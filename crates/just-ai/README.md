@@ -4,12 +4,15 @@
 workflows. It does not replace `just`, does not change how recipes run, and is
 not required by projects that only want to use `just`.
 
-The current implementation is intentionally offline:
+The deterministic parts are offline:
 
 - it reads project data from `just --dump --dump-format json`;
 - it exports compact context for AI tools;
 - it performs local risk scoring for recipe command bodies;
-- it does not send project data to an LLM provider.
+- it validates generated recipes before writing them.
+
+AI commands are opt-in and require provider configuration. They send the compact
+project context to the configured OpenAI-compatible chat completions endpoint.
 
 ## Relationship to `just`
 
@@ -25,6 +28,9 @@ just --list
 
 ```sh
 just-ai doctor
+just-ai suggest
+just-ai explain test
+just-ai add "run tests with coverage"
 just-ai export-context --pretty
 ```
 
@@ -36,6 +42,7 @@ continue to run through `just` exactly as before.
 - Rust 1.89.0 or newer, matching the workspace `rust-version`.
 - A `just` binary available in `PATH`, or an explicit path passed with
   `--just-binary`.
+- `curl` for AI commands.
 
 On macOS with Homebrew-managed `rustup`, a typical setup is:
 
@@ -68,6 +75,45 @@ cargo build --bin just
 ```
 
 ## Commands
+
+### AI provider configuration
+
+AI commands use an OpenAI-compatible `/chat/completions` endpoint through
+`curl`. This keeps the Rust crate small and lets the same code work with OpenAI,
+Ollama's OpenAI-compatible endpoint, OpenRouter, and similar providers.
+
+OpenAI:
+
+```sh
+export JUST_AI_PROVIDER=openai
+export JUST_AI_MODEL=gpt-5-mini
+export JUST_AI_API_KEY=...
+```
+
+Ollama:
+
+```sh
+export JUST_AI_PROVIDER=ollama
+export JUST_AI_BASE_URL=http://localhost:11434/v1
+export JUST_AI_MODEL=llama3.1
+```
+
+Generic OpenAI-compatible endpoint:
+
+```sh
+export JUST_AI_PROVIDER=openai-compatible
+export JUST_AI_BASE_URL=https://api.example.com/v1
+export JUST_AI_MODEL=...
+export JUST_AI_API_KEY=...
+```
+
+Optional:
+
+```sh
+export JUST_AI_CURL=/path/to/curl
+```
+
+`JUST_AI_API_KEY` is required unless `JUST_AI_PROVIDER=ollama` is used.
 
 ### `export-context`
 
@@ -155,6 +201,58 @@ just-ai doctor --json
 and high findings are warnings because many real project workflows legitimately
 install tools, push branches, clean temporary directories, or build containers.
 
+### `suggest`
+
+Asks the configured AI provider to recommend useful missing recipes:
+
+```sh
+just-ai suggest
+```
+
+The model receives the exported project context and must return strict JSON.
+`just-ai` prints the recommendations, proposed command bodies, rationale, and
+expected risk. It does not write files.
+
+### `explain`
+
+Asks the configured AI provider to explain one recipe:
+
+```sh
+just-ai explain test
+just-ai explain module:recipe
+```
+
+The output includes a summary, plain-language explanation, parameters,
+dependencies, and risk notes.
+
+### `add`
+
+Asks the configured AI provider to propose one new recipe:
+
+```sh
+just-ai add "run tests with coverage"
+```
+
+By default this is a dry run. `just-ai`:
+
+1. sends compact context and the user request to the provider;
+2. parses the provider response as strict JSON;
+3. renders one recipe;
+4. rejects duplicate recipe names and missing dependency recipes;
+5. validates the proposed `justfile` with `just --dump --dump-format json`;
+6. runs local risk scoring on the proposed body;
+7. prints a diff.
+
+Apply the generated recipe:
+
+```sh
+just-ai add "run tests with coverage" --write
+```
+
+`add --write` refuses to write recipes with `blocked` risk. Medium and high risk
+recipes are still printed with findings so the user can review them before
+running anything.
+
 ## Risk Scoring
 
 Risk scoring is local and deterministic. It is designed as a guardrail for
@@ -211,7 +309,7 @@ cargo run --package just-ai -- doctor
 
 ## Architecture
 
-The first implementation keeps `just-ai` outside the `just` runtime path:
+`just-ai` stays outside the `just` runtime path:
 
 ```text
 justfile
@@ -223,7 +321,9 @@ just --dump --dump-format json
 just-ai
    |-- context export
    |-- local risk scoring
-   `-- future AI workflows
+   |-- AI provider request
+   |-- proposed patch
+   `-- local validation before write
 ```
 
 This design keeps the core `just` binary deterministic and avoids adding LLM,
@@ -237,11 +337,17 @@ Important implementation pieces:
   integrations.
 - `RiskFinding` and `RiskLevel`: deterministic local risk analysis.
 - `DoctorReport`: summary view used by `doctor`.
+- `AiClient`: small OpenAI-compatible provider client implemented through
+  `curl`.
+- `RecipeProposal`: structured model output for `add`.
 
 ## Current Limitations
 
-- There is no LLM provider integration yet.
-- `just-ai` does not edit `justfile`s yet.
+- Only OpenAI-compatible chat completions are supported.
+- AI responses are constrained by prompts and JSON parsing, but model quality
+  still depends on the selected provider and model.
+- `just-ai add --write` appends a recipe to the root `justfile`; it does not yet
+  insert into submodules or preserve custom grouping conventions.
 - Dynamic `just` expressions are summarized as placeholders in command text.
 - Risk scoring is pattern-based and does not parse shell syntax deeply.
 - The JSON context format is new and should be treated as experimental.
@@ -250,14 +356,11 @@ Important implementation pieces:
 
 Likely next steps:
 
-1. Add `just-ai suggest` to recommend missing project recipes.
-2. Add `just-ai add "<task>"` to generate a patch for a new recipe.
-3. Add `just-ai fix <recipe>` to propose changes after a failed run.
-4. Add provider abstraction for OpenAI, Anthropic, Ollama, and OpenAI-compatible
-   endpoints.
-5. Add `--write` and interactive confirmation flows for applying generated
-   patches.
-6. Expose the context/risk protocol to VSCode or an LSP-adjacent extension.
+1. Add `just-ai fix <recipe>` to propose changes after a failed run.
+2. Add interactive confirmation flows for applying generated patches.
+3. Add provider-specific adapters for Anthropic and non-OpenAI Ollama APIs.
+4. Add grouped insertion so generated recipes can land near related recipes.
+5. Expose the context/risk protocol to VSCode or an LSP-adjacent extension.
 
 The invariant should stay the same: AI can propose and explain changes, but
 `just` remains the deterministic runtime for recipes.

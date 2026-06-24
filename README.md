@@ -21,6 +21,58 @@
 </div>
 <br>
 
+## About the `just-ai` Fork
+
+This repository is a fork of [`just`](https://github.com/casey/just) with
+additional `just-ai` functionality. The core `just` behavior stays the same:
+recipes from a `justfile` still run through the regular `just` binary, recipe
+syntax is unchanged, and existing projects do not need AI configuration.
+
+`just-ai` is shipped as an extension next to `just`, not as a replacement for
+it. It uses `just --dump --dump-format json` to read a structured description
+of the `justfile`, builds compact project context, scores command risk locally,
+and sends that context to a configured OpenAI-compatible provider only for AI
+commands.
+
+Usage examples:
+
+```sh
+# Regular recipes still run through just
+just test
+just build
+just --list
+
+# The extension analyzes the justfile and prepares context for AI tools
+just-ai export-context --pretty
+just-ai doctor
+
+# AI commands work only after provider configuration
+just-ai suggest
+just-ai explain test
+just-ai add "run tests with coverage"
+just-ai add "run tests with coverage" --write
+```
+
+The extension intentionally separates deterministic steps from AI-dependent
+steps:
+
+- `export-context` reads the `just` JSON dump and prints a compact description
+  of modules, recipes, parameters, dependencies, commands, and warnings.
+- `doctor` scans recipe bodies locally for risky patterns such as file removal,
+  network actions, git remote changes, or container execution. It does not
+  require an AI provider.
+- `suggest` and `explain` send compact project context to the configured model
+  and print recommendations or a recipe explanation without modifying files.
+- `add` asks the model to propose a new recipe, then checks the result:
+  duplicate names are rejected, dependencies are validated, the updated
+  `justfile` is checked through `just --dump --dump-format json`, risk is
+  scored again, and a diff is printed by default without writing changes.
+- `add --write` applies the recipe only after those checks and refuses to write
+  commands with `blocked` risk.
+
+If `just-ai` is removed or unused, a valid `justfile` remains a regular
+`justfile` and continues to run through `just`.
+
 `just` is a handy way to save and run project-specific commands.
 
 This readme is also available as a [book](https://just.systems/man/en/). The

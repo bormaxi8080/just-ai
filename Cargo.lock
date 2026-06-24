@@ -656,6 +656,7 @@ dependencies = [
  "clap",
  "serde",
  "serde_json",
+ "similar",
 ]
 
 [[package]]
