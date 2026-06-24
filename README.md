@@ -1,6 +1,6 @@
 <div align=right>Table of Contents↗️</div>
 
-<h1 align=center><code>just</code></h1>
+<h1 align=center><code>just-ai</code></h1>
 
 <div align=center>
   <a href=https://crates.io/crates/just>
