@@ -14,6 +14,35 @@ const PROTOCOL_VERSION: &str = "2025-11-25";
 const SUPPORTED_PROTOCOL_VERSIONS: &[&str] =
   &["2024-11-05", "2025-03-26", "2025-06-18", PROTOCOL_VERSION];
 
+struct PromptDefinition {
+  name: &'static str,
+  description: &'static str,
+  text: &'static str,
+}
+
+const PROMPTS: &[PromptDefinition] = &[
+  PromptDefinition {
+    name: "implement",
+    description: "Implement one small, tested architecture increment.",
+    text: include_str!("../../../agent/commands/implement.md"),
+  },
+  PromptDefinition {
+    name: "review-architecture",
+    description: "Review dependency direction and safety invariants.",
+    text: include_str!("../../../agent/commands/review-architecture.md"),
+  },
+  PromptDefinition {
+    name: "refresh-index",
+    description: "Refresh and verify the Codebase Memory MCP graph.",
+    text: include_str!("../../../agent/commands/refresh-index.md"),
+  },
+  PromptDefinition {
+    name: "system",
+    description: "Apply the just-ai maintainer invariants.",
+    text: include_str!("../../../agent/prompts/system.md"),
+  },
+];
+
 pub fn run_stdio() -> io::Result<()> {
   let stdin = io::stdin();
   let mut stdout = io::stdout().lock();
@@ -56,13 +85,23 @@ fn handle_request(request: &Value) -> Option<Value> {
   let id = request.get("id")?.clone();
   let method = request.get("method").and_then(Value::as_str)?;
   let params = request.get("params").unwrap_or(&Value::Null);
+  if method == "prompts/get" {
+    return Some(match get_prompt(params) {
+      Ok(result) => json!({ "jsonrpc": "2.0", "id": id, "result": result }),
+      Err(message) => protocol_error(id, -32602, &message),
+    });
+  }
   let result = match method {
     "initialize" => Ok(json!({
       "protocolVersion": negotiate_protocol_version(params),
-      "capabilities": { "tools": { "listChanged": false } },
+      "capabilities": {
+        "prompts": { "listChanged": false },
+        "tools": { "listChanged": false }
+      },
       "serverInfo": { "name": "just-ai-mcp", "version": env!("CARGO_PKG_VERSION") }
     })),
     "ping" => Ok(json!({})),
+    "prompts/list" => Ok(json!({ "prompts": prompt_definitions() })),
     "tools/list" => Ok(json!({ "tools": tool_definitions() })),
     "tools/call" => call_tool(params),
     _ => return Some(protocol_error(id, -32601, "method not found")),
@@ -75,6 +114,43 @@ fn handle_request(request: &Value) -> Option<Value> {
       "result": { "content": [{ "type": "text", "text": message }], "isError": true }
     }),
   })
+}
+
+fn prompt_definitions() -> Value {
+  Value::Array(
+    PROMPTS
+      .iter()
+      .map(|prompt| {
+        json!({
+          "name": prompt.name,
+          "description": prompt.description
+        })
+      })
+      .collect(),
+  )
+}
+
+fn get_prompt(params: &Value) -> Result<Value, String> {
+  let name = params
+    .get("name")
+    .and_then(Value::as_str)
+    .ok_or("prompt name is required")?;
+  if let Some(arguments) = params.get("arguments")
+    && (!arguments.is_object() || arguments.as_object().is_some_and(|value| !value.is_empty()))
+  {
+    return Err(format!("prompt `{name}` does not accept arguments"));
+  }
+  let prompt = PROMPTS
+    .iter()
+    .find(|prompt| prompt.name == name)
+    .ok_or_else(|| format!("unknown prompt `{name}`"))?;
+  Ok(json!({
+    "description": prompt.description,
+    "messages": [{
+      "role": "user",
+      "content": { "type": "text", "text": prompt.text }
+    }]
+  }))
 }
 
 fn negotiate_protocol_version(params: &Value) -> &str {
@@ -217,7 +293,7 @@ mod tests {
   }
 
   #[test]
-  fn initialize_negotiates_supported_protocol_and_declares_tools() {
+  fn initialize_negotiates_supported_protocol_and_declares_capabilities() {
     let response = handle_request(&json!({
       "jsonrpc":"2.0", "id":"init", "method":"initialize", "params": {
         "protocolVersion":"2024-11-05", "capabilities": {},
@@ -235,6 +311,76 @@ mod tests {
       response.pointer("/result/capabilities/tools/listChanged"),
       Some(&Value::Bool(false))
     );
+    assert_eq!(
+      response.pointer("/result/capabilities/prompts/listChanged"),
+      Some(&Value::Bool(false))
+    );
+  }
+
+  #[test]
+  fn prompt_list_exposes_canonical_agent_commands() {
+    let response =
+      handle_request(&json!({"jsonrpc":"2.0","id":1,"method":"prompts/list"})).unwrap();
+    let prompts = response
+      .pointer("/result/prompts")
+      .and_then(Value::as_array)
+      .unwrap();
+    let names = prompts
+      .iter()
+      .filter_map(|prompt| prompt.get("name").and_then(Value::as_str))
+      .collect::<Vec<_>>();
+    assert_eq!(
+      names,
+      [
+        "implement",
+        "review-architecture",
+        "refresh-index",
+        "system"
+      ]
+    );
+    assert!(
+      prompts
+        .iter()
+        .all(|prompt| prompt.get("arguments").is_none())
+    );
+  }
+
+  #[test]
+  fn prompt_get_returns_embedded_canonical_text() {
+    let response = handle_request(&json!({
+      "jsonrpc":"2.0", "id":1, "method":"prompts/get",
+      "params":{"name":"implement", "arguments":{}}
+    }))
+    .unwrap();
+    assert_eq!(
+      response
+        .pointer("/result/messages/0/content/text")
+        .and_then(Value::as_str),
+      Some(include_str!("../../../agent/commands/implement.md"))
+    );
+    assert_eq!(
+      response
+        .pointer("/result/messages/0/role")
+        .and_then(Value::as_str),
+      Some("user")
+    );
+  }
+
+  #[test]
+  fn invalid_prompt_request_returns_invalid_params() {
+    for params in [
+      json!({"name":"missing"}),
+      json!({"name":"implement", "arguments":{"untrusted":"text"}}),
+    ] {
+      let response =
+        handle_request(&json!({"jsonrpc":"2.0","id":1,"method":"prompts/get","params":params}))
+          .unwrap();
+      assert_eq!(
+        response.pointer("/error/code").and_then(Value::as_i64),
+        Some(-32602)
+      );
+      assert!(response.get("result").is_none());
+    }
   }
 
   #[test]

@@ -49,8 +49,12 @@ crates/just-ai/src/
 
 apps/just-ai-gui/     separate Tauri/React adapter
 apps/just-ai-mcp/     separate read-only JSON-RPC/stdio adapter
-agent/                prompts and project-management commands
+agent/                canonical prompts and project-management commands
 ```
+
+The MCP adapter publishes the canonical `agent/` sources through
+`prompts/list` and `prompts/get`. Prompt files are embedded at build time, so
+the CLI and MCP surfaces cannot drift while the installed binary is running.
 
 ## Verification gates
 

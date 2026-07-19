@@ -32,6 +32,7 @@
   temperature, and explicit non-streaming transport;
 - independent read-only MCP/stdio adapter for inspection, risk reports, and
   dry-run preparation, with no execution or write tools;
+- MCP prompt discovery backed directly by the canonical project-agent files;
 - dedicated layered CI workflow;
 - local ADRs and Codebase Memory MCP ADR/index.
 

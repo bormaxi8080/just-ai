@@ -18,3 +18,15 @@ Tools:
 - `inspect_project` — full serializable recipe/project context;
 - `doctor` — deterministic per-recipe risk reports;
 - `prepare_run` — `just --dry-run` preview, risk, and confirmation policy.
+
+Prompts:
+
+- `implement` — implement one verified architecture increment;
+- `review-architecture` — inspect dependency direction and safety invariants;
+- `refresh-index` — rebuild and verify the Codebase Memory MCP graph;
+- `system` — apply the project maintainer invariants.
+
+The prompt catalog is compiled directly from the canonical files under
+`agent/`; the adapter has no second editable copy. Prompts accept no arguments
+and are returned as MCP `user` messages because the protocol prompt-message
+roles are limited to `user` and `assistant`.
