@@ -1,7 +1,12 @@
-use std::{path::PathBuf, sync::Mutex};
+use std::{
+  path::PathBuf,
+  sync::Mutex,
+  time::{Instant, SystemTime, UNIX_EPOCH},
+};
 
-use just_ai::application::execution::{
-  CancellationToken, PreparedRun, RecipeExecutor, RunConfirmation, RunRequest,
+use just_ai::application::{
+  execution::{CancellationToken, PreparedRun, RecipeExecutor, RunConfirmation, RunRequest},
+  history::{JsonLineHistory, RunHistory, RunRecord, project_history_path},
 };
 use tauri::Emitter;
 
@@ -22,6 +27,19 @@ async fn prepare_run(request: RunRequest) -> Result<PreparedRun, String> {
   tauri::async_runtime::spawn_blocking(move || RecipeExecutor::new("just").prepare(request))
     .await
     .map_err(|error| error.to_string())?
+    .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn recent_runs(project_root: PathBuf, limit: usize) -> Result<Vec<RunRecord>, String> {
+  if !project_root.is_dir() {
+    return Err(format!(
+      "project root is not a directory: {}",
+      project_root.display()
+    ));
+  }
+  JsonLineHistory::new(project_history_path(&project_root), 500)
+    .recent(limit.min(100))
     .map_err(|error| error.to_string())
 }
 
@@ -51,23 +69,41 @@ async fn execute_run(
     }
     *active = Some(cancellation.clone());
   }
-  let result = tauri::async_runtime::spawn_blocking(move || {
-    RecipeExecutor::new("just")
+  let result = tauri::async_runtime::spawn_blocking(move || -> Result<RunResult, String> {
+    let started_at_ms = SystemTime::now()
+      .duration_since(UNIX_EPOCH)
+      .map_err(|error| error.to_string())?
+      .as_millis();
+    let started = Instant::now();
+    let project_root = prepared.request.project_root.clone();
+    let recipe = prepared.request.recipe.clone();
+    let completed = RecipeExecutor::new("just")
       .execute_streaming(&prepared, &confirmation, &cancellation, |event| {
         let _ = app.emit("run-event", event);
       })
-      .map(|completed| RunResult {
-        success: completed.status.success(),
-        exit_code: completed.status.code(),
-        stdout: String::from_utf8_lossy(&completed.stdout).into_owned(),
-        stderr: String::from_utf8_lossy(&completed.stderr).into_owned(),
-      })
+      .map_err(|error| error.to_string())?;
+    let record = RunRecord::completed(
+      recipe,
+      started_at_ms,
+      started.elapsed().as_millis(),
+      completed.status.code(),
+      completed.status.success(),
+      &completed.stdout,
+      &completed.stderr,
+    );
+    JsonLineHistory::new(project_history_path(&project_root), 500)
+      .append(&record)
+      .map_err(|error| error.to_string())?;
+    Ok(RunResult {
+      success: completed.status.success(),
+      exit_code: completed.status.code(),
+      stdout: String::from_utf8_lossy(&completed.stdout).into_owned(),
+      stderr: String::from_utf8_lossy(&completed.stderr).into_owned(),
+    })
   })
   .await;
   *active_run.0.lock().map_err(|error| error.to_string())? = None;
-  result
-    .map_err(|error| error.to_string())?
-    .map_err(|error| error.to_string())
+  result.map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
@@ -88,6 +124,7 @@ pub fn run() {
     .invoke_handler(tauri::generate_handler![
       inspect_project,
       prepare_run,
+      recent_runs,
       execute_run,
       cancel_run
     ])

@@ -179,7 +179,7 @@ fn try_main() -> Result<(), Box<dyn Error>> {
     } => {
       use application::{
         execution::{RecipeExecutor, RunConfirmation, RunRequest},
-        history::{JsonLineHistory, RunHistory, RunRecord, output_tail, project_history_path},
+        history::{JsonLineHistory, RunHistory, RunRecord, project_history_path},
       };
       use std::time::{Instant, SystemTime, UNIX_EPOCH};
       let project_root = env::current_dir()?;
@@ -201,16 +201,15 @@ fn try_main() -> Result<(), Box<dyn Error>> {
       let started_at_ms = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis();
       let started = Instant::now();
       let completed = executor.execute(&prepared, &confirmation)?;
-      let record = RunRecord {
-        id: format!("{started_at_ms}-{}", prepared.request.recipe),
-        recipe: prepared.request.recipe.clone(),
+      let record = RunRecord::completed(
+        prepared.request.recipe.clone(),
         started_at_ms,
-        duration_ms: started.elapsed().as_millis(),
-        exit_code: completed.status.code(),
-        success: completed.status.success(),
-        stdout_tail: output_tail(&completed.stdout),
-        stderr_tail: output_tail(&completed.stderr),
-      };
+        started.elapsed().as_millis(),
+        completed.status.code(),
+        completed.status.success(),
+        &completed.stdout,
+        &completed.stderr,
+      );
       JsonLineHistory::new(project_history_path(&project_root), 500).append(&record)?;
       std::io::stdout().write_all(&completed.stdout)?;
       std::io::stderr().write_all(&completed.stderr)?;

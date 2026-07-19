@@ -24,6 +24,31 @@ pub struct RunRecord {
   pub stderr_tail: String,
 }
 
+impl RunRecord {
+  #[must_use]
+  pub fn completed(
+    recipe: impl Into<String>,
+    started_at_ms: u128,
+    duration_ms: u128,
+    exit_code: Option<i32>,
+    success: bool,
+    stdout: &[u8],
+    stderr: &[u8],
+  ) -> Self {
+    let recipe = recipe.into();
+    Self {
+      id: format!("{started_at_ms}-{recipe}"),
+      recipe,
+      started_at_ms,
+      duration_ms,
+      exit_code,
+      success,
+      stdout_tail: output_tail(stdout),
+      stderr_tail: output_tail(stderr),
+    }
+  }
+}
+
 pub trait RunHistory {
   fn append(&self, record: &RunRecord) -> io::Result<()>;
   fn recent(&self, limit: usize) -> io::Result<Vec<RunRecord>>;
@@ -43,7 +68,9 @@ pub fn project_history_path(root: &Path) -> PathBuf {
     .unwrap_or_else(std::env::temp_dir)
     .join("just-ai");
   let mut hasher = DefaultHasher::new();
-  root.hash(&mut hasher);
+  fs::canonicalize(root)
+    .unwrap_or_else(|_| root.to_path_buf())
+    .hash(&mut hasher);
   base.join(format!("project-{:016x}.jsonl", hasher.finish()))
 }
 
@@ -142,6 +169,15 @@ mod tests {
   }
 
   #[test]
+  fn equivalent_project_paths_share_history() {
+    let directory = tempfile::tempdir().unwrap();
+    assert_eq!(
+      project_history_path(directory.path()),
+      project_history_path(&directory.path().join("."))
+    );
+  }
+
+  #[test]
   fn output_is_bounded_to_tail() {
     let bytes = vec![b'x'; OUTPUT_TAIL_BYTES + 10];
     assert_eq!(output_tail(&bytes).len(), OUTPUT_TAIL_BYTES);
@@ -150,5 +186,21 @@ mod tests {
   #[test]
   fn output_tail_redacts_likely_secrets() {
     assert_eq!(output_tail(b"API_KEY=secret\n"), "API_KEY = <redacted>");
+  }
+
+  #[test]
+  fn completed_record_bounds_and_redacts_output() {
+    let record = RunRecord::completed(
+      "deploy",
+      10,
+      25,
+      Some(0),
+      true,
+      b"deployed\n",
+      b"API_KEY=secret\n",
+    );
+    assert_eq!(record.id, "10-deploy");
+    assert_eq!(record.stdout_tail, "deployed");
+    assert_eq!(record.stderr_tail, "API_KEY = <redacted>");
   }
 }

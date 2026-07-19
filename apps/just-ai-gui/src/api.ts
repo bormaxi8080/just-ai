@@ -14,9 +14,16 @@ export interface Recipe {
   doc: string | null;
   body: string[];
   dependencies: string[];
+  parameters: ContextParameter[];
   risk: RiskLevel;
   risks: RiskFinding[];
   private: boolean;
+}
+
+export interface ContextParameter {
+  name: string;
+  kind: string;
+  default: string | null;
 }
 
 export interface ProjectContext {
@@ -56,6 +63,17 @@ export interface RunResult {
   stderr: string;
 }
 
+export interface RunRecord {
+  id: string;
+  recipe: string;
+  started_at_ms: number;
+  duration_ms: number;
+  exit_code: number | null;
+  success: boolean;
+  stdout_tail: string;
+  stderr_tail: string;
+}
+
 export function inspectProject(projectRoot: string): Promise<ProjectContext> {
   return invoke("inspect_project", { projectRoot });
 }
@@ -66,6 +84,10 @@ export function prepareRun(request: RunRequest): Promise<PreparedRun> {
 
 export function executeRun(prepared: PreparedRun, confirmation: RunConfirmation): Promise<RunResult> {
   return invoke("execute_run", { prepared, confirmation });
+}
+
+export function recentRuns(projectRoot: string, limit = 20): Promise<RunRecord[]> {
+  return invoke("recent_runs", { projectRoot, limit });
 }
 
 export function cancelRun(): Promise<boolean> {

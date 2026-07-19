@@ -7,7 +7,8 @@ h1 { margin: 4px 0 0; font-size: 38px; letter-spacing: -2px; }
 h2 { font-size: 25px; } h3 { margin-top: 28px; color: #aeb8b1; font-size: 13px; text-transform: uppercase; }
 .eyebrow { color: #87e8a5; font: 700 11px ui-monospace; letter-spacing: 1.6px; }
 form { display: flex; gap: 8px; }
-input, button { border: 1px solid #394039; border-radius: 8px; background: #1a1e1b; color: inherit; padding: 10px 12px; }
+input, textarea, button { border: 1px solid #394039; border-radius: 8px; background: #1a1e1b; color: inherit; padding: 10px 12px; }
+textarea { font: inherit; resize: vertical; }
 button { cursor: pointer; } button:hover { border-color: #75c98e; }
 .layout { display: grid; grid-template-columns: minmax(260px, 340px) minmax(0, 1fr); gap: 24px; padding-top: 24px; }
 nav, article { border: 1px solid #2b302c; border-radius: 14px; background: #151816; padding: 20px; }
@@ -23,4 +24,12 @@ pre, .risk-card { background: #0d0f0e; border: 1px solid #292e2a; border-radius:
 .run-button { margin-top: 20px; background: #87e8a5; border-color: #87e8a5; color: #0d170f; font-weight: 750; }
 .cancel-button { margin: 20px 0 0 8px; border-color: #ff7b72; color: #ff7b72; }
 .run-output { margin-top: 28px; border-top: 1px solid #303531; }
+.parameter-form { align-items: stretch; display: grid; gap: 12px; }
+.parameter-form label { display: grid; gap: 6px; }
+.parameter-form label > span { display: flex; justify-content: space-between; }
+.parameter-form .run-button { justify-self: start; margin-top: 4px; }
+.history { border-top: 1px solid #303531; margin-top: 24px; padding-top: 1px; }
+.history-row { display: grid; gap: 3px; padding: 8px 2px; border-bottom: 1px solid #252a26; }
+.history-row .success { color: #87e8a5; }
+.history-row .failure { color: #ff7b72; }
 @media (max-width: 760px) { header { align-items: stretch; flex-direction: column; gap: 18px; } .layout { grid-template-columns: 1fr; } }

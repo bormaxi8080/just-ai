@@ -20,6 +20,7 @@
 - allowlisted project scanner with per-file/total budgets and secret redaction;
 - typed streaming run events and shared cancellation tokens in core;
 - bounded, atomic, per-project JSONL run history with redacted output tails;
+- recipe parameter forms and persisted run history in the desktop UI;
 - dedicated layered CI workflow;
 - local ADRs and Codebase Memory MCP ADR/index.
 
@@ -29,10 +30,9 @@
    semantics differ from OpenAI-compatible chat completions.
 2. Add process-group cancellation on Unix and job-object cancellation on
    Windows; migrate JSONL history to SQLite if querying requirements justify it.
-3. Add parameter forms and persisted history to the desktop UI.
-4. Expand JSON dump fixtures for modules, interpolations, shebangs, and
+3. Expand JSON dump fixtures for modules, interpolations, shebangs, and
    platform-specific parameter kinds.
-5. Add an optional daemon/MCP adapter only after core contracts stabilize.
+4. Add an optional daemon/MCP adapter only after core contracts stabilize.
 
 Every increment follows `agent/commands/implement.md` and ends with a graph
 refresh and architecture review.
