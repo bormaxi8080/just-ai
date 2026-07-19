@@ -174,6 +174,7 @@ impl RecipeExecutor {
 
     let mut command = self.command(&prepared.request);
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
+    configure_process_tree(&mut command);
     let mut child = command.spawn().map_err(io_error)?;
     let stdout = child
       .stdout
@@ -193,7 +194,7 @@ impl RecipeExecutor {
     let mut cancelled = false;
     while closed < 2 {
       if cancellation.is_cancelled() && !cancelled {
-        child.kill().map_err(io_error)?;
+        terminate_process_tree(&mut child)?;
         cancelled = true;
       }
       match receiver.recv_timeout(Duration::from_millis(25)) {
@@ -234,6 +235,38 @@ impl RecipeExecutor {
       .args(&request.arguments);
     command
   }
+}
+
+#[cfg(unix)]
+fn configure_process_tree(command: &mut Command) {
+  use std::os::unix::process::CommandExt;
+  command.process_group(0);
+}
+
+#[cfg(not(unix))]
+fn configure_process_tree(_command: &mut Command) {}
+
+#[cfg(unix)]
+fn terminate_process_tree(child: &mut std::process::Child) -> Result<(), ExecutionError> {
+  let process_group = i32::try_from(child.id())
+    .map_err(|_| ExecutionError("child process id exceeds platform range".into()))?;
+  // SAFETY: `process_group` is the positive PID returned by `Child::id`; its
+  // negation intentionally addresses only the isolated group configured above.
+  let result = unsafe { libc::kill(-process_group, libc::SIGKILL) };
+  if result == 0 {
+    return Ok(());
+  }
+  let error = std::io::Error::last_os_error();
+  if error.raw_os_error() == Some(libc::ESRCH) {
+    Ok(())
+  } else {
+    Err(io_error(error))
+  }
+}
+
+#[cfg(not(unix))]
+fn terminate_process_tree(child: &mut std::process::Child) -> Result<(), ExecutionError> {
+  child.kill().map_err(io_error)
 }
 
 #[derive(Clone, Copy)]
@@ -423,5 +456,54 @@ mod tests {
         .iter()
         .any(|event| matches!(event, RunEvent::Stderr { text } if text == "err"))
     );
+  }
+
+  #[cfg(unix)]
+  #[test]
+  fn cancellation_terminates_descendants_holding_output_pipes() {
+    use std::{fs, os::unix::fs::PermissionsExt, time::Instant};
+    let directory = tempfile::tempdir().unwrap();
+    let binary = directory.path().join("fake-just");
+    fs::write(
+      &binary,
+      "#!/bin/sh\nif [ \"$1\" = \"--dry-run\" ]; then echo 'sleep 30'; exit 0; fi\nsleep 30 &\nwait\n",
+    )
+    .unwrap();
+    let mut permissions = fs::metadata(&binary).unwrap().permissions();
+    permissions.set_mode(0o700);
+    fs::set_permissions(&binary, permissions).unwrap();
+
+    let executor = RecipeExecutor::new(binary);
+    let prepared = executor
+      .prepare(RunRequest {
+        project_root: directory.path().into(),
+        recipe: "long-running".into(),
+        arguments: Vec::new(),
+      })
+      .unwrap();
+    let cancellation = CancellationToken::default();
+    let cancellation_handle = cancellation.clone();
+    let cancel_thread = thread::spawn(move || {
+      thread::sleep(Duration::from_millis(100));
+      cancellation_handle.cancel();
+    });
+    let started = Instant::now();
+    let mut events = Vec::new();
+    let completed = executor
+      .execute_streaming(&prepared, &RunConfirmation::None, &cancellation, |event| {
+        events.push(event)
+      })
+      .unwrap();
+    cancel_thread.join().unwrap();
+
+    assert!(started.elapsed() < Duration::from_secs(3));
+    assert!(!completed.status.success());
+    assert!(events.iter().any(|event| matches!(
+      event,
+      RunEvent::Exited {
+        cancelled: true,
+        ..
+      }
+    )));
   }
 }

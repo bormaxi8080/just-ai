@@ -23,6 +23,7 @@
 - recipe parameter forms and persisted run history in the desktop UI;
 - versioned rich JSON dump coverage for nested modules, interpolations,
   shebangs, and singular/plus/star parameter kinds;
+- Unix process-group isolation and whole-tree cancellation for streaming runs;
 - dedicated layered CI workflow;
 - local ADRs and Codebase Memory MCP ADR/index.
 
@@ -30,8 +31,8 @@
 
 1. Add provider-specific Responses API and local-model adapters where their
    semantics differ from OpenAI-compatible chat completions.
-2. Add process-group cancellation on Unix and job-object cancellation on
-   Windows; migrate JSONL history to SQLite if querying requirements justify it.
+2. Add job-object cancellation on Windows; migrate JSONL history to SQLite if
+   querying requirements justify it.
 3. Add platform-specific JSON dump fixtures on Windows CI.
 4. Add an optional daemon/MCP adapter only after core contracts stabilize.
 
