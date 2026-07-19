@@ -36,6 +36,7 @@
 - allowlisted MCP resources for canonical architecture documentation and ADRs;
 - black-box MCP stdio tests for framing, notification silence, and parse-error
   recovery;
+- shared CLI/MCP `verify` agent command for layered quality gates;
 - dedicated layered CI workflow;
 - local ADRs and Codebase Memory MCP ADR/index.
 

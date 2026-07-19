@@ -24,7 +24,8 @@ Prompts:
 - `implement` — implement one verified architecture increment;
 - `review-architecture` — inspect dependency direction and safety invariants;
 - `refresh-index` — rebuild and verify the Codebase Memory MCP graph;
-- `system` — apply the project maintainer invariants.
+- `system` — apply the project maintainer invariants;
+- `verify` — run the layered test, lint, upstream, and graph gates.
 
 The prompt catalog is compiled directly from the canonical files under
 `agent/`; the adapter has no second editable copy. Prompts accept no arguments

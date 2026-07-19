@@ -19,6 +19,21 @@ fn agent_command_does_not_require_a_justfile() {
 }
 
 #[test]
+fn verify_agent_command_prints_canonical_playbook() {
+  let directory = tempfile::tempdir().unwrap();
+  let output = just_ai()
+    .current_dir(directory.path())
+    .args(["agent", "verify"])
+    .output()
+    .unwrap();
+  assert!(output.status.success());
+  assert_eq!(
+    String::from_utf8(output.stdout).unwrap(),
+    include_str!("../../../agent/commands/verify.md")
+  );
+}
+
+#[test]
 fn missing_justfile_is_reported_without_panicking() {
   let directory = tempfile::tempdir().unwrap();
   let output = just_ai()

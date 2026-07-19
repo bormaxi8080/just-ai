@@ -101,6 +101,8 @@ enum AgentCommands {
   RefreshIndex,
   #[command(about = "Print the maintainer system prompt")]
   SystemPrompt,
+  #[command(about = "Print the layered verification playbook")]
+  Verify,
 }
 
 /// Run the `just-ai` command-line application using process arguments.
@@ -248,6 +250,7 @@ fn print_agent_command(command: &AgentCommands) {
     }
     AgentCommands::RefreshIndex => include_str!("../../../agent/commands/refresh-index.md"),
     AgentCommands::SystemPrompt => include_str!("../../../agent/prompts/system.md"),
+    AgentCommands::Verify => include_str!("../../../agent/commands/verify.md"),
   };
   print!("{prompt}");
 }

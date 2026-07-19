@@ -8,3 +8,5 @@ upstream `just` implementation, work in small verified increments, and update
 architecture records when a dependency boundary changes.
 
 Commands are in `agent/commands/`; prompt fragments are in `agent/prompts/`.
+`verify.md` is the canonical layered verification contract exposed by both the
+`just-ai agent verify` CLI command and the MCP prompt catalog.

@@ -48,6 +48,11 @@ const PROMPTS: &[PromptDefinition] = &[
     description: "Apply the just-ai maintainer invariants.",
     text: include_str!("../../../agent/prompts/system.md"),
   },
+  PromptDefinition {
+    name: "verify",
+    description: "Run the layered verification and architecture gates.",
+    text: include_str!("../../../agent/commands/verify.md"),
+  },
 ];
 
 const RESOURCES: &[ResourceDefinition] = &[
@@ -497,7 +502,8 @@ mod tests {
         "implement",
         "review-architecture",
         "refresh-index",
-        "system"
+        "system",
+        "verify"
       ]
     );
     assert!(
@@ -509,23 +515,31 @@ mod tests {
 
   #[test]
   fn prompt_get_returns_embedded_canonical_text() {
-    let response = handle_request(&json!({
-      "jsonrpc":"2.0", "id":1, "method":"prompts/get",
-      "params":{"name":"implement", "arguments":{}}
-    }))
-    .unwrap();
-    assert_eq!(
-      response
-        .pointer("/result/messages/0/content/text")
-        .and_then(Value::as_str),
-      Some(include_str!("../../../agent/commands/implement.md"))
-    );
-    assert_eq!(
-      response
-        .pointer("/result/messages/0/role")
-        .and_then(Value::as_str),
-      Some("user")
-    );
+    for (name, expected) in [
+      (
+        "implement",
+        include_str!("../../../agent/commands/implement.md"),
+      ),
+      ("verify", include_str!("../../../agent/commands/verify.md")),
+    ] {
+      let response = handle_request(&json!({
+        "jsonrpc":"2.0", "id":1, "method":"prompts/get",
+        "params":{"name":name, "arguments":{}}
+      }))
+      .unwrap();
+      assert_eq!(
+        response
+          .pointer("/result/messages/0/content/text")
+          .and_then(Value::as_str),
+        Some(expected)
+      );
+      assert_eq!(
+        response
+          .pointer("/result/messages/0/role")
+          .and_then(Value::as_str),
+        Some("user")
+      );
+    }
   }
 
   #[test]
