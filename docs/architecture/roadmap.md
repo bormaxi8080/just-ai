@@ -30,6 +30,8 @@
   retaining Chat Completions for Ollama and OpenAI-compatible servers;
 - native Ollama `/api/chat` adapter with schema-format output, deterministic
   temperature, and explicit non-streaming transport;
+- independent read-only MCP/stdio adapter for inspection, risk reports, and
+  dry-run preparation, with no execution or write tools;
 - dedicated layered CI workflow;
 - local ADRs and Codebase Memory MCP ADR/index.
 
@@ -40,7 +42,6 @@
 2. Add job-object cancellation on Windows; migrate JSONL history to SQLite if
    querying requirements justify it.
 3. Add platform-specific JSON dump fixtures on Windows CI.
-4. Add an optional daemon/MCP adapter only after core contracts stabilize.
 
 Every increment follows `agent/commands/implement.md` and ends with a graph
 refresh and architecture review.

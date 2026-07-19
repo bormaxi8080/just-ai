@@ -8,7 +8,7 @@ The project follows a core-first, ports-and-adapters architecture.
 ```text
 justfile -> just CLI -> just-ai-core <- CLI
                                   <- Tauri GUI
-                                  <- optional daemon/MCP adapters
+                                  <- read-only stdio MCP adapter
 ```
 
 `just` owns parsing, dependency resolution, and recipe execution. `just-ai`
@@ -48,6 +48,7 @@ crates/just-ai/src/
   domain/            risk and policy rules
 
 apps/just-ai-gui/     separate Tauri/React adapter
+apps/just-ai-mcp/     separate read-only JSON-RPC/stdio adapter
 agent/                prompts and project-management commands
 ```
 
@@ -60,6 +61,7 @@ cargo fmt --check
 cargo clippy --package just-ai --all-targets -- -D warnings
 cargo test --package just-ai
 cargo test --lib
+cargo test --manifest-path apps/just-ai-mcp/Cargo.toml
 ```
 
 The Codebase Memory MCP index is refreshed after structural changes. Graph

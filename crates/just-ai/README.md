@@ -390,7 +390,8 @@ Important implementation pieces:
 
 ## Current Limitations
 
-- Only OpenAI-compatible chat completions are supported.
+- OpenAI Responses, native Ollama, and generic OpenAI-compatible transports are
+  supported; other provider-specific APIs require dedicated adapters.
 - AI responses are constrained by prompts and JSON parsing, but model quality
   still depends on the selected provider and model.
 - `just-ai add --write` appends a recipe to the root `justfile`; it does not yet
@@ -405,9 +406,12 @@ Likely next steps:
 
 1. Add `just-ai fix <recipe>` to propose changes after a failed run.
 2. Add interactive confirmation flows for applying generated patches.
-3. Add provider-specific adapters for Anthropic and non-OpenAI Ollama APIs.
+3. Add provider-specific adapters only where their semantics justify them.
 4. Add grouped insertion so generated recipes can land near related recipes.
 5. Expose the context/risk protocol to VSCode or an LSP-adjacent extension.
+
+The read-only context/risk protocol is also available today through the
+independent `apps/just-ai-mcp` stdio adapter.
 
 The invariant should stay the same: AI can propose and explain changes, but
 `just` remains the deterministic runtime for recipes.

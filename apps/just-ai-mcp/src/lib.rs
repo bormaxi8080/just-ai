@@ -1,0 +1,254 @@
+use {
+  just_ai::{
+    application::execution::{RecipeExecutor, RunRequest},
+    inspect_project_at,
+  },
+  serde_json::{Value, json},
+  std::{
+    io::{self, BufRead, Write},
+    path::PathBuf,
+  },
+};
+
+const PROTOCOL_VERSION: &str = "2025-11-25";
+
+pub fn run_stdio() -> io::Result<()> {
+  let stdin = io::stdin();
+  let mut stdout = io::stdout().lock();
+  for line in stdin.lock().lines() {
+    let line = line?;
+    if line.trim().is_empty() {
+      continue;
+    }
+    if let Some(response) = handle_line(&line) {
+      serde_json::to_writer(&mut stdout, &response)?;
+      stdout.write_all(b"\n")?;
+      stdout.flush()?;
+    }
+  }
+  Ok(())
+}
+
+fn handle_line(line: &str) -> Option<Value> {
+  match serde_json::from_str(line) {
+    Ok(request) => handle_request(&request),
+    Err(error) => Some(protocol_error(
+      Value::Null,
+      -32700,
+      &format!("parse error: {error}"),
+    )),
+  }
+}
+
+fn handle_request(request: &Value) -> Option<Value> {
+  let id = request.get("id")?.clone();
+  let method = request.get("method").and_then(Value::as_str)?;
+  let params = request.get("params").unwrap_or(&Value::Null);
+  let result = match method {
+    "initialize" => Ok(json!({
+      "protocolVersion": PROTOCOL_VERSION,
+      "capabilities": { "tools": { "listChanged": false } },
+      "serverInfo": { "name": "just-ai-mcp", "version": env!("CARGO_PKG_VERSION") }
+    })),
+    "ping" => Ok(json!({})),
+    "tools/list" => Ok(json!({ "tools": tool_definitions() })),
+    "tools/call" => call_tool(params),
+    _ => return Some(protocol_error(id, -32601, "method not found")),
+  };
+  Some(match result {
+    Ok(result) => json!({ "jsonrpc": "2.0", "id": id, "result": result }),
+    Err(message) => json!({
+      "jsonrpc": "2.0",
+      "id": id,
+      "result": { "content": [{ "type": "text", "text": message }], "isError": true }
+    }),
+  })
+}
+
+fn tool_definitions() -> Value {
+  json!([
+    {
+      "name": "inspect_project",
+      "description": "Inspect recipes and deterministic risk findings through just's JSON dump without executing recipes.",
+      "inputSchema": path_schema(false),
+      "annotations": { "readOnlyHint": true, "destructiveHint": false }
+    },
+    {
+      "name": "doctor",
+      "description": "Return deterministic risk reports for recipes without executing them.",
+      "inputSchema": path_schema(false),
+      "annotations": { "readOnlyHint": true, "destructiveHint": false }
+    },
+    {
+      "name": "prepare_run",
+      "description": "Dry-run a recipe and return preview, risk, and confirmation policy. Never executes the recipe.",
+      "inputSchema": path_schema(true),
+      "annotations": { "readOnlyHint": true, "destructiveHint": false }
+    }
+  ])
+}
+
+fn path_schema(include_recipe: bool) -> Value {
+  let mut properties = json!({
+    "project_root": { "type": "string" },
+    "just_binary": { "type": "string", "default": "just" }
+  });
+  let mut required = vec!["project_root"];
+  if include_recipe {
+    properties["recipe"] = json!({ "type": "string" });
+    properties["arguments"] =
+      json!({ "type": "array", "items": { "type": "string" }, "default": [] });
+    required.push("recipe");
+  }
+  json!({ "type": "object", "properties": properties, "required": required, "additionalProperties": false })
+}
+
+fn call_tool(params: &Value) -> Result<Value, String> {
+  let name = params
+    .get("name")
+    .and_then(Value::as_str)
+    .ok_or("tool name is required")?;
+  let arguments = params.get("arguments").unwrap_or(&Value::Null);
+  let project_root = string_argument(arguments, "project_root")?;
+  let just_binary = arguments
+    .get("just_binary")
+    .and_then(Value::as_str)
+    .unwrap_or("just");
+  let value = match name {
+    "inspect_project" => serde_json::to_value(
+      inspect_project_at(just_binary, &project_root).map_err(|error| error.to_string())?,
+    )
+    .map_err(|error| error.to_string())?,
+    "doctor" => {
+      let context =
+        inspect_project_at(just_binary, &project_root).map_err(|error| error.to_string())?;
+      json!({ "recipes": context.recipes.into_iter().map(|recipe| json!({
+        "namepath": recipe.namepath, "risk": recipe.risk, "findings": recipe.risks
+      })).collect::<Vec<_>>() })
+    }
+    "prepare_run" => {
+      let recipe = string_argument(arguments, "recipe")?;
+      let arguments = arguments
+        .get("arguments")
+        .cloned()
+        .unwrap_or_else(|| json!([]));
+      let arguments: Vec<String> =
+        serde_json::from_value(arguments).map_err(|error| error.to_string())?;
+      serde_json::to_value(
+        RecipeExecutor::new(just_binary)
+          .prepare(RunRequest {
+            project_root: PathBuf::from(project_root),
+            recipe,
+            arguments,
+          })
+          .map_err(|error| error.to_string())?,
+      )
+      .map_err(|error| error.to_string())?
+    }
+    _ => return Err(format!("unknown tool `{name}`")),
+  };
+  let text = serde_json::to_string(&value).map_err(|error| error.to_string())?;
+  Ok(
+    json!({ "content": [{ "type": "text", "text": text }], "structuredContent": value, "isError": false }),
+  )
+}
+
+fn string_argument(arguments: &Value, name: &str) -> Result<String, String> {
+  arguments
+    .get(name)
+    .and_then(Value::as_str)
+    .map(str::to_owned)
+    .ok_or_else(|| format!("`{name}` must be a string"))
+}
+
+fn protocol_error(id: Value, code: i32, message: &str) -> Value {
+  json!({ "jsonrpc": "2.0", "id": id, "error": { "code": code, "message": message } })
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn tool_list_contains_only_read_only_operations() {
+    let response = handle_request(&json!({"jsonrpc":"2.0","id":1,"method":"tools/list"})).unwrap();
+    let tools = response
+      .pointer("/result/tools")
+      .unwrap()
+      .as_array()
+      .unwrap();
+    assert_eq!(tools.len(), 3);
+    assert!(
+      tools
+        .iter()
+        .all(|tool| tool.pointer("/annotations/readOnlyHint") == Some(&Value::Bool(true)))
+    );
+    assert!(
+      tools
+        .iter()
+        .all(|tool| tool.get("name").and_then(Value::as_str) != Some("execute_run"))
+    );
+  }
+
+  #[test]
+  fn notifications_produce_no_stdout_message() {
+    assert!(
+      handle_request(&json!({"jsonrpc":"2.0","method":"notifications/initialized"})).is_none()
+    );
+  }
+
+  #[test]
+  fn initialize_declares_current_tools_capability() {
+    let response = handle_request(&json!({
+      "jsonrpc":"2.0", "id":"init", "method":"initialize", "params": {
+        "protocolVersion":"2024-11-05", "capabilities": {},
+        "clientInfo": {"name":"test", "version":"1"}
+      }
+    }))
+    .unwrap();
+    assert_eq!(
+      response
+        .pointer("/result/protocolVersion")
+        .and_then(Value::as_str),
+      Some(PROTOCOL_VERSION)
+    );
+    assert_eq!(
+      response.pointer("/result/capabilities/tools/listChanged"),
+      Some(&Value::Bool(false))
+    );
+  }
+
+  #[cfg(unix)]
+  #[test]
+  fn prepare_tool_uses_dry_run() {
+    use std::{fs, os::unix::fs::PermissionsExt};
+    let directory = tempfile::tempdir().unwrap();
+    let binary = directory.path().join("fake-just");
+    fs::write(
+      &binary,
+      "#!/bin/sh\n[ \"$1\" = \"--dry-run\" ] || exit 91\necho 'echo safe'\n",
+    )
+    .unwrap();
+    let mut permissions = fs::metadata(&binary).unwrap().permissions();
+    permissions.set_mode(0o700);
+    fs::set_permissions(&binary, permissions).unwrap();
+    let response = handle_request(&json!({
+      "jsonrpc":"2.0", "id":2, "method":"tools/call", "params": {
+        "name":"prepare_run", "arguments": {
+          "project_root": directory.path(), "just_binary": binary, "recipe":"test", "arguments":[]
+        }
+      }
+    }))
+    .unwrap();
+    assert_eq!(
+      response.pointer("/result/isError"),
+      Some(&Value::Bool(false))
+    );
+    assert_eq!(
+      response
+        .pointer("/result/structuredContent/preview/0")
+        .and_then(Value::as_str),
+      Some("echo safe")
+    );
+  }
+}

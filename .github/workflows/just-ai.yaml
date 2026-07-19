@@ -5,6 +5,7 @@ on:
     paths:
       - "crates/just-ai/**"
       - "apps/just-ai-gui/**"
+      - "apps/just-ai-mcp/**"
       - "agent/**"
       - "docs/architecture/**"
       - ".github/workflows/just-ai.yaml"
@@ -13,6 +14,7 @@ on:
     paths:
       - "crates/just-ai/**"
       - "apps/just-ai-gui/**"
+      - "apps/just-ai-mcp/**"
       - "agent/**"
       - "docs/architecture/**"
 
@@ -29,6 +31,9 @@ jobs:
       - run: cargo fmt --all -- --check
       - run: cargo clippy --package just-ai --all-targets -- -D warnings
       - run: cargo test --package just-ai
+      - run: cargo fmt --manifest-path apps/just-ai-mcp/Cargo.toml -- --check
+      - run: cargo clippy --manifest-path apps/just-ai-mcp/Cargo.toml --all-targets --locked -- -D warnings
+      - run: cargo test --manifest-path apps/just-ai-mcp/Cargo.toml --locked
 
   desktop:
     runs-on: macos-latest
