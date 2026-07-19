@@ -1,0 +1,75 @@
+{
+  "source": "/workspace/justfile",
+  "warnings": [],
+  "recipes": {
+    "script": {
+      "name": "script",
+      "namepath": "script",
+      "doc": "Run a script",
+      "body": [
+        ["#!/usr/bin/env bash"],
+        ["echo ", ["TARGET"]]
+      ],
+      "dependencies": [],
+      "parameters": [
+        {"name": "TARGET", "kind": "singular", "default": "dev"},
+        {"name": "FILES", "kind": "plus", "default": null}
+      ],
+      "private": false,
+      "quiet": true,
+      "shebang": true
+    },
+    "optional": {
+      "name": "optional",
+      "namepath": "optional",
+      "doc": null,
+      "body": [],
+      "dependencies": [],
+      "parameters": [
+        {"name": "ARGS", "kind": "star", "default": null}
+      ],
+      "private": true,
+      "quiet": false,
+      "shebang": false
+    }
+  },
+  "modules": {
+    "tools": {
+      "source": "/workspace/tools.just",
+      "warnings": ["module warning"],
+      "recipes": {
+        "check": {
+          "name": "check",
+          "namepath": "tools::check",
+          "doc": "Check the project",
+          "body": [["cargo check"]],
+          "dependencies": [{"recipe": "script"}],
+          "parameters": [],
+          "private": false,
+          "quiet": false,
+          "shebang": false
+        }
+      },
+      "modules": {
+        "ci": {
+          "source": "/workspace/ci.just",
+          "warnings": [],
+          "recipes": {
+            "test": {
+              "name": "test",
+              "namepath": "tools::ci::test",
+              "doc": null,
+              "body": [["cargo test"]],
+              "dependencies": [],
+              "parameters": [],
+              "private": false,
+              "quiet": false,
+              "shebang": false
+            }
+          },
+          "modules": {}
+        }
+      }
+    }
+  }
+}

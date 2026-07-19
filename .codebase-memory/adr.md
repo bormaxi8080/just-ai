@@ -13,7 +13,7 @@ Execution is two-phase: prepare obtains preview, risk, and policy; execute re-pr
 The desktop adapter renders parameters from `ContextParameter`; it does not parse justfiles. Singular values remain one argv element. Plus/star variadics accept one argv element per line, preserving spaces inside each argument. Defaults are initialized explicitly in the form, and plus/required parameters are validated before prepare.
 
 ## Compatibility testing
-The JSON dump boundary has versioned fixtures parsed directly by inspection tests. Black-box CLI integration tests verify agent commands work without a justfile and operational commands fail cleanly when project discovery fails. History tests cover retention, missing storage, bounded/redacted output, shared record construction, and canonical project identity.
+The JSON dump boundary has immutable, versioned fixtures parsed directly by inspection tests. The basic fixture covers recipes, dependencies, defaults, warnings, and risk derivation. The rich fixture pins the `just 1.54.0` contract for nested modules, structured interpolation bodies, shebangs, flags, and singular/plus/star parameters. Platform-only dump shapes remain a Windows-CI increment. Black-box CLI integration tests verify agent commands work without a justfile and operational commands fail cleanly when project discovery fails. History tests cover retention, missing storage, bounded/redacted output, shared record construction, and canonical project identity.
 
 ## Agent workflow
 Code discovery and impact analysis use Codebase Memory MCP first. Structural changes require tests, formatting, Clippy, documentation/ADR updates, re-indexing, and graph verification.

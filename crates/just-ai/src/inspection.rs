@@ -311,4 +311,36 @@ mod tests {
     assert_eq!(deploy.parameters[0].default.as_deref(), Some("production"));
     assert_eq!(deploy.risk, RiskLevel::Medium);
   }
+
+  #[test]
+  fn parses_versioned_rich_dump_fixture() {
+    let dump: DumpModule =
+      serde_json::from_str(include_str!("../tests/fixtures/just-dump-rich.json")).unwrap();
+    let context = ProjectContext::from_dump(dump);
+
+    assert_eq!(
+      context
+        .modules
+        .iter()
+        .map(|module| module.module_path.as_str())
+        .collect::<Vec<_>>(),
+      ["", "tools", "tools:ci"]
+    );
+    assert_eq!(context.warnings, ["module warning"]);
+
+    let script = context.find_recipe("script").unwrap();
+    assert!(script.shebang);
+    assert!(script.quiet);
+    assert_eq!(script.body, ["#!/usr/bin/env bash", "echo {{TARGET:...}}"]);
+    assert_eq!(script.parameters[0].kind, "singular");
+    assert_eq!(script.parameters[1].kind, "plus");
+
+    let optional = context.find_recipe("optional").unwrap();
+    assert!(optional.private);
+    assert_eq!(optional.parameters[0].kind, "star");
+
+    let nested = context.find_recipe("tools::ci::test").unwrap();
+    assert_eq!(nested.module_path, "tools:ci");
+    assert_eq!(nested.body, ["cargo test"]);
+  }
 }
