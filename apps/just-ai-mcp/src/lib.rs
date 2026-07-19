@@ -20,6 +20,13 @@ struct PromptDefinition {
   text: &'static str,
 }
 
+struct ResourceDefinition {
+  uri: &'static str,
+  name: &'static str,
+  description: &'static str,
+  text: &'static str,
+}
+
 const PROMPTS: &[PromptDefinition] = &[
   PromptDefinition {
     name: "implement",
@@ -40,6 +47,47 @@ const PROMPTS: &[PromptDefinition] = &[
     name: "system",
     description: "Apply the just-ai maintainer invariants.",
     text: include_str!("../../../agent/prompts/system.md"),
+  },
+];
+
+const RESOURCES: &[ResourceDefinition] = &[
+  ResourceDefinition {
+    uri: "just-ai://docs/architecture",
+    name: "Architecture",
+    description: "Layer boundaries, dependency rules, and verification gates.",
+    text: include_str!("../../../docs/architecture/README.md"),
+  },
+  ResourceDefinition {
+    uri: "just-ai://docs/roadmap",
+    name: "Implementation roadmap",
+    description: "Completed foundation and intentionally deferred increments.",
+    text: include_str!("../../../docs/architecture/roadmap.md"),
+  },
+  ResourceDefinition {
+    uri: "just-ai://docs/adr/0001-companion-layers",
+    name: "ADR 0001: Companion layers",
+    description: "Decision to preserve just and build separate companion layers.",
+    text: include_str!("../../../docs/architecture/adr/0001-companion-layers.md"),
+  },
+  ResourceDefinition {
+    uri: "just-ai://docs/adr/0002-ai-is-proposal-only",
+    name: "ADR 0002: AI is proposal-only",
+    description: "Decision to validate AI proposals locally before applying them.",
+    text: include_str!("../../../docs/architecture/adr/0002-ai-is-proposal-only.md"),
+  },
+  ResourceDefinition {
+    uri: "just-ai://docs/adr/0003-two-phase-execution",
+    name: "ADR 0003: Two-phase execution",
+    description: "Decision to separate run preparation from confirmed execution.",
+    text: include_str!("../../../docs/architecture/adr/0003-two-phase-execution.md"),
+  },
+  ResourceDefinition {
+    uri: "just-ai://docs/adr/0004-native-provider-and-response-contracts",
+    name: "ADR 0004: Native provider and response contracts",
+    description: "Decision for native transports and schema-validated AI responses.",
+    text: include_str!(
+      "../../../docs/architecture/adr/0004-native-provider-and-response-contracts.md"
+    ),
   },
 ];
 
@@ -91,17 +139,27 @@ fn handle_request(request: &Value) -> Option<Value> {
       Err(message) => protocol_error(id, -32602, &message),
     });
   }
+  if method == "resources/read" {
+    return Some(match read_resource(params) {
+      Ok(result) => json!({ "jsonrpc": "2.0", "id": id, "result": result }),
+      Err(ResourceReadError::InvalidParams(message)) => protocol_error(id, -32602, &message),
+      Err(ResourceReadError::NotFound(message)) => protocol_error(id, -32002, &message),
+    });
+  }
   let result = match method {
     "initialize" => Ok(json!({
       "protocolVersion": negotiate_protocol_version(params),
       "capabilities": {
         "prompts": { "listChanged": false },
+        "resources": { "subscribe": false, "listChanged": false },
         "tools": { "listChanged": false }
       },
       "serverInfo": { "name": "just-ai-mcp", "version": env!("CARGO_PKG_VERSION") }
     })),
     "ping" => Ok(json!({})),
     "prompts/list" => Ok(json!({ "prompts": prompt_definitions() })),
+    "resources/list" => Ok(json!({ "resources": resource_definitions() })),
+    "resources/templates/list" => Ok(json!({ "resourceTemplates": [] })),
     "tools/list" => Ok(json!({ "tools": tool_definitions() })),
     "tools/call" => call_tool(params),
     _ => return Some(protocol_error(id, -32601, "method not found")),
@@ -114,6 +172,47 @@ fn handle_request(request: &Value) -> Option<Value> {
       "result": { "content": [{ "type": "text", "text": message }], "isError": true }
     }),
   })
+}
+
+enum ResourceReadError {
+  InvalidParams(String),
+  NotFound(String),
+}
+
+fn resource_definitions() -> Value {
+  Value::Array(
+    RESOURCES
+      .iter()
+      .map(|resource| {
+        json!({
+          "uri": resource.uri,
+          "name": resource.name,
+          "description": resource.description,
+          "mimeType": "text/markdown",
+          "size": resource.text.len(),
+          "annotations": { "audience": ["assistant"], "priority": 1.0 }
+        })
+      })
+      .collect(),
+  )
+}
+
+fn read_resource(params: &Value) -> Result<Value, ResourceReadError> {
+  let uri = params
+    .get("uri")
+    .and_then(Value::as_str)
+    .ok_or_else(|| ResourceReadError::InvalidParams("resource URI is required".into()))?;
+  let resource = RESOURCES
+    .iter()
+    .find(|resource| resource.uri == uri)
+    .ok_or_else(|| ResourceReadError::NotFound(format!("resource not found: `{uri}`")))?;
+  Ok(json!({
+    "contents": [{
+      "uri": resource.uri,
+      "mimeType": "text/markdown",
+      "text": resource.text
+    }]
+  }))
 }
 
 fn prompt_definitions() -> Value {
@@ -315,6 +414,69 @@ mod tests {
       response.pointer("/result/capabilities/prompts/listChanged"),
       Some(&Value::Bool(false))
     );
+    assert_eq!(
+      response.pointer("/result/capabilities/resources/subscribe"),
+      Some(&Value::Bool(false))
+    );
+  }
+
+  #[test]
+  fn resource_list_exposes_only_canonical_architecture_documents() {
+    let response =
+      handle_request(&json!({"jsonrpc":"2.0","id":1,"method":"resources/list"})).unwrap();
+    let resources = response
+      .pointer("/result/resources")
+      .and_then(Value::as_array)
+      .unwrap();
+    assert_eq!(resources.len(), 6);
+    assert!(resources.iter().all(|resource| {
+      resource
+        .get("uri")
+        .and_then(Value::as_str)
+        .is_some_and(|uri| uri.starts_with("just-ai://docs/"))
+    }));
+    assert!(resources.iter().all(|resource| {
+      resource.get("mimeType").and_then(Value::as_str) == Some("text/markdown")
+    }));
+  }
+
+  #[test]
+  fn resource_read_returns_embedded_canonical_text() {
+    let response = handle_request(&json!({
+      "jsonrpc":"2.0", "id":1, "method":"resources/read",
+      "params":{"uri":"just-ai://docs/architecture"}
+    }))
+    .unwrap();
+    assert_eq!(
+      response
+        .pointer("/result/contents/0/text")
+        .and_then(Value::as_str),
+      Some(include_str!("../../../docs/architecture/README.md"))
+    );
+  }
+
+  #[test]
+  fn resource_templates_are_explicitly_empty() {
+    let response =
+      handle_request(&json!({"jsonrpc":"2.0","id":1,"method":"resources/templates/list"})).unwrap();
+    assert_eq!(
+      response.pointer("/result/resourceTemplates"),
+      Some(&json!([]))
+    );
+  }
+
+  #[test]
+  fn unknown_resource_cannot_escape_static_allowlist() {
+    let response = handle_request(&json!({
+      "jsonrpc":"2.0", "id":1, "method":"resources/read",
+      "params":{"uri":"file:///etc/passwd"}
+    }))
+    .unwrap();
+    assert_eq!(
+      response.pointer("/error/code").and_then(Value::as_i64),
+      Some(-32002)
+    );
+    assert!(response.get("result").is_none());
   }
 
   #[test]

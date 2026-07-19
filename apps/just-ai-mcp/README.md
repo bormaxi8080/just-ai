@@ -30,3 +30,13 @@ The prompt catalog is compiled directly from the canonical files under
 `agent/`; the adapter has no second editable copy. Prompts accept no arguments
 and are returned as MCP `user` messages because the protocol prompt-message
 roles are limited to `user` and `assistant`.
+
+Resources:
+
+- `just-ai://docs/architecture` — boundaries and verification gates;
+- `just-ai://docs/roadmap` — completed and deferred increments;
+- `just-ai://docs/adr/*` — the four accepted architecture decisions.
+
+Resources are a build-time allowlist of canonical Markdown documents. The
+adapter exposes no path template, arbitrary filesystem read, subscription, or
+resource-change notification capability.

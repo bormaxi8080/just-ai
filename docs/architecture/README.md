@@ -55,6 +55,9 @@ agent/                canonical prompts and project-management commands
 The MCP adapter publishes the canonical `agent/` sources through
 `prompts/list` and `prompts/get`. Prompt files are embedded at build time, so
 the CLI and MCP surfaces cannot drift while the installed binary is running.
+It also publishes this architecture guide, roadmap, and accepted ADRs through
+a fixed `just-ai://docs/*` resource allowlist. No client-supplied path reaches
+the filesystem.
 
 ## Verification gates
 

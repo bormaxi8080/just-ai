@@ -33,6 +33,7 @@
 - independent read-only MCP/stdio adapter for inspection, risk reports, and
   dry-run preparation, with no execution or write tools;
 - MCP prompt discovery backed directly by the canonical project-agent files;
+- allowlisted MCP resources for canonical architecture documentation and ADRs;
 - dedicated layered CI workflow;
 - local ADRs and Codebase Memory MCP ADR/index.
 
