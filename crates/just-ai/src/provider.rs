@@ -1,4 +1,4 @@
-//! Provider-neutral AI request boundary and native OpenAI-compatible adapter.
+//! Provider-neutral AI boundary with native OpenAI, Ollama, and compatible adapters.
 
 use {
   serde_json::Value,
@@ -23,6 +23,30 @@ pub struct OpenAiResponsesProvider {
   api_key: String,
   base_url: String,
   model: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct OllamaProvider {
+  agent: ureq::Agent,
+  api_key: Option<String>,
+  base_url: String,
+  model: String,
+}
+
+impl OllamaProvider {
+  #[must_use]
+  pub fn new(
+    base_url: impl Into<String>,
+    model: impl Into<String>,
+    api_key: Option<String>,
+  ) -> Self {
+    Self {
+      agent: provider_agent(),
+      api_key,
+      base_url: base_url.into(),
+      model: model.into(),
+    }
+  }
 }
 
 impl OpenAiResponsesProvider {
@@ -108,6 +132,33 @@ impl AiProvider for OpenAiResponsesProvider {
       })
       .map(str::to_owned)
       .ok_or_else(|| ProviderError::new("OpenAI response contains no output_text content"))
+  }
+}
+
+impl AiProvider for OllamaProvider {
+  fn complete(&self, request: &AiRequest) -> Result<String, ProviderError> {
+    let url = format!("{}/api/chat", self.base_url.trim_end_matches('/'));
+    let body = serde_json::json!({
+      "model": self.model,
+      "messages": [
+        { "role": "system", "content": request.system },
+        { "role": "user", "content": request.user }
+      ],
+      "format": request.schema,
+      "stream": false,
+      "options": { "temperature": 0 }
+    });
+    let response = post_json(&self.agent, &url, self.api_key.as_deref(), &body)?;
+    if response.get("done").and_then(Value::as_bool) != Some(true) {
+      return Err(ProviderError::new(
+        "Ollama response did not finish as a non-streaming response",
+      ));
+    }
+    response
+      .pointer("/message/content")
+      .and_then(Value::as_str)
+      .map(str::to_owned)
+      .ok_or_else(|| ProviderError::new("Ollama response contains no message content"))
   }
 }
 
@@ -308,6 +359,51 @@ mod tests {
     assert!(
       request.contains("authorization: Bearer test-secret")
         || request.contains("Authorization: Bearer test-secret")
+    );
+  }
+
+  #[test]
+  fn ollama_provider_sends_native_schema_and_disables_streaming() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = thread::spawn(move || {
+      let (mut stream, _) = listener.accept().unwrap();
+      let request = read_http_request(&mut stream);
+      write_http_response(
+        &mut stream,
+        r#"{"model":"test","message":{"role":"assistant","content":"{\"summary\":\"local\"}"},"done":true}"#,
+      );
+      request
+    });
+
+    let provider = OllamaProvider::new(format!("http://{address}"), "local-model", None);
+    let content = provider
+      .complete(&AiRequest {
+        system: "system".into(),
+        user: "user".into(),
+        schema_name: "unused_by_ollama".into(),
+        schema: serde_json::json!({
+          "type": "object",
+          "properties": {"summary": {"type": "string"}},
+          "required": ["summary"]
+        }),
+      })
+      .unwrap();
+    assert_eq!(content, "{\"summary\":\"local\"}");
+
+    let request = server.join().unwrap();
+    assert!(request.contains("POST /api/chat"));
+    let body: Value = serde_json::from_str(request.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+    assert_eq!(body.get("stream").and_then(Value::as_bool), Some(false));
+    assert_eq!(
+      body
+        .pointer("/format/properties/summary/type")
+        .and_then(Value::as_str),
+      Some("string")
+    );
+    assert_eq!(
+      body.pointer("/options/temperature").and_then(Value::as_i64),
+      Some(0)
     );
   }
 

@@ -117,9 +117,9 @@ per-project, bounded to 500 records, and stores only redacted output tails.
 
 ### AI provider configuration
 
-AI commands use a native Rust client for OpenAI-compatible
-`/chat/completions` endpoints. The provider boundary works with OpenAI, Ollama,
-OpenRouter, and compatible services without spawning an external HTTP command.
+AI commands use native Rust transports selected behind one provider boundary:
+OpenAI Responses, Ollama Chat, or generic OpenAI-compatible Chat Completions.
+No provider path spawns an external HTTP command.
 
 OpenAI:
 
@@ -139,9 +139,14 @@ Ollama:
 
 ```sh
 export JUST_AI_PROVIDER=ollama
-export JUST_AI_BASE_URL=http://localhost:11434/v1
+export JUST_AI_BASE_URL=http://localhost:11434
 export JUST_AI_MODEL=llama3.1
 ```
+
+The `ollama` provider uses Ollama's native `/api/chat` endpoint, disables its
+default response streaming, sends the operation JSON Schema through `format`,
+and uses temperature zero for deterministic structured output. Local Ollama
+requires no API key; `JUST_AI_API_KEY` is forwarded for authenticated remotes.
 
 Generic OpenAI-compatible endpoint:
 
@@ -152,8 +157,8 @@ export JUST_AI_MODEL=...
 export JUST_AI_API_KEY=...
 ```
 
-`openai-compatible` and `ollama` retain the Chat Completions transport for
-servers that do not implement the OpenAI Responses API.
+`openai-compatible` retains the Chat Completions transport for servers that do
+not implement either native Ollama or OpenAI Responses semantics.
 
 `JUST_AI_API_KEY` is required unless `JUST_AI_PROVIDER=ollama` is used.
 

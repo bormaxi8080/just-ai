@@ -344,7 +344,7 @@ impl AiClient {
   fn from_env() -> Result<Self, Box<dyn Error>> {
     let provider = env::var("JUST_AI_PROVIDER").unwrap_or_else(|_| "openai".to_owned());
     let base_url = env::var("JUST_AI_BASE_URL").unwrap_or_else(|_| match provider.as_str() {
-      "ollama" => "http://localhost:11434/v1".to_owned(),
+      "ollama" => "http://localhost:11434".to_owned(),
       _ => "https://api.openai.com/v1".to_owned(),
     });
     let model = env::var("JUST_AI_MODEL").unwrap_or_else(|_| match provider.as_str() {
@@ -363,7 +363,8 @@ impl AiClient {
         model,
         api_key.expect("API key requirement checked above"),
       )),
-      "ollama" | "openai-compatible" => Box::new(provider::OpenAiCompatibleProvider::new(
+      "ollama" => Box::new(provider::OllamaProvider::new(base_url, model, api_key)),
+      "openai-compatible" => Box::new(provider::OpenAiCompatibleProvider::new(
         base_url, model, api_key,
       )),
       other => return Err(format!("unsupported JUST_AI_PROVIDER `{other}`").into()),

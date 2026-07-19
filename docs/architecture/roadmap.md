@@ -28,13 +28,15 @@
   and expandable redacted output in the desktop UI;
 - dedicated OpenAI Responses API adapter with strict Structured Outputs while
   retaining Chat Completions for Ollama and OpenAI-compatible servers;
+- native Ollama `/api/chat` adapter with schema-format output, deterministic
+  temperature, and explicit non-streaming transport;
 - dedicated layered CI workflow;
 - local ADRs and Codebase Memory MCP ADR/index.
 
 ## Next increments
 
-1. Add provider-specific local-model adapters where their semantics differ from
-   OpenAI-compatible chat completions.
+1. Add adapters for additional local-model runtimes only when their semantics
+   differ materially from Ollama and OpenAI-compatible chat completions.
 2. Add job-object cancellation on Windows; migrate JSONL history to SQLite if
    querying requirements justify it.
 3. Add platform-specific JSON dump fixtures on Windows CI.
