@@ -42,6 +42,7 @@ pub struct CompletedRun {
   pub status: ExitStatus,
   pub stdout: Vec<u8>,
   pub stderr: Vec<u8>,
+  pub cancelled: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -144,6 +145,7 @@ impl RecipeExecutor {
       status: output.status,
       stdout: output.stdout,
       stderr: output.stderr,
+      cancelled: false,
     })
   }
 
@@ -224,6 +226,7 @@ impl RecipeExecutor {
       status,
       stdout: stdout_bytes,
       stderr: stderr_bytes,
+      cancelled,
     })
   }
 

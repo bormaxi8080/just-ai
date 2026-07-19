@@ -24,6 +24,8 @@
 - versioned rich JSON dump coverage for nested modules, interpolations,
   shebangs, and singular/plus/star parameter kinds;
 - Unix process-group isolation and whole-tree cancellation for streaming runs;
+- backward-compatible history observability for argv, cancellation, timestamps,
+  and expandable redacted output in the desktop UI;
 - dedicated layered CI workflow;
 - local ADRs and Codebase Memory MCP ADR/index.
 

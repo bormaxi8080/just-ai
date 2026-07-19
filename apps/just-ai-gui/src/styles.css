@@ -29,7 +29,12 @@ pre, .risk-card { background: #0d0f0e; border: 1px solid #292e2a; border-radius:
 .parameter-form label > span { display: flex; justify-content: space-between; }
 .parameter-form .run-button { justify-self: start; margin-top: 4px; }
 .history { border-top: 1px solid #303531; margin-top: 24px; padding-top: 1px; }
-.history-row { display: grid; gap: 3px; padding: 8px 2px; border-bottom: 1px solid #252a26; }
+.history-row { padding: 8px 2px; border-bottom: 1px solid #252a26; }
+.history-row summary { cursor: pointer; display: flex; justify-content: space-between; }
+.history-row[open] { display: grid; gap: 8px; }
+.history-row code { color: #aeb8b1; overflow-wrap: anywhere; }
+.history-row pre { font-size: 11px; margin: 0; max-height: 180px; padding: 9px; }
+.history-stderr { color: #ffb4ae; }
 .history-row .success { color: #87e8a5; }
 .history-row .failure { color: #ff7b72; }
 @media (max-width: 760px) { header { align-items: stretch; flex-direction: column; gap: 18px; } .layout { grid-template-columns: 1fr; } }

@@ -66,10 +66,12 @@ export interface RunResult {
 export interface RunRecord {
   id: string;
   recipe: string;
+  arguments: string[];
   started_at_ms: number;
   duration_ms: number;
   exit_code: number | null;
   success: boolean;
+  cancelled: boolean;
   stdout_tail: string;
   stderr_tail: string;
 }

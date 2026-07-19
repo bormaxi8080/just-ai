@@ -202,13 +202,10 @@ fn try_main() -> Result<(), Box<dyn Error>> {
       let started = Instant::now();
       let completed = executor.execute(&prepared, &confirmation)?;
       let record = RunRecord::completed(
-        prepared.request.recipe.clone(),
+        &prepared.request,
         started_at_ms,
         started.elapsed().as_millis(),
-        completed.status.code(),
-        completed.status.success(),
-        &completed.stdout,
-        &completed.stderr,
+        &completed,
       );
       JsonLineHistory::new(project_history_path(&project_root), 500).append(&record)?;
       std::io::stdout().write_all(&completed.stdout)?;

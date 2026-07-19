@@ -141,12 +141,18 @@ function RunHistory({ records }: { records: RunRecord[] }) {
   return <section className="history">
     <h3>Recent runs</h3>
     {records.length === 0 ? <p>No runs yet.</p> : records.map((record) =>
-      <div className="history-row" key={record.id}>
-        <span>{record.recipe}</span>
-        <small className={record.success ? "success" : "failure"}>
-          {record.success ? "success" : `exit ${record.exit_code ?? "?"}`} · {record.duration_ms} ms
-        </small>
-      </div>)}
+      <details className="history-row" key={record.id}>
+        <summary>
+          <span>{record.recipe}</span>
+          <small className={record.success ? "success" : "failure"}>
+            {record.cancelled ? "cancelled" : record.success ? "success" : `exit ${record.exit_code ?? "?"}`} · {record.duration_ms} ms
+          </small>
+        </summary>
+        <small>{new Date(record.started_at_ms).toLocaleString()}</small>
+        <code>{[record.recipe, ...record.arguments].join(" ")}</code>
+        {record.stdout_tail && <pre>{record.stdout_tail}</pre>}
+        {record.stderr_tail && <pre className="history-stderr">{record.stderr_tail}</pre>}
+      </details>)}
   </section>;
 }
 

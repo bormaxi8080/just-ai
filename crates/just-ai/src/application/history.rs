@@ -1,5 +1,8 @@
 use {
-  super::project_context::redact_text,
+  super::{
+    execution::{CompletedRun, RunRequest},
+    project_context::redact_text,
+  },
   serde::{Deserialize, Serialize},
   std::{
     fs,
@@ -16,10 +19,14 @@ const OUTPUT_TAIL_BYTES: usize = 16 * 1024;
 pub struct RunRecord {
   pub id: String,
   pub recipe: String,
+  #[serde(default)]
+  pub arguments: Vec<String>,
   pub started_at_ms: u128,
   pub duration_ms: u128,
   pub exit_code: Option<i32>,
   pub success: bool,
+  #[serde(default)]
+  pub cancelled: bool,
   pub stdout_tail: String,
   pub stderr_tail: String,
 }
@@ -27,24 +34,22 @@ pub struct RunRecord {
 impl RunRecord {
   #[must_use]
   pub fn completed(
-    recipe: impl Into<String>,
+    request: &RunRequest,
     started_at_ms: u128,
     duration_ms: u128,
-    exit_code: Option<i32>,
-    success: bool,
-    stdout: &[u8],
-    stderr: &[u8],
+    completed: &CompletedRun,
   ) -> Self {
-    let recipe = recipe.into();
     Self {
-      id: format!("{started_at_ms}-{recipe}"),
-      recipe,
+      id: format!("{started_at_ms}-{}", request.recipe),
+      recipe: request.recipe.clone(),
+      arguments: request.arguments.clone(),
       started_at_ms,
       duration_ms,
-      exit_code,
-      success,
-      stdout_tail: output_tail(stdout),
-      stderr_tail: output_tail(stderr),
+      exit_code: completed.status.code(),
+      success: completed.status.success(),
+      cancelled: completed.cancelled,
+      stdout_tail: output_tail(&completed.stdout),
+      stderr_tail: output_tail(&completed.stderr),
     }
   }
 }
@@ -139,10 +144,12 @@ mod tests {
     RunRecord {
       id: id.into(),
       recipe: "test".into(),
+      arguments: Vec::new(),
       started_at_ms: 1,
       duration_ms: 2,
       exit_code: Some(0),
       success: true,
+      cancelled: false,
       stdout_tail: String::new(),
       stderr_tail: String::new(),
     }
@@ -190,17 +197,44 @@ mod tests {
 
   #[test]
   fn completed_record_bounds_and_redacts_output() {
-    let record = RunRecord::completed(
-      "deploy",
-      10,
-      25,
-      Some(0),
-      true,
-      b"deployed\n",
-      b"API_KEY=secret\n",
-    );
+    let request = RunRequest {
+      project_root: PathBuf::from("."),
+      recipe: "deploy".into(),
+      arguments: vec!["production west".into()],
+    };
+    let completed = CompletedRun {
+      status: successful_status(),
+      stdout: b"deployed\n".to_vec(),
+      stderr: b"API_KEY=secret\n".to_vec(),
+      cancelled: false,
+    };
+    let record = RunRecord::completed(&request, 10, 25, &completed);
     assert_eq!(record.id, "10-deploy");
+    assert_eq!(record.arguments, ["production west"]);
     assert_eq!(record.stdout_tail, "deployed");
     assert_eq!(record.stderr_tail, "API_KEY = <redacted>");
+  }
+
+  #[cfg(unix)]
+  fn successful_status() -> std::process::ExitStatus {
+    std::process::Command::new("true").status().unwrap()
+  }
+
+  #[cfg(windows)]
+  fn successful_status() -> std::process::ExitStatus {
+    std::process::Command::new("cmd")
+      .args(["/C", "exit", "0"])
+      .status()
+      .unwrap()
+  }
+
+  #[test]
+  fn legacy_records_default_new_observability_fields() {
+    let record: RunRecord = serde_json::from_str(
+      r#"{"id":"1-test","recipe":"test","started_at_ms":1,"duration_ms":2,"exit_code":0,"success":true,"stdout_tail":"","stderr_tail":""}"#,
+    )
+    .unwrap();
+    assert!(record.arguments.is_empty());
+    assert!(!record.cancelled);
   }
 }

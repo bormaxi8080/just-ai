@@ -5,6 +5,8 @@ It does not execute shell strings and does not import code from the upstream
 `just` crate. The current vertical slice discovers recipes, renders positional
 and variadic parameter forms, presents local deterministic risk reports,
 streams output, supports cancellation, and displays persisted run history.
+History rows expose argv, cancellation status, timestamps, and redacted bounded
+stdout/stderr tails for local diagnostics.
 
 Variadic parameters use one argument per line so whitespace inside an argument
 is preserved. History is owned by the Rust application layer; the GUI reads it

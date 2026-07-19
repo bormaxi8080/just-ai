@@ -76,20 +76,16 @@ async fn execute_run(
       .as_millis();
     let started = Instant::now();
     let project_root = prepared.request.project_root.clone();
-    let recipe = prepared.request.recipe.clone();
     let completed = RecipeExecutor::new("just")
       .execute_streaming(&prepared, &confirmation, &cancellation, |event| {
         let _ = app.emit("run-event", event);
       })
       .map_err(|error| error.to_string())?;
     let record = RunRecord::completed(
-      recipe,
+      &prepared.request,
       started_at_ms,
       started.elapsed().as_millis(),
-      completed.status.code(),
-      completed.status.success(),
-      &completed.stdout,
-      &completed.stderr,
+      &completed,
     );
     JsonLineHistory::new(project_history_path(&project_root), 500)
       .append(&record)
