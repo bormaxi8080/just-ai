@@ -34,6 +34,8 @@
   dry-run preparation, with no execution or write tools;
 - MCP prompt discovery backed directly by the canonical project-agent files;
 - allowlisted MCP resources for canonical architecture documentation and ADRs;
+- black-box MCP stdio tests for framing, notification silence, and parse-error
+  recovery;
 - dedicated layered CI workflow;
 - local ADRs and Codebase Memory MCP ADR/index.
 

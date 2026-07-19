@@ -40,3 +40,7 @@ Resources:
 Resources are a build-time allowlist of canonical Markdown documents. The
 adapter exposes no path template, arbitrary filesystem read, subscription, or
 resource-change notification capability.
+
+Black-box integration tests spawn the built binary with piped stdio. They
+verify one JSON-RPC object per stdout line, silent notifications, and continued
+service after malformed JSON input. Stderr remains available for diagnostics.
