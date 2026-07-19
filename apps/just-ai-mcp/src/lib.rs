@@ -94,6 +94,14 @@ const RESOURCES: &[ResourceDefinition] = &[
       "../../../docs/architecture/adr/0004-native-provider-and-response-contracts.md"
     ),
   },
+  ResourceDefinition {
+    uri: "just-ai://docs/adr/0005-cross-platform-process-tree-cancellation",
+    name: "ADR 0005: Cross-platform process-tree cancellation",
+    description: "Decision for Unix process groups and Windows Job Objects.",
+    text: include_str!(
+      "../../../docs/architecture/adr/0005-cross-platform-process-tree-cancellation.md"
+    ),
+  },
 ];
 
 pub fn run_stdio() -> io::Result<()> {
@@ -433,7 +441,7 @@ mod tests {
       .pointer("/result/resources")
       .and_then(Value::as_array)
       .unwrap();
-    assert_eq!(resources.len(), 6);
+    assert_eq!(resources.len(), 7);
     assert!(resources.iter().all(|resource| {
       resource
         .get("uri")

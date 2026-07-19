@@ -36,7 +36,7 @@ Resources:
 
 - `just-ai://docs/architecture` — boundaries and verification gates;
 - `just-ai://docs/roadmap` — completed and deferred increments;
-- `just-ai://docs/adr/*` — the four accepted architecture decisions.
+- `just-ai://docs/adr/*` — the five accepted architecture decisions.
 
 Resources are a build-time allowlist of canonical Markdown documents. The
 adapter exposes no path template, arbitrary filesystem read, subscription, or

@@ -58,7 +58,7 @@ fn stdio_is_protocol_only_and_notifications_are_silent() {
       .pointer("/result/resources")
       .and_then(Value::as_array)
       .map(Vec::len),
-    Some(6)
+    Some(7)
   );
 }
 

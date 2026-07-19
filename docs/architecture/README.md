@@ -30,6 +30,8 @@ Presentation adapters must never accept or execute arbitrary shell strings.
 7. Secrets and excluded files never enter remote AI context.
 8. Provider transport is native Rust behind `AiProvider`; model responses must
    pass operation-specific JSON Schema validation before deserialization.
+9. Streaming cancellation terminates the recipe process tree through Unix
+   process groups or Windows Job Objects.
 
 ## Packages
 

@@ -20,6 +20,10 @@ use {
   },
 };
 
+mod process_tree;
+
+use process_tree::ProcessTree;
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct RunRequest {
   pub project_root: PathBuf,
@@ -176,8 +180,9 @@ impl RecipeExecutor {
 
     let mut command = self.command(&prepared.request);
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
-    configure_process_tree(&mut command);
+    let process_tree = ProcessTree::configure(&mut command)?;
     let mut child = command.spawn().map_err(io_error)?;
+    process_tree.attach(&mut child)?;
     let stdout = child
       .stdout
       .take()
@@ -196,7 +201,7 @@ impl RecipeExecutor {
     let mut cancelled = false;
     while closed < 2 {
       if cancellation.is_cancelled() && !cancelled {
-        terminate_process_tree(&mut child)?;
+        process_tree.terminate(&mut child)?;
         cancelled = true;
       }
       match receiver.recv_timeout(Duration::from_millis(25)) {
@@ -238,38 +243,6 @@ impl RecipeExecutor {
       .args(&request.arguments);
     command
   }
-}
-
-#[cfg(unix)]
-fn configure_process_tree(command: &mut Command) {
-  use std::os::unix::process::CommandExt;
-  command.process_group(0);
-}
-
-#[cfg(not(unix))]
-fn configure_process_tree(_command: &mut Command) {}
-
-#[cfg(unix)]
-fn terminate_process_tree(child: &mut std::process::Child) -> Result<(), ExecutionError> {
-  let process_group = i32::try_from(child.id())
-    .map_err(|_| ExecutionError("child process id exceeds platform range".into()))?;
-  // SAFETY: `process_group` is the positive PID returned by `Child::id`; its
-  // negation intentionally addresses only the isolated group configured above.
-  let result = unsafe { libc::kill(-process_group, libc::SIGKILL) };
-  if result == 0 {
-    return Ok(());
-  }
-  let error = std::io::Error::last_os_error();
-  if error.raw_os_error() == Some(libc::ESRCH) {
-    Ok(())
-  } else {
-    Err(io_error(error))
-  }
-}
-
-#[cfg(not(unix))]
-fn terminate_process_tree(child: &mut std::process::Child) -> Result<(), ExecutionError> {
-  child.kill().map_err(io_error)
 }
 
 #[derive(Clone, Copy)]
@@ -508,5 +481,42 @@ mod tests {
         ..
       }
     )));
+  }
+
+  #[cfg(windows)]
+  #[test]
+  fn cancellation_terminates_windows_job_descendants() {
+    use std::{fs, time::Instant};
+    let directory = tempfile::tempdir().unwrap();
+    let binary = directory.path().join("fake-just.cmd");
+    fs::write(
+      &binary,
+      "@echo off\r\nif \"%1\"==\"--dry-run\" (\r\n  echo powershell.exe -NoProfile -Command \"Start-Sleep -Seconds 30\"\r\n  exit /b 0\r\n)\r\nstart \"\" /b powershell.exe -NoProfile -Command \"Start-Sleep -Seconds 30\"\r\npowershell.exe -NoProfile -Command \"Start-Sleep -Seconds 30\"\r\n",
+    )
+    .unwrap();
+
+    let executor = RecipeExecutor::new(binary);
+    let prepared = executor
+      .prepare(RunRequest {
+        project_root: directory.path().into(),
+        recipe: "long-running".into(),
+        arguments: Vec::new(),
+      })
+      .unwrap();
+    let cancellation = CancellationToken::default();
+    let cancellation_handle = cancellation.clone();
+    let cancel_thread = thread::spawn(move || {
+      thread::sleep(Duration::from_millis(250));
+      cancellation_handle.cancel();
+    });
+    let started = Instant::now();
+    let completed = executor
+      .execute_streaming(&prepared, &RunConfirmation::None, &cancellation, |_| {})
+      .unwrap();
+    cancel_thread.join().unwrap();
+
+    assert!(started.elapsed() < Duration::from_secs(5));
+    assert!(!completed.status.success());
+    assert!(completed.cancelled);
   }
 }

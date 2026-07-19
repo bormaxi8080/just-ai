@@ -24,6 +24,7 @@
 - versioned rich JSON dump coverage for nested modules, interpolations,
   shebangs, and singular/plus/star parameter kinds;
 - Unix process-group isolation and whole-tree cancellation for streaming runs;
+- Windows Job Object ownership and whole-tree cancellation for streaming runs;
 - backward-compatible history observability for argv, cancellation, timestamps,
   and expandable redacted output in the desktop UI;
 - dedicated OpenAI Responses API adapter with strict Structured Outputs while
@@ -44,9 +45,8 @@
 
 1. Add adapters for additional local-model runtimes only when their semantics
    differ materially from Ollama and OpenAI-compatible chat completions.
-2. Add job-object cancellation on Windows; migrate JSONL history to SQLite if
-   querying requirements justify it.
-3. Add platform-specific JSON dump fixtures on Windows CI.
+2. Migrate JSONL history to SQLite if querying requirements justify it.
+3. Add more platform-specific JSON dump fixtures on Windows CI.
 
 Every increment follows `agent/commands/implement.md` and ends with a graph
 refresh and architecture review.
