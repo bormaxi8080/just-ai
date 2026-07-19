@@ -11,6 +11,8 @@ use {
 };
 
 const PROTOCOL_VERSION: &str = "2025-11-25";
+const SUPPORTED_PROTOCOL_VERSIONS: &[&str] =
+  &["2024-11-05", "2025-03-26", "2025-06-18", PROTOCOL_VERSION];
 
 pub fn run_stdio() -> io::Result<()> {
   let stdin = io::stdin();
@@ -30,8 +32,15 @@ pub fn run_stdio() -> io::Result<()> {
 }
 
 fn handle_line(line: &str) -> Option<Value> {
-  match serde_json::from_str(line) {
-    Ok(request) => handle_request(&request),
+  match serde_json::from_str::<Value>(line) {
+    Ok(request) if !request.is_object() => {
+      Some(protocol_error(Value::Null, -32600, "invalid request"))
+    }
+    Ok(request) => {
+      let id = request.get("id").cloned();
+      handle_request(&request)
+        .or_else(|| id.map(|id| protocol_error(id, -32600, "invalid request")))
+    }
     Err(error) => Some(protocol_error(
       Value::Null,
       -32700,
@@ -41,12 +50,15 @@ fn handle_line(line: &str) -> Option<Value> {
 }
 
 fn handle_request(request: &Value) -> Option<Value> {
+  if request.get("jsonrpc").and_then(Value::as_str) != Some("2.0") {
+    return None;
+  }
   let id = request.get("id")?.clone();
   let method = request.get("method").and_then(Value::as_str)?;
   let params = request.get("params").unwrap_or(&Value::Null);
   let result = match method {
     "initialize" => Ok(json!({
-      "protocolVersion": PROTOCOL_VERSION,
+      "protocolVersion": negotiate_protocol_version(params),
       "capabilities": { "tools": { "listChanged": false } },
       "serverInfo": { "name": "just-ai-mcp", "version": env!("CARGO_PKG_VERSION") }
     })),
@@ -63,6 +75,13 @@ fn handle_request(request: &Value) -> Option<Value> {
       "result": { "content": [{ "type": "text", "text": message }], "isError": true }
     }),
   })
+}
+
+fn negotiate_protocol_version(params: &Value) -> &str {
+  let requested = params.get("protocolVersion").and_then(Value::as_str);
+  requested
+    .filter(|version| SUPPORTED_PROTOCOL_VERSIONS.contains(version))
+    .unwrap_or(PROTOCOL_VERSION)
 }
 
 fn tool_definitions() -> Value {
@@ -198,7 +217,7 @@ mod tests {
   }
 
   #[test]
-  fn initialize_declares_current_tools_capability() {
+  fn initialize_negotiates_supported_protocol_and_declares_tools() {
     let response = handle_request(&json!({
       "jsonrpc":"2.0", "id":"init", "method":"initialize", "params": {
         "protocolVersion":"2024-11-05", "capabilities": {},
@@ -210,11 +229,41 @@ mod tests {
       response
         .pointer("/result/protocolVersion")
         .and_then(Value::as_str),
-      Some(PROTOCOL_VERSION)
+      Some("2024-11-05")
     );
     assert_eq!(
       response.pointer("/result/capabilities/tools/listChanged"),
       Some(&Value::Bool(false))
+    );
+  }
+
+  #[test]
+  fn unsupported_protocol_falls_back_to_latest() {
+    let response = handle_request(&json!({
+      "jsonrpc":"2.0", "id":1, "method":"initialize",
+      "params":{"protocolVersion":"2099-01-01"}
+    }))
+    .unwrap();
+    assert_eq!(
+      response
+        .pointer("/result/protocolVersion")
+        .and_then(Value::as_str),
+      Some(PROTOCOL_VERSION)
+    );
+  }
+
+  #[test]
+  fn malformed_request_returns_json_rpc_error() {
+    let response = handle_line(r#"{"jsonrpc":"2.0","id":7}"#).unwrap();
+    assert_eq!(
+      response.pointer("/error/code").and_then(Value::as_i64),
+      Some(-32600)
+    );
+    assert_eq!(response.get("id"), Some(&json!(7)));
+    let scalar = handle_line("42").unwrap();
+    assert_eq!(
+      scalar.pointer("/error/code").and_then(Value::as_i64),
+      Some(-32600)
     );
   }
 

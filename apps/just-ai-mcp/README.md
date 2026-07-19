@@ -10,6 +10,8 @@ cargo build --manifest-path apps/just-ai-mcp/Cargo.toml --release
 
 Configure the resulting `just-ai-mcp` binary as a stdio MCP server. The adapter
 implements newline-delimited JSON-RPC and writes no logs to stdout.
+It negotiates the published MCP protocol versions from `2024-11-05` through
+`2025-11-25`, falling back to its latest supported version for unknown clients.
 
 Tools:
 
