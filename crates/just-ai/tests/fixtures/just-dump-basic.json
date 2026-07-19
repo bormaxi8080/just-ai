@@ -1,0 +1,29 @@
+{
+  "source": "/workspace/justfile",
+  "warnings": ["fixture warning"],
+  "modules": {},
+  "recipes": {
+    "test": {
+      "name": "test",
+      "namepath": "test",
+      "doc": "Run tests",
+      "body": ["cargo test"],
+      "dependencies": [],
+      "parameters": [],
+      "private": false,
+      "quiet": false,
+      "shebang": false
+    },
+    "deploy": {
+      "name": "deploy",
+      "namepath": "deploy",
+      "doc": null,
+      "body": ["git push origin main"],
+      "dependencies": [{"recipe": "test"}],
+      "parameters": [{"name": "TARGET", "kind": "singular", "default": "production"}],
+      "private": false,
+      "quiet": false,
+      "shebang": false
+    }
+  }
+}

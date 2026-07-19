@@ -1,0 +1,66 @@
+# just-ai architecture
+
+`just-ai` is an optional layer around the unmodified `just` task runner.
+The project follows a core-first, ports-and-adapters architecture.
+
+## Product boundaries
+
+```text
+justfile -> just CLI -> just-ai-core <- CLI
+                                  <- Tauri GUI
+                                  <- optional daemon/MCP adapters
+```
+
+`just` owns parsing, dependency resolution, and recipe execution. `just-ai`
+uses the public JSON dump and process interface; it must not add AI behavior to
+the `just` crate or depend on private `just` modules.
+
+The core owns project inspection, deterministic risk analysis, policy,
+provider-neutral AI operations, validated change proposals, and run events.
+Presentation adapters must never accept or execute arbitrary shell strings.
+
+## Dependency rules
+
+1. The root `just` package does not depend on any `just-ai` package.
+2. Core code does not depend on Clap, Tauri, React, HTTP, or terminal output.
+3. CLI and GUI depend inward on core contracts.
+4. AI produces proposals. Local deterministic code validates and applies them.
+5. Recipe execution is always delegated to the configured `just` binary.
+6. File writes are workspace-confined, hash-guarded, validated, and atomic.
+7. Secrets and excluded files never enter remote AI context.
+8. Provider transport is native Rust behind `AiProvider`; model responses must
+   pass operation-specific JSON Schema validation before deserialization.
+
+## Packages
+
+The library exposes a small public API and a two-line binary. Adapter and core
+modules are physically separate while the CLI contract stays stable.
+
+```text
+crates/just-ai/src/
+  lib.rs             19-line public composition API
+  cli.rs             Clap adapter and terminal rendering
+  inspection.rs      just JSON dump boundary and project context
+  ai_responses.rs    typed model responses and JSON Schemas
+  proposal.rs        validation, rendering, diff, guarded application
+  provider.rs        native provider adapter
+  application/       execution, history, scanner, patch use cases
+  domain/            risk and policy rules
+
+apps/just-ai-gui/     separate Tauri/React adapter
+agent/                prompts and project-management commands
+```
+
+## Verification gates
+
+Every architecture increment must pass:
+
+```sh
+cargo fmt --check
+cargo clippy --package just-ai --all-targets -- -D warnings
+cargo test --package just-ai
+cargo test --lib
+```
+
+The Codebase Memory MCP index is refreshed after structural changes. Graph
+queries are used to verify that adapters depend on core and not vice versa.

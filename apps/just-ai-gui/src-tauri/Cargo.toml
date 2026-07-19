@@ -1,0 +1,18 @@
+[package]
+name = "just-ai-gui"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+just-ai = { path = "../../../crates/just-ai" }
+serde = { version = "1", features = ["derive"] }
+tauri = { version = "2", features = [] }
+
+# Keep the GUI lifecycle independent from the upstream `just` workspace.
+[workspace]

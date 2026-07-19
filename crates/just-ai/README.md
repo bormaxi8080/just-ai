@@ -28,10 +28,17 @@ just --list
 
 ```sh
 just-ai doctor
+just-ai run test
+just-ai run --yes container-build
+just-ai run --confirm "run deploy" deploy
+just-ai history
+just-ai history --json --limit 50
 just-ai suggest
 just-ai explain test
 just-ai add "run tests with coverage"
 just-ai export-context --pretty
+just-ai agent implement
+just-ai agent review-architecture
 ```
 
 Removing `just-ai` from a machine does not affect a valid `justfile`. Recipes
@@ -42,7 +49,6 @@ continue to run through `just` exactly as before.
 - Rust 1.89.0 or newer, matching the workspace `rust-version`.
 - A `just` binary available in `PATH`, or an explicit path passed with
   `--just-binary`.
-- `curl` for AI commands.
 
 On macOS with Homebrew-managed `rustup`, a typical setup is:
 
@@ -74,13 +80,46 @@ build the main binary:
 cargo build --bin just
 ```
 
+## Architecture
+
+The binary is a thin adapter over the `just-ai` Rust library. Deterministic
+domain rules and application use cases are shared with the separate Tauri GUI
+in `apps/just-ai-gui`. The upstream `just` package has no dependency on either
+layer and remains the source of truth for parsing and execution.
+
+See [`docs/architecture/README.md`](../../docs/architecture/README.md) and the
+ADRs in that directory before changing module boundaries.
+
+## Agent commands
+
+Versioned maintenance playbooks are shipped with the binary and can be printed
+without discovering a justfile or contacting an AI provider:
+
+```sh
+just-ai agent system-prompt
+just-ai agent implement
+just-ai agent review-architecture
+just-ai agent refresh-index
+```
+
+Their editable sources live in `agent/`. They require Codebase Memory MCP for
+code discovery and architectural impact checks.
+
+The current implementation status and subsequent increments are tracked in
+[`docs/architecture/roadmap.md`](../../docs/architecture/roadmap.md).
+
+AI context scanning is allowlist-based and bounded. Dotenv files are never
+read by the scanner, likely credential assignments are redacted, and the
+exported context reports truncation and redaction counts. Run history is local,
+per-project, bounded to 500 records, and stores only redacted output tails.
+
 ## Commands
 
 ### AI provider configuration
 
-AI commands use an OpenAI-compatible `/chat/completions` endpoint through
-`curl`. This keeps the Rust crate small and lets the same code work with OpenAI,
-Ollama's OpenAI-compatible endpoint, OpenRouter, and similar providers.
+AI commands use a native Rust client for OpenAI-compatible
+`/chat/completions` endpoints. The provider boundary works with OpenAI, Ollama,
+OpenRouter, and compatible services without spawning an external HTTP command.
 
 OpenAI:
 
@@ -105,12 +144,6 @@ export JUST_AI_PROVIDER=openai-compatible
 export JUST_AI_BASE_URL=https://api.example.com/v1
 export JUST_AI_MODEL=...
 export JUST_AI_API_KEY=...
-```
-
-Optional:
-
-```sh
-export JUST_AI_CURL=/path/to/curl
 ```
 
 `JUST_AI_API_KEY` is required unless `JUST_AI_PROVIDER=ollama` is used.
@@ -337,8 +370,8 @@ Important implementation pieces:
   integrations.
 - `RiskFinding` and `RiskLevel`: deterministic local risk analysis.
 - `DoctorReport`: summary view used by `doctor`.
-- `AiClient`: small OpenAI-compatible provider client implemented through
-  `curl`.
+- `AiProvider`: provider-neutral request boundary with a native
+  OpenAI-compatible implementation.
 - `RecipeProposal`: structured model output for `add`.
 
 ## Current Limitations

@@ -1,0 +1,26 @@
+:root { font-family: Inter, ui-sans-serif, system-ui; color: #e8e8e3; background: #101211; }
+* { box-sizing: border-box; }
+body { margin: 0; }
+main { min-height: 100vh; padding: 32px; }
+header { display: flex; align-items: end; justify-content: space-between; border-bottom: 1px solid #303531; padding-bottom: 24px; }
+h1 { margin: 4px 0 0; font-size: 38px; letter-spacing: -2px; }
+h2 { font-size: 25px; } h3 { margin-top: 28px; color: #aeb8b1; font-size: 13px; text-transform: uppercase; }
+.eyebrow { color: #87e8a5; font: 700 11px ui-monospace; letter-spacing: 1.6px; }
+form { display: flex; gap: 8px; }
+input, button { border: 1px solid #394039; border-radius: 8px; background: #1a1e1b; color: inherit; padding: 10px 12px; }
+button { cursor: pointer; } button:hover { border-color: #75c98e; }
+.layout { display: grid; grid-template-columns: minmax(260px, 340px) minmax(0, 1fr); gap: 24px; padding-top: 24px; }
+nav, article { border: 1px solid #2b302c; border-radius: 14px; background: #151816; padding: 20px; }
+nav h2 { display: flex; justify-content: space-between; }
+small { color: #778078; }
+.recipe { width: 100%; display: flex; justify-content: space-between; margin: 7px 0; text-align: left; }
+.recipe.selected { background: #253329; border-color: #67b77e; }
+i, [data-risk] { font-style: normal; text-transform: uppercase; font: 700 10px ui-monospace; }
+[data-risk="low"] { color: #87e8a5; } [data-risk="medium"] { color: #f1c86b; }
+[data-risk="high"], [data-risk="blocked"] { color: #ff7b72; }
+pre, .risk-card { background: #0d0f0e; border: 1px solid #292e2a; border-radius: 9px; padding: 16px; overflow: auto; }
+.error { color: #ff7b72; }
+.run-button { margin-top: 20px; background: #87e8a5; border-color: #87e8a5; color: #0d170f; font-weight: 750; }
+.cancel-button { margin: 20px 0 0 8px; border-color: #ff7b72; color: #ff7b72; }
+.run-output { margin-top: 28px; border-top: 1px solid #303531; }
+@media (max-width: 760px) { header { align-items: stretch; flex-direction: column; gap: 18px; } .layout { grid-template-columns: 1fr; } }
