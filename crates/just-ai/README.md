@@ -125,9 +125,15 @@ OpenAI:
 
 ```sh
 export JUST_AI_PROVIDER=openai
-export JUST_AI_MODEL=gpt-5-mini
+export JUST_AI_MODEL=gpt-5.6-terra
 export JUST_AI_API_KEY=...
 ```
+
+The `openai` provider uses the native Responses API with strict Structured
+Outputs. The response contract for each operation is sent as `text.format`
+JSON Schema and is validated again locally before deserialization. The default
+uses Terra with `reasoning.effort=none` to preserve the former mini model's
+balanced cost/latency role; override `JUST_AI_MODEL` for quality-first routing.
 
 Ollama:
 
@@ -145,6 +151,9 @@ export JUST_AI_BASE_URL=https://api.example.com/v1
 export JUST_AI_MODEL=...
 export JUST_AI_API_KEY=...
 ```
+
+`openai-compatible` and `ollama` retain the Chat Completions transport for
+servers that do not implement the OpenAI Responses API.
 
 `JUST_AI_API_KEY` is required unless `JUST_AI_PROVIDER=ollama` is used.
 

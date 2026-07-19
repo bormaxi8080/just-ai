@@ -26,13 +26,15 @@
 - Unix process-group isolation and whole-tree cancellation for streaming runs;
 - backward-compatible history observability for argv, cancellation, timestamps,
   and expandable redacted output in the desktop UI;
+- dedicated OpenAI Responses API adapter with strict Structured Outputs while
+  retaining Chat Completions for Ollama and OpenAI-compatible servers;
 - dedicated layered CI workflow;
 - local ADRs and Codebase Memory MCP ADR/index.
 
 ## Next increments
 
-1. Add provider-specific Responses API and local-model adapters where their
-   semantics differ from OpenAI-compatible chat completions.
+1. Add provider-specific local-model adapters where their semantics differ from
+   OpenAI-compatible chat completions.
 2. Add job-object cancellation on Windows; migrate JSONL history to SQLite if
    querying requirements justify it.
 3. Add platform-specific JSON dump fixtures on Windows CI.

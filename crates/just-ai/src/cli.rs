@@ -337,7 +337,7 @@ fn print_doctor_report(report: &DoctorReport) {
 }
 
 struct AiClient {
-  provider: provider::OpenAiCompatibleProvider,
+  provider: Box<dyn provider::AiProvider>,
 }
 
 impl AiClient {
@@ -349,6 +349,7 @@ impl AiClient {
     });
     let model = env::var("JUST_AI_MODEL").unwrap_or_else(|_| match provider.as_str() {
       "ollama" => "llama3.1".to_owned(),
+      "openai" => "gpt-5.6-terra".to_owned(),
       _ => "gpt-5-mini".to_owned(),
     });
     let api_key = env::var("JUST_AI_API_KEY").ok();
@@ -356,9 +357,18 @@ impl AiClient {
       return Err("JUST_AI_API_KEY is required unless JUST_AI_PROVIDER=ollama is used".into());
     }
 
-    Ok(Self {
-      provider: provider::OpenAiCompatibleProvider::new(base_url, model, api_key),
-    })
+    let provider: Box<dyn provider::AiProvider> = match provider.as_str() {
+      "openai" => Box::new(provider::OpenAiResponsesProvider::new(
+        base_url,
+        model,
+        api_key.expect("API key requirement checked above"),
+      )),
+      "ollama" | "openai-compatible" => Box::new(provider::OpenAiCompatibleProvider::new(
+        base_url, model, api_key,
+      )),
+      other => return Err(format!("unsupported JUST_AI_PROVIDER `{other}`").into()),
+    };
+    Ok(Self { provider })
   }
 
   fn complete_json<T>(&self, system: &str, user: &str) -> Result<T, Box<dyn Error>>
@@ -366,10 +376,16 @@ impl AiClient {
     T: for<'de> Deserialize<'de> + ResponseContract,
   {
     let content = provider::AiProvider::complete(
-      &self.provider,
+      self.provider.as_ref(),
       &provider::AiRequest {
         system: system.into(),
         user: user.into(),
+        schema_name: std::any::type_name::<T>()
+          .rsplit("::")
+          .next()
+          .unwrap_or("just_ai_response")
+          .to_owned(),
+        schema: T::schema(),
       },
     )?;
     let content = strip_json_fence(content.trim());
