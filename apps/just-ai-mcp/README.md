@@ -46,7 +46,8 @@ Black-box integration tests spawn the built binary with piped stdio. They
 verify one JSON-RPC object per stdout line, silent notifications, and continued
 service after malformed JSON input. Stderr remains available for diagnostics.
 
-The adapter source keeps protocol transport/dispatch in `lib.rs`, the
-compile-time prompt/resource allowlists in `catalog.rs`, and the read-only core
-integration in `tools.rs`. Catalog code has no filesystem or execution
-dependency; only the tool adapter depends on `just-ai` core.
+The adapter source keeps only newline-delimited stdio transport in `lib.rs`,
+JSON-RPC parsing and dispatch in `protocol.rs`, compile-time prompt/resource
+allowlists in `catalog.rs`, and the read-only core integration in `tools.rs`.
+Catalog code has no filesystem or execution dependency; only the tool adapter
+depends on `just-ai` core.
