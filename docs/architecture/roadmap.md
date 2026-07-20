@@ -54,6 +54,8 @@
 - shared JSON-dump process boundary and pre-dry-run rejection of function calls
   and `dotenv-command`;
 - bounded JSON-dump and dry-run subprocess capture with overflow termination;
+- bounded proposal validation and recipe-output collection, including a
+  backpressured streaming queue and process-tree termination on overflow;
 - dedicated layered CI workflow;
 - local ADRs and Codebase Memory MCP ADR/index.
 

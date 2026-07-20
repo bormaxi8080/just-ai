@@ -2,7 +2,7 @@ use {
   crate::{
     ProjectContext,
     ai_responses::{AddRecipeResponse, RecipeProposal},
-    application,
+    application, bounded_output,
     cli::print_section,
     domain::risk::{RiskFinding, RiskLevel},
     just_dump::DumpError,
@@ -173,11 +173,12 @@ fn validate_justfile(
   let temp_path = temporary_justfile_path(source)?;
   fs::write(&temp_path, proposed)?;
 
-  let output = Command::new(just_binary)
+  let mut command = Command::new(just_binary);
+  command
     .arg("--justfile")
     .arg(&temp_path)
-    .args(["--dump", "--dump-format", "json"])
-    .output();
+    .args(["--dump", "--dump-format", "json"]);
+  let output = bounded_output::capture(&mut command);
 
   let remove_result = fs::remove_file(&temp_path);
   let output = output?;

@@ -49,10 +49,10 @@ and refuses function-call expressions or `dotenv-command`. Upstream `just` may
 evaluate these during dry-run, so refusing the preview preserves the rule that
 authorization must happen before project-defined commands run.
 
-JSON dumps and dry-run previews are captured through a shared bounded process
-adapter. Stdout and stderr are each limited to 8 MiB; exceeding either limit
-terminates the child and returns an error instead of growing memory without a
-bound.
+JSON dumps, proposal validation, dry-run previews, and completed recipe output
+are bounded to 8 MiB per stream. Streaming execution also uses a bounded event
+queue; exceeding the byte limit terminates the recipe process tree and returns
+an error instead of growing memory without a bound.
 
 ## Requirements
 

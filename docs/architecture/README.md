@@ -42,8 +42,10 @@ Presentation adapters must never accept or execute arbitrary shell strings.
     allowlists before any filesystem or process operation.
 13. Preparation rejects structured function calls and `dotenv-command` before
     invoking dry-run, since upstream may evaluate them during preview.
-14. JSON-dump and dry-run subprocesses share a bounded capture adapter; stdout
-    and stderr are each capped at 8 MiB and overflow terminates the child.
+14. Every captured `just` subprocess stream is capped at 8 MiB. Dump,
+    validation, and dry-run use the shared capture adapter; recipe execution
+    additionally uses a bounded event queue and terminates its process tree on
+    overflow.
 
 ## Packages
 

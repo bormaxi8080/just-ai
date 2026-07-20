@@ -14,6 +14,19 @@ pub(crate) fn capture(command: &mut Command) -> Result<Output, CaptureError> {
   capture_with_limit(command, MAX_CAPTURE_BYTES)
 }
 
+pub(crate) fn extend_with_limit(
+  output: &mut Vec<u8>,
+  bytes: &[u8],
+  stream: &'static str,
+  limit: usize,
+) -> Result<(), CaptureError> {
+  if output.len().saturating_add(bytes.len()) > limit {
+    return Err(CaptureError::Limit { stream, limit });
+  }
+  output.extend_from_slice(bytes);
+  Ok(())
+}
+
 fn capture_with_limit(command: &mut Command, limit: usize) -> Result<Output, CaptureError> {
   command.stdout(Stdio::piped()).stderr(Stdio::piped());
   let mut child = command.spawn().map_err(CaptureError::Io)?;
@@ -90,10 +103,7 @@ fn read_bounded(
     if count == 0 {
       return Ok(output);
     }
-    if output.len().saturating_add(count) > limit {
-      return Err(CaptureError::Limit { stream, limit });
-    }
-    output.extend_from_slice(&buffer[..count]);
+    extend_with_limit(&mut output, &buffer[..count], stream, limit)?;
   }
 }
 
