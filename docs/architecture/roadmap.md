@@ -47,6 +47,7 @@
   requests and preserves valid request identifiers in errors;
 - bounded MCP stdio frames with recovery after oversized and non-UTF-8 input;
 - server-controlled MCP `just` executable with no client-provided binary path;
+- working-directory-confined MCP tools with no client-provided project root;
 - dedicated layered CI workflow;
 - local ADRs and Codebase Memory MCP ADR/index.
 

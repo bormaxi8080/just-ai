@@ -34,6 +34,8 @@ Presentation adapters must never accept or execute arbitrary shell strings.
    process groups or Windows Job Objects.
 10. MCP clients cannot select the `just` executable; that process boundary is
     controlled by the server environment.
+11. Each MCP server is scoped to its process working directory; clients cannot
+    redirect inspection or preparation to another project root.
 
 ## Packages
 

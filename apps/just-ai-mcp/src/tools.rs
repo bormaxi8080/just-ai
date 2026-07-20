@@ -4,7 +4,11 @@ use {
     inspect_project_at,
   },
   serde_json::{Value, json},
-  std::{ffi::OsStr, path::PathBuf},
+  std::{
+    env,
+    ffi::OsStr,
+    path::{Path, PathBuf},
+  },
 };
 
 pub(super) fn tool_definitions() -> Value {
@@ -12,29 +16,27 @@ pub(super) fn tool_definitions() -> Value {
     {
       "name": "inspect_project",
       "description": "Inspect recipes and deterministic risk findings through just's JSON dump without executing recipes.",
-      "inputSchema": path_schema(false),
+      "inputSchema": tool_schema(false),
       "annotations": { "readOnlyHint": true, "destructiveHint": false }
     },
     {
       "name": "doctor",
       "description": "Return deterministic risk reports for recipes without executing them.",
-      "inputSchema": path_schema(false),
+      "inputSchema": tool_schema(false),
       "annotations": { "readOnlyHint": true, "destructiveHint": false }
     },
     {
       "name": "prepare_run",
       "description": "Dry-run a recipe and return preview, risk, and confirmation policy. Never executes the recipe.",
-      "inputSchema": path_schema(true),
+      "inputSchema": tool_schema(true),
       "annotations": { "readOnlyHint": true, "destructiveHint": false }
     }
   ])
 }
 
-fn path_schema(include_recipe: bool) -> Value {
-  let mut properties = json!({
-    "project_root": { "type": "string" }
-  });
-  let mut required = vec!["project_root"];
+fn tool_schema(include_recipe: bool) -> Value {
+  let mut properties = json!({});
+  let mut required = Vec::new();
   if include_recipe {
     properties["recipe"] = json!({ "type": "string" });
     properties["arguments"] =
@@ -45,24 +47,24 @@ fn path_schema(include_recipe: bool) -> Value {
 }
 
 pub(super) fn call_tool(params: &Value) -> Result<Value, String> {
-  call_tool_with_binary(params, OsStr::new("just"))
+  let project_root = env::current_dir().map_err(|error| error.to_string())?;
+  call_tool_at(params, OsStr::new("just"), &project_root)
 }
 
-fn call_tool_with_binary(params: &Value, just_binary: &OsStr) -> Result<Value, String> {
+fn call_tool_at(params: &Value, just_binary: &OsStr, project_root: &Path) -> Result<Value, String> {
   let name = params
     .get("name")
     .and_then(Value::as_str)
     .ok_or("tool name is required")?;
   let arguments = params.get("arguments").unwrap_or(&Value::Null);
-  let project_root = string_argument(arguments, "project_root")?;
   let value = match name {
     "inspect_project" => serde_json::to_value(
-      inspect_project_at(just_binary, &project_root).map_err(|error| error.to_string())?,
+      inspect_project_at(just_binary, project_root).map_err(|error| error.to_string())?,
     )
     .map_err(|error| error.to_string())?,
     "doctor" => {
       let context =
-        inspect_project_at(just_binary, &project_root).map_err(|error| error.to_string())?;
+        inspect_project_at(just_binary, project_root).map_err(|error| error.to_string())?;
       json!({ "recipes": context.recipes.into_iter().map(|recipe| json!({
         "namepath": recipe.namepath, "risk": recipe.risk, "findings": recipe.risks
       })).collect::<Vec<_>>() })
@@ -121,14 +123,15 @@ mod tests {
     permissions.set_mode(0o700);
     fs::set_permissions(&binary, permissions).unwrap();
 
-    let response = call_tool_with_binary(
+    let response = call_tool_at(
       &json!({
         "name":"prepare_run", "arguments": {
-          "project_root": directory.path(), "just_binary":"/client/cannot/select/this",
+          "project_root":"/client/cannot/select/this", "just_binary":"/client/cannot/select/this",
           "recipe":"test", "arguments":[]
         }
       }),
       binary.as_os_str(),
+      directory.path(),
     )
     .unwrap();
 

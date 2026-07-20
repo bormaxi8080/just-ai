@@ -25,9 +25,11 @@ Tools:
 - `doctor` — deterministic per-recipe risk reports;
 - `prepare_run` — `just --dry-run` preview, risk, and confirmation policy.
 
-Tool inputs cannot select an executable. The adapter always resolves `just`
-from its server-controlled process environment; the MCP client can provide
-only project, recipe, and recipe-argument data.
+Tool inputs cannot select an executable or project root. The adapter always
+resolves `just` from its server-controlled process environment and operates on
+the server working directory; the MCP client can provide only recipe and
+recipe-argument data. Start one adapter process per project with that project
+as its working directory.
 
 Prompts:
 

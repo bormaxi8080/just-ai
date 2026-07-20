@@ -136,6 +136,11 @@ mod tests {
         .pointer("/inputSchema/properties/just_binary")
         .is_none()
     }));
+    assert!(tools.iter().all(|tool| {
+      tool
+        .pointer("/inputSchema/properties/project_root")
+        .is_none()
+    }));
   }
 
   #[test]
