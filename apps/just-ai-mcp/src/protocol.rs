@@ -12,8 +12,8 @@ const PROTOCOL_VERSION: &str = "2025-11-25";
 const SUPPORTED_PROTOCOL_VERSIONS: &[&str] =
   &["2024-11-05", "2025-03-26", "2025-06-18", PROTOCOL_VERSION];
 
-pub(super) fn handle_line(line: &str) -> Option<Value> {
-  match serde_json::from_str::<Value>(line) {
+pub(super) fn handle_message(message: &[u8]) -> Option<Value> {
+  match serde_json::from_slice::<Value>(message) {
     Ok(request) if !request.is_object() => {
       Some(protocol_error(Value::Null, -32600, "invalid request"))
     }
@@ -24,6 +24,10 @@ pub(super) fn handle_line(line: &str) -> Option<Value> {
       &format!("parse error: {error}"),
     )),
   }
+}
+
+pub(super) fn oversized_request() -> Value {
+  protocol_error(Value::Null, -32600, "request exceeds maximum size")
 }
 
 fn handle_request(request: &Value) -> Option<Value> {
@@ -316,7 +320,7 @@ mod tests {
 
   #[test]
   fn malformed_requests_return_json_rpc_errors() {
-    let missing_method = handle_line(r#"{"jsonrpc":"2.0","id":7}"#).unwrap();
+    let missing_method = handle_message(br#"{"jsonrpc":"2.0","id":7}"#).unwrap();
     assert_eq!(
       missing_method
         .pointer("/error/code")
@@ -325,7 +329,7 @@ mod tests {
     );
     assert_eq!(missing_method.get("id"), Some(&json!(7)));
 
-    let invalid_notification = handle_line(r#"{"jsonrpc":"1.0","method":"ping"}"#).unwrap();
+    let invalid_notification = handle_message(br#"{"jsonrpc":"1.0","method":"ping"}"#).unwrap();
     assert_eq!(
       invalid_notification
         .pointer("/error/code")
@@ -334,20 +338,20 @@ mod tests {
     );
     assert_eq!(invalid_notification.get("id"), Some(&Value::Null));
 
-    let invalid_id = handle_line(r#"{"jsonrpc":"2.0","id":true,"method":"ping"}"#).unwrap();
+    let invalid_id = handle_message(br#"{"jsonrpc":"2.0","id":true,"method":"ping"}"#).unwrap();
     assert_eq!(
       invalid_id.pointer("/error/code").and_then(Value::as_i64),
       Some(-32600)
     );
     assert_eq!(invalid_id.get("id"), Some(&Value::Null));
 
-    let scalar = handle_line("42").unwrap();
+    let scalar = handle_message(b"42").unwrap();
     assert_eq!(
       scalar.pointer("/error/code").and_then(Value::as_i64),
       Some(-32600)
     );
 
-    let parse_error = handle_line("{").unwrap();
+    let parse_error = handle_message(b"{").unwrap();
     assert_eq!(
       parse_error.pointer("/error/code").and_then(Value::as_i64),
       Some(-32700)
@@ -357,7 +361,8 @@ mod tests {
 
   #[test]
   fn unknown_method_preserves_request_id() {
-    let response = handle_line(r#"{"jsonrpc":"2.0","id":"unknown","method":"missing"}"#).unwrap();
+    let response =
+      handle_message(br#"{"jsonrpc":"2.0","id":"unknown","method":"missing"}"#).unwrap();
     assert_eq!(
       response.pointer("/error/code").and_then(Value::as_i64),
       Some(-32601)

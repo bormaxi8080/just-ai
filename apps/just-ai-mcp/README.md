@@ -15,6 +15,9 @@ It negotiates the published MCP protocol versions from `2024-11-05` through
 Valid JSON-RPC notifications remain silent, while malformed envelopes receive
 standard parse or invalid-request errors with a safe `null` identifier when no
 valid request identifier exists.
+Input frames are streamed with a 1 MiB bound. Oversized or non-UTF-8 frames are
+rejected without terminating the server, and processing resumes at the next
+newline-delimited frame.
 
 Tools:
 

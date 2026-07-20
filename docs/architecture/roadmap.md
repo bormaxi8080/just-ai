@@ -45,6 +45,7 @@
 - MCP newline transport isolated from JSON-RPC parsing and dispatch;
 - JSON-RPC envelope validation that distinguishes notifications from malformed
   requests and preserves valid request identifiers in errors;
+- bounded MCP stdio frames with recovery after oversized and non-UTF-8 input;
 - dedicated layered CI workflow;
 - local ADRs and Codebase Memory MCP ADR/index.
 

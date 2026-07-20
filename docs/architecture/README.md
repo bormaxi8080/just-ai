@@ -63,7 +63,9 @@ It also publishes this architecture guide, roadmap, and accepted ADRs through
 a fixed `just-ai://docs/*` resource allowlist. No client-supplied path reaches
 the filesystem. The protocol layer validates JSON-RPC envelopes before
 classifying messages as notifications, so malformed notification-shaped input
-receives a standard error while valid notifications remain silent.
+receives a standard error while valid notifications remain silent. The stdio
+transport bounds each input frame to 1 MiB and recovers at the next newline
+after oversized or non-UTF-8 input.
 
 ## Verification gates
 
