@@ -615,7 +615,7 @@ mod tests {
     let binary = directory.path().join("fake-just");
     fs::write(
       &binary,
-      "#!/bin/sh\nif [ \"$1\" = \"--dump\" ]; then echo '{}'; exit 0; fi\nif [ \"$1\" = \"--dry-run\" ]; then echo 'printf 12345'; exit 0; fi\nprintf 12345\nsleep 30 &\nwait\n",
+      "#!/bin/sh\nif [ \"$1\" = \"--dump\" ]; then echo '{}'; exit 0; fi\nif [ \"$1\" = \"--dry-run\" ]; then echo 'printf 12345'; exit 0; fi\nsleep 30 &\nprintf 12345\nwait\n",
     )
     .unwrap();
     let mut permissions = fs::metadata(&binary).unwrap().permissions();
