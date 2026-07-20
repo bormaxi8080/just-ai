@@ -49,6 +49,8 @@ Presentation adapters must never accept or execute arbitrary shell strings.
 15. Allowlisted AI context uses bounded prefix reads. Exact proposal and atomic
     write paths reject non-UTF-8 or larger-than-1-MiB files instead of
     truncating content that will be compared or written.
+16. JSONL history is capped at 500 records, 64 KiB per serialized record, and
+    about 32 MiB per file. Only the newest retained lines are deserialized.
 
 ## Packages
 

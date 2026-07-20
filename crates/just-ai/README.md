@@ -123,8 +123,9 @@ AI context scanning is allowlist-based and reads at most 16 KiB per file and
 assignments are redacted, and exported context reports truncation and redaction
 counts. Files used for exact proposal review and atomic writes must be valid
 UTF-8 and no larger than 1 MiB; oversized input is rejected, not silently
-truncated. Run history is local,
-per-project, bounded to 500 records, and stores only redacted output tails.
+truncated. Run history is local and per-project. It retains at most 500 records,
+limits each JSONL record to 64 KiB and the file to about 32 MiB, and stores only
+redacted output tails.
 
 ## Commands
 

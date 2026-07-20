@@ -3,17 +3,21 @@ use {
     execution::{CompletedRun, RunRequest},
     project_context::redact_text,
   },
+  crate::bounded_file,
   serde::{Deserialize, Serialize},
   std::{
     fs,
     hash::{DefaultHasher, Hash, Hasher},
-    io::{self, BufRead, BufReader, Write},
+    io::{self, Write},
     path::{Path, PathBuf},
   },
   tempfile::NamedTempFile,
 };
 
 const OUTPUT_TAIL_BYTES: usize = 16 * 1024;
+const MAX_HISTORY_RECORDS: usize = 500;
+const MAX_HISTORY_RECORD_BYTES: usize = 64 * 1024;
+const MAX_HISTORY_FILE_BYTES: usize = MAX_HISTORY_RECORDS * (MAX_HISTORY_RECORD_BYTES + 1);
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct RunRecord {
@@ -90,30 +94,46 @@ impl JsonLineHistory {
   pub fn new(path: impl Into<PathBuf>, retained_records: usize) -> Self {
     Self {
       path: path.into(),
-      retained_records,
+      retained_records: retained_records.min(MAX_HISTORY_RECORDS),
     }
   }
 
   fn read_all(&self) -> io::Result<Vec<RunRecord>> {
-    let file = match fs::File::open(&self.path) {
-      Ok(file) => file,
+    let content = match bounded_file::read_utf8(&self.path, MAX_HISTORY_FILE_BYTES) {
+      Ok(content) => content,
       Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
       Err(error) => return Err(error),
     };
-    BufReader::new(file)
+    let mut records = content
       .lines()
-      .filter(|line| line.as_ref().map_or(true, |line| !line.trim().is_empty()))
+      .filter(|line| !line.trim().is_empty())
+      .rev()
+      .take(self.retained_records)
       .map(|line| {
-        let line = line?;
-        serde_json::from_str(&line)
+        if line.len() > MAX_HISTORY_RECORD_BYTES {
+          return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("history record exceeds {MAX_HISTORY_RECORD_BYTES} byte limit"),
+          ));
+        }
+        serde_json::from_str(line)
           .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
       })
-      .collect()
+      .collect::<io::Result<Vec<_>>>()?;
+    records.reverse();
+    Ok(records)
   }
 }
 
 impl RunHistory for JsonLineHistory {
   fn append(&self, record: &RunRecord) -> io::Result<()> {
+    let encoded = serde_json::to_vec(record).map_err(io::Error::other)?;
+    if encoded.len() > MAX_HISTORY_RECORD_BYTES {
+      return Err(io::Error::new(
+        io::ErrorKind::InvalidInput,
+        format!("history record exceeds {MAX_HISTORY_RECORD_BYTES} byte limit"),
+      ));
+    }
     let mut records = self.read_all()?;
     records.push(record.clone());
     let keep_from = records.len().saturating_sub(self.retained_records);
@@ -166,6 +186,52 @@ mod tests {
       history.recent(10).unwrap(),
       [record("three"), record("two")]
     );
+  }
+
+  #[test]
+  fn constructor_caps_retention() {
+    let history = JsonLineHistory::new("history.jsonl", usize::MAX);
+    assert_eq!(history.retained_records, MAX_HISTORY_RECORDS);
+  }
+
+  #[test]
+  fn read_keeps_only_newest_configured_records() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("history.jsonl");
+    let content = [record("one"), record("two"), record("three")]
+      .into_iter()
+      .map(|record| serde_json::to_string(&record).unwrap())
+      .collect::<Vec<_>>()
+      .join("\n");
+    fs::write(&path, format!("{content}\n")).unwrap();
+
+    assert_eq!(
+      JsonLineHistory::new(path, 2).recent(10).unwrap(),
+      [record("three"), record("two")]
+    );
+  }
+
+  #[test]
+  fn rejects_oversized_stored_record() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("history.jsonl");
+    fs::write(&path, "x".repeat(MAX_HISTORY_RECORD_BYTES + 1)).unwrap();
+
+    let error = JsonLineHistory::new(path, 5).recent(5).unwrap_err();
+    assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+  }
+
+  #[test]
+  fn rejects_oversized_new_record_before_creating_file() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("history.jsonl");
+    let mut oversized = record("oversized");
+    oversized.arguments = vec!["x".repeat(MAX_HISTORY_RECORD_BYTES)];
+    let history = JsonLineHistory::new(&path, 5);
+
+    let error = history.append(&oversized).unwrap_err();
+    assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+    assert!(!path.exists());
   }
 
   #[test]
