@@ -50,7 +50,8 @@ crates/just-ai/src/
   domain/            risk and policy rules
 
 apps/just-ai-gui/     separate Tauri/React adapter
-apps/just-ai-mcp/     separate read-only JSON-RPC/stdio adapter
+apps/just-ai-mcp/     separate read-only JSON-RPC/stdio adapter with an isolated
+                     compile-time prompt/resource catalog
 agent/                canonical prompts and project-management commands
 ```
 

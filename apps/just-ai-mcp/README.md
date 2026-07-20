@@ -45,3 +45,7 @@ resource-change notification capability.
 Black-box integration tests spawn the built binary with piped stdio. They
 verify one JSON-RPC object per stdout line, silent notifications, and continued
 service after malformed JSON input. Stderr remains available for diagnostics.
+
+The adapter source keeps protocol transport/dispatch in `lib.rs` and the
+compile-time prompt/resource allowlists in `catalog.rs`. Catalog code has no
+filesystem or execution dependency.

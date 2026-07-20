@@ -40,6 +40,7 @@
 - black-box MCP stdio tests for framing, notification silence, and parse-error
   recovery;
 - shared CLI/MCP `verify` agent command for layered quality gates;
+- MCP prompt/resource catalog isolated from protocol transport and tool code;
 - dedicated layered CI workflow;
 - local ADRs and Codebase Memory MCP ADR/index.
 
