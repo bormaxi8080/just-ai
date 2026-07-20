@@ -46,6 +46,7 @@
 - JSON-RPC envelope validation that distinguishes notifications from malformed
   requests and preserves valid request identifiers in errors;
 - bounded MCP stdio frames with recovery after oversized and non-UTF-8 input;
+- server-controlled MCP `just` executable with no client-provided binary path;
 - dedicated layered CI workflow;
 - local ADRs and Codebase Memory MCP ADR/index.
 

@@ -32,6 +32,8 @@ Presentation adapters must never accept or execute arbitrary shell strings.
    pass operation-specific JSON Schema validation before deserialization.
 9. Streaming cancellation terminates the recipe process tree through Unix
    process groups or Windows Job Objects.
+10. MCP clients cannot select the `just` executable; that process boundary is
+    controlled by the server environment.
 
 ## Packages
 

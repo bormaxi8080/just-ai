@@ -4,7 +4,7 @@ use {
     inspect_project_at,
   },
   serde_json::{Value, json},
-  std::path::PathBuf,
+  std::{ffi::OsStr, path::PathBuf},
 };
 
 pub(super) fn tool_definitions() -> Value {
@@ -32,8 +32,7 @@ pub(super) fn tool_definitions() -> Value {
 
 fn path_schema(include_recipe: bool) -> Value {
   let mut properties = json!({
-    "project_root": { "type": "string" },
-    "just_binary": { "type": "string", "default": "just" }
+    "project_root": { "type": "string" }
   });
   let mut required = vec!["project_root"];
   if include_recipe {
@@ -46,16 +45,16 @@ fn path_schema(include_recipe: bool) -> Value {
 }
 
 pub(super) fn call_tool(params: &Value) -> Result<Value, String> {
+  call_tool_with_binary(params, OsStr::new("just"))
+}
+
+fn call_tool_with_binary(params: &Value, just_binary: &OsStr) -> Result<Value, String> {
   let name = params
     .get("name")
     .and_then(Value::as_str)
     .ok_or("tool name is required")?;
   let arguments = params.get("arguments").unwrap_or(&Value::Null);
   let project_root = string_argument(arguments, "project_root")?;
-  let just_binary = arguments
-    .get("just_binary")
-    .and_then(Value::as_str)
-    .unwrap_or("just");
   let value = match name {
     "inspect_project" => serde_json::to_value(
       inspect_project_at(just_binary, &project_root).map_err(|error| error.to_string())?,
@@ -101,4 +100,44 @@ fn string_argument(arguments: &Value, name: &str) -> Result<String, String> {
     .and_then(Value::as_str)
     .map(str::to_owned)
     .ok_or_else(|| format!("`{name}` must be a string"))
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[cfg(unix)]
+  #[test]
+  fn prepare_tool_uses_dry_run_with_internal_binary_seam() {
+    use std::{fs, os::unix::fs::PermissionsExt};
+    let directory = tempfile::tempdir().unwrap();
+    let binary = directory.path().join("fake-just");
+    fs::write(
+      &binary,
+      "#!/bin/sh\n[ \"$1\" = \"--dry-run\" ] || exit 91\necho 'echo safe'\n",
+    )
+    .unwrap();
+    let mut permissions = fs::metadata(&binary).unwrap().permissions();
+    permissions.set_mode(0o700);
+    fs::set_permissions(&binary, permissions).unwrap();
+
+    let response = call_tool_with_binary(
+      &json!({
+        "name":"prepare_run", "arguments": {
+          "project_root": directory.path(), "just_binary":"/client/cannot/select/this",
+          "recipe":"test", "arguments":[]
+        }
+      }),
+      binary.as_os_str(),
+    )
+    .unwrap();
+
+    assert_eq!(response.get("isError"), Some(&Value::Bool(false)));
+    assert_eq!(
+      response
+        .pointer("/structuredContent/preview/0")
+        .and_then(Value::as_str),
+      Some("echo safe")
+    );
+  }
 }

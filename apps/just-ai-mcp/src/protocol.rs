@@ -131,6 +131,11 @@ mod tests {
         .iter()
         .all(|tool| tool.get("name").and_then(Value::as_str) != Some("execute_run"))
     );
+    assert!(tools.iter().all(|tool| {
+      tool
+        .pointer("/inputSchema/properties/just_binary")
+        .is_none()
+    }));
   }
 
   #[test]
@@ -368,39 +373,5 @@ mod tests {
       Some(-32601)
     );
     assert_eq!(response.get("id"), Some(&json!("unknown")));
-  }
-
-  #[cfg(unix)]
-  #[test]
-  fn prepare_tool_uses_dry_run() {
-    use std::{fs, os::unix::fs::PermissionsExt};
-    let directory = tempfile::tempdir().unwrap();
-    let binary = directory.path().join("fake-just");
-    fs::write(
-      &binary,
-      "#!/bin/sh\n[ \"$1\" = \"--dry-run\" ] || exit 91\necho 'echo safe'\n",
-    )
-    .unwrap();
-    let mut permissions = fs::metadata(&binary).unwrap().permissions();
-    permissions.set_mode(0o700);
-    fs::set_permissions(&binary, permissions).unwrap();
-    let response = handle_request(&json!({
-      "jsonrpc":"2.0", "id":2, "method":"tools/call", "params": {
-        "name":"prepare_run", "arguments": {
-          "project_root": directory.path(), "just_binary": binary, "recipe":"test", "arguments":[]
-        }
-      }
-    }))
-    .unwrap();
-    assert_eq!(
-      response.pointer("/result/isError"),
-      Some(&Value::Bool(false))
-    );
-    assert_eq!(
-      response
-        .pointer("/result/structuredContent/preview/0")
-        .and_then(Value::as_str),
-      Some("echo safe")
-    );
   }
 }
