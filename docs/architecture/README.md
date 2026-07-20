@@ -36,6 +36,8 @@ Presentation adapters must never accept or execute arbitrary shell strings.
     controlled by the server environment.
 11. Each MCP server is scoped to its process working directory; clients cannot
     redirect inspection or preparation to another project root.
+12. MCP tool arguments are runtime-validated against explicit per-tool
+    allowlists before any filesystem or process operation.
 
 ## Packages
 

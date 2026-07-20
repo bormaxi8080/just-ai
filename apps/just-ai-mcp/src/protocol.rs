@@ -151,6 +151,26 @@ mod tests {
   }
 
   #[test]
+  fn rejected_tool_arguments_are_returned_as_tool_errors() {
+    let response = handle_request(&json!({
+      "jsonrpc":"2.0", "id":4, "method":"tools/call", "params": {
+        "name":"inspect_project", "arguments":{"project_root":"/untrusted"}
+      }
+    }))
+    .unwrap();
+    assert_eq!(
+      response.pointer("/result/isError"),
+      Some(&Value::Bool(true))
+    );
+    assert_eq!(
+      response
+        .pointer("/result/content/0/text")
+        .and_then(Value::as_str),
+      Some("unsupported argument `project_root` for `inspect_project`")
+    );
+  }
+
+  #[test]
   fn initialize_negotiates_supported_protocol_and_declares_capabilities() {
     let response = handle_request(&json!({
       "jsonrpc":"2.0", "id":"init", "method":"initialize", "params": {

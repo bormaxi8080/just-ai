@@ -3,7 +3,7 @@ use {
     application::execution::{RecipeExecutor, RunRequest},
     inspect_project_at,
   },
-  serde_json::{Value, json},
+  serde_json::{Map, Value, json},
   std::{
     env,
     ffi::OsStr,
@@ -56,7 +56,23 @@ fn call_tool_at(params: &Value, just_binary: &OsStr, project_root: &Path) -> Res
     .get("name")
     .and_then(Value::as_str)
     .ok_or("tool name is required")?;
-  let arguments = params.get("arguments").unwrap_or(&Value::Null);
+  let allowed_arguments: &[&str] = match name {
+    "inspect_project" | "doctor" => &[],
+    "prepare_run" => &["recipe", "arguments"],
+    _ => return Err(format!("unknown tool `{name}`")),
+  };
+  let empty_arguments = Map::new();
+  let arguments = match params.get("arguments") {
+    None | Some(Value::Null) => &empty_arguments,
+    Some(Value::Object(arguments)) => arguments,
+    Some(_) => return Err("`arguments` must be an object".to_owned()),
+  };
+  if let Some(argument) = arguments
+    .keys()
+    .find(|argument| !allowed_arguments.contains(&argument.as_str()))
+  {
+    return Err(format!("unsupported argument `{argument}` for `{name}`"));
+  }
   let value = match name {
     "inspect_project" => serde_json::to_value(
       inspect_project_at(just_binary, project_root).map_err(|error| error.to_string())?,
@@ -88,7 +104,7 @@ fn call_tool_at(params: &Value, just_binary: &OsStr, project_root: &Path) -> Res
       )
       .map_err(|error| error.to_string())?
     }
-    _ => return Err(format!("unknown tool `{name}`")),
+    _ => unreachable!("tool name validated before argument parsing"),
   };
   let text = serde_json::to_string(&value).map_err(|error| error.to_string())?;
   Ok(
@@ -96,7 +112,7 @@ fn call_tool_at(params: &Value, just_binary: &OsStr, project_root: &Path) -> Res
   )
 }
 
-fn string_argument(arguments: &Value, name: &str) -> Result<String, String> {
+fn string_argument(arguments: &Map<String, Value>, name: &str) -> Result<String, String> {
   arguments
     .get(name)
     .and_then(Value::as_str)
@@ -126,7 +142,6 @@ mod tests {
     let response = call_tool_at(
       &json!({
         "name":"prepare_run", "arguments": {
-          "project_root":"/client/cannot/select/this", "just_binary":"/client/cannot/select/this",
           "recipe":"test", "arguments":[]
         }
       }),
@@ -142,5 +157,32 @@ mod tests {
         .and_then(Value::as_str),
       Some("echo safe")
     );
+  }
+
+  #[test]
+  fn rejects_client_controlled_and_unknown_arguments() {
+    let directory = tempfile::tempdir().unwrap();
+    for argument in ["project_root", "just_binary", "unexpected"] {
+      let response = call_tool_at(
+        &json!({"name":"inspect_project", "arguments": {argument:"value"}}),
+        OsStr::new("unused"),
+        directory.path(),
+      );
+      assert_eq!(
+        response.unwrap_err(),
+        format!("unsupported argument `{argument}` for `inspect_project`")
+      );
+    }
+  }
+
+  #[test]
+  fn rejects_non_object_arguments() {
+    let directory = tempfile::tempdir().unwrap();
+    let response = call_tool_at(
+      &json!({"name":"doctor", "arguments": []}),
+      OsStr::new("unused"),
+      directory.path(),
+    );
+    assert_eq!(response.unwrap_err(), "`arguments` must be an object");
   }
 }

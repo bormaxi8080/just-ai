@@ -29,7 +29,9 @@ Tool inputs cannot select an executable or project root. The adapter always
 resolves `just` from its server-controlled process environment and operates on
 the server working directory; the MCP client can provide only recipe and
 recipe-argument data. Start one adapter process per project with that project
-as its working directory.
+as its working directory. Tool arguments are checked against per-tool
+allowlists at runtime, so client-controlled boundary fields and unknown keys
+are rejected rather than ignored.
 
 Prompts:
 
