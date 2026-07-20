@@ -43,6 +43,8 @@
 - MCP prompt/resource catalog isolated from protocol transport and tool code;
 - MCP read-only core tools isolated from protocol transport and dispatch;
 - MCP newline transport isolated from JSON-RPC parsing and dispatch;
+- JSON-RPC envelope validation that distinguishes notifications from malformed
+  requests and preserves valid request identifiers in errors;
 - dedicated layered CI workflow;
 - local ADRs and Codebase Memory MCP ADR/index.
 

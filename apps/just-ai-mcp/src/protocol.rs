@@ -17,11 +17,7 @@ pub(super) fn handle_line(line: &str) -> Option<Value> {
     Ok(request) if !request.is_object() => {
       Some(protocol_error(Value::Null, -32600, "invalid request"))
     }
-    Ok(request) => {
-      let id = request.get("id").cloned();
-      handle_request(&request)
-        .or_else(|| id.map(|id| protocol_error(id, -32600, "invalid request")))
-    }
+    Ok(request) => handle_request(&request),
     Err(error) => Some(protocol_error(
       Value::Null,
       -32700,
@@ -31,11 +27,30 @@ pub(super) fn handle_line(line: &str) -> Option<Value> {
 }
 
 fn handle_request(request: &Value) -> Option<Value> {
-  if request.get("jsonrpc").and_then(Value::as_str) != Some("2.0") {
-    return None;
+  let id = match request.get("id") {
+    None => None,
+    Some(id @ (Value::Null | Value::String(_) | Value::Number(_))) => Some(id.clone()),
+    Some(_) => return Some(protocol_error(Value::Null, -32600, "invalid request")),
+  };
+  let Some(method) = request.get("method").and_then(Value::as_str) else {
+    return Some(protocol_error(
+      id.unwrap_or(Value::Null),
+      -32600,
+      "invalid request",
+    ));
+  };
+  if request.get("jsonrpc").and_then(Value::as_str) != Some("2.0")
+    || request
+      .get("params")
+      .is_some_and(|params| !params.is_object() && !params.is_array())
+  {
+    return Some(protocol_error(
+      id.unwrap_or(Value::Null),
+      -32600,
+      "invalid request",
+    ));
   }
-  let id = request.get("id")?.clone();
-  let method = request.get("method").and_then(Value::as_str)?;
+  let id = id?;
   let params = request.get("params").unwrap_or(&Value::Null);
   if method == "prompts/get" {
     return Some(match get_prompt(params) {
@@ -300,18 +315,54 @@ mod tests {
   }
 
   #[test]
-  fn malformed_request_returns_json_rpc_error() {
-    let response = handle_line(r#"{"jsonrpc":"2.0","id":7}"#).unwrap();
+  fn malformed_requests_return_json_rpc_errors() {
+    let missing_method = handle_line(r#"{"jsonrpc":"2.0","id":7}"#).unwrap();
     assert_eq!(
-      response.pointer("/error/code").and_then(Value::as_i64),
+      missing_method
+        .pointer("/error/code")
+        .and_then(Value::as_i64),
       Some(-32600)
     );
-    assert_eq!(response.get("id"), Some(&json!(7)));
+    assert_eq!(missing_method.get("id"), Some(&json!(7)));
+
+    let invalid_notification = handle_line(r#"{"jsonrpc":"1.0","method":"ping"}"#).unwrap();
+    assert_eq!(
+      invalid_notification
+        .pointer("/error/code")
+        .and_then(Value::as_i64),
+      Some(-32600)
+    );
+    assert_eq!(invalid_notification.get("id"), Some(&Value::Null));
+
+    let invalid_id = handle_line(r#"{"jsonrpc":"2.0","id":true,"method":"ping"}"#).unwrap();
+    assert_eq!(
+      invalid_id.pointer("/error/code").and_then(Value::as_i64),
+      Some(-32600)
+    );
+    assert_eq!(invalid_id.get("id"), Some(&Value::Null));
+
     let scalar = handle_line("42").unwrap();
     assert_eq!(
       scalar.pointer("/error/code").and_then(Value::as_i64),
       Some(-32600)
     );
+
+    let parse_error = handle_line("{").unwrap();
+    assert_eq!(
+      parse_error.pointer("/error/code").and_then(Value::as_i64),
+      Some(-32700)
+    );
+    assert_eq!(parse_error.get("id"), Some(&Value::Null));
+  }
+
+  #[test]
+  fn unknown_method_preserves_request_id() {
+    let response = handle_line(r#"{"jsonrpc":"2.0","id":"unknown","method":"missing"}"#).unwrap();
+    assert_eq!(
+      response.pointer("/error/code").and_then(Value::as_i64),
+      Some(-32601)
+    );
+    assert_eq!(response.get("id"), Some(&json!("unknown")));
   }
 
   #[cfg(unix)]

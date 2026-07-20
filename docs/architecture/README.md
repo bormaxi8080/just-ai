@@ -61,7 +61,9 @@ the CLI and MCP surfaces cannot drift while the installed binary is running.
 The same source backs `just-ai agent verify` and the MCP `verify` prompt.
 It also publishes this architecture guide, roadmap, and accepted ADRs through
 a fixed `just-ai://docs/*` resource allowlist. No client-supplied path reaches
-the filesystem.
+the filesystem. The protocol layer validates JSON-RPC envelopes before
+classifying messages as notifications, so malformed notification-shaped input
+receives a standard error while valid notifications remain silent.
 
 ## Verification gates
 
