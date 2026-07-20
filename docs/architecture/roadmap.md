@@ -41,6 +41,7 @@
   recovery;
 - shared CLI/MCP `verify` agent command for layered quality gates;
 - MCP prompt/resource catalog isolated from protocol transport and tool code;
+- MCP read-only core tools isolated from protocol transport and dispatch;
 - dedicated layered CI workflow;
 - local ADRs and Codebase Memory MCP ADR/index.
 
