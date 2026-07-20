@@ -56,6 +56,8 @@
 - bounded JSON-dump and dry-run subprocess capture with overflow termination;
 - bounded proposal validation and recipe-output collection, including a
   backpressured streaming queue and process-tree termination on overflow;
+- bounded allowlisted context reads and a 1 MiB exact-file policy for reviewed
+  proposals and atomic writes;
 - dedicated layered CI workflow;
 - local ADRs and Codebase Memory MCP ADR/index.
 

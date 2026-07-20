@@ -118,9 +118,12 @@ code discovery and architectural impact checks.
 The current implementation status and subsequent increments are tracked in
 [`docs/architecture/roadmap.md`](../../docs/architecture/roadmap.md).
 
-AI context scanning is allowlist-based and bounded. Dotenv files are never
-read by the scanner, likely credential assignments are redacted, and the
-exported context reports truncation and redaction counts. Run history is local,
+AI context scanning is allowlist-based and reads at most 16 KiB per file and
+64 KiB in total. Dotenv files are never read by the scanner, likely credential
+assignments are redacted, and exported context reports truncation and redaction
+counts. Files used for exact proposal review and atomic writes must be valid
+UTF-8 and no larger than 1 MiB; oversized input is rejected, not silently
+truncated. Run history is local,
 per-project, bounded to 500 records, and stores only redacted output tails.
 
 ## Commands

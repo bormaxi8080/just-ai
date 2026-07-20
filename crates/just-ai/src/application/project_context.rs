@@ -1,6 +1,7 @@
 use {
+  crate::bounded_file,
   serde::{Deserialize, Serialize},
-  std::{fs, path::Path},
+  std::path::Path,
 };
 
 const DEFAULT_TOTAL_BUDGET: usize = 64 * 1024;
@@ -68,18 +69,17 @@ impl ProjectScanner {
         facts.omitted_by_budget.push((*relative).into());
         continue;
       }
-      let Ok(bytes) = fs::read(path) else {
+      let limit = self.file_budget.min(remaining);
+      let Ok(prefix) = bounded_file::read_prefix(&path, limit) else {
         continue;
       };
-      let limit = bytes.len().min(self.file_budget).min(remaining);
-      let truncated = limit < bytes.len();
-      let (mut content, redactions) = redact_text(&String::from_utf8_lossy(&bytes[..limit]));
+      let (mut content, redactions) = redact_text(&String::from_utf8_lossy(&prefix.bytes));
       truncate_utf8(&mut content, remaining.min(self.file_budget));
       remaining = remaining.saturating_sub(content.len());
       facts.files.push(ScannedFile {
         path: (*relative).into(),
         content,
-        truncated,
+        truncated: prefix.truncated,
         redactions,
       });
     }
@@ -135,7 +135,7 @@ fn looks_secret(line: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-  use super::*;
+  use {super::*, std::fs};
 
   #[test]
   fn reads_only_allowlisted_files_and_redacts_secrets() {

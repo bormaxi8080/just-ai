@@ -2,7 +2,9 @@ use {
   crate::{
     ProjectContext,
     ai_responses::{AddRecipeResponse, RecipeProposal},
-    application, bounded_output,
+    application,
+    bounded_file::{self, MAX_EDITABLE_FILE_BYTES},
+    bounded_output,
     cli::print_section,
     domain::risk::{RiskFinding, RiskLevel},
     just_dump::DumpError,
@@ -29,9 +31,10 @@ pub(crate) fn handle_add(
   let source = context
     .root_source()
     .ok_or("project context does not contain a root justfile source")?;
-  let original = fs::read_to_string(source)?;
+  let original = bounded_file::read_utf8(source, MAX_EDITABLE_FILE_BYTES)?;
   let recipe = render_recipe(&response.recipe);
   let proposed = append_recipe(&original, &recipe);
+  bounded_file::ensure_text_limit(&proposed, "proposed justfile", MAX_EDITABLE_FILE_BYTES)?;
   validate_justfile(just_binary, source, &proposed)?;
 
   let risks = RiskFinding::scan_lines(&response.recipe.body);

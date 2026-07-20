@@ -46,6 +46,9 @@ Presentation adapters must never accept or execute arbitrary shell strings.
     validation, and dry-run use the shared capture adapter; recipe execution
     additionally uses a bounded event queue and terminates its process tree on
     overflow.
+15. Allowlisted AI context uses bounded prefix reads. Exact proposal and atomic
+    write paths reject non-UTF-8 or larger-than-1-MiB files instead of
+    truncating content that will be compared or written.
 
 ## Packages
 
@@ -55,6 +58,7 @@ modules are physically separate while the CLI contract stays stable.
 ```text
 crates/just-ai/src/
   lib.rs             small public composition API
+  bounded_file.rs    bounded prefix and exact UTF-8 file reads
   bounded_output.rs  bounded concurrent subprocess output capture
   cli.rs             Clap adapter and terminal rendering
   inspection.rs      just JSON dump boundary and project context

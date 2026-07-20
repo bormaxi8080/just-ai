@@ -33,6 +33,10 @@ Project inspection and preparation also cap each child-process output stream
 at 8 MiB. Oversized dumps, previews, or diagnostics fail as tool errors instead
 of being accumulated without a memory bound.
 
+Allowlisted project facts use bounded prefix reads: 16 KiB per file and 64 KiB
+in total. The scanner never reads an entire oversized file before truncating
+the returned context.
+
 Tool inputs cannot select an executable or project root. The adapter always
 resolves `just` from its server-controlled process environment and operates on
 the server working directory; the MCP client can provide only recipe and

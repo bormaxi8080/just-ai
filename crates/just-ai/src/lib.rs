@@ -4,6 +4,7 @@ pub mod prompts;
 pub mod provider;
 
 mod ai_responses;
+mod bounded_file;
 mod bounded_output;
 mod cli;
 mod inspection;
