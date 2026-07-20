@@ -23,6 +23,8 @@
 - recipe parameter forms and persisted run history in the desktop UI;
 - versioned rich JSON dump coverage for nested modules, interpolations,
   shebangs, and singular/plus/star parameter kinds;
+- versioned Windows JSON dump coverage for drive-letter paths, PowerShell/cmd
+  bodies, interpolation, and nested modules;
 - Unix process-group isolation and whole-tree cancellation for streaming runs;
 - Windows Job Object ownership and whole-tree cancellation for streaming runs;
 - backward-compatible history observability for argv, cancellation, timestamps,
@@ -46,7 +48,8 @@
 1. Add adapters for additional local-model runtimes only when their semantics
    differ materially from Ollama and OpenAI-compatible chat completions.
 2. Migrate JSONL history to SQLite if querying requirements justify it.
-3. Add more platform-specific JSON dump fixtures on Windows CI.
+3. Add platform fixtures only when upstream emits a materially different JSON
+   shape on that platform.
 
 Every increment follows `agent/commands/implement.md` and ends with a graph
 refresh and architecture review.

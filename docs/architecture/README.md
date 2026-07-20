@@ -74,5 +74,9 @@ cargo test --lib
 cargo test --manifest-path apps/just-ai-mcp/Cargo.toml
 ```
 
+The core suite includes versioned basic, rich, and Windows JSON-dump fixtures.
+The Windows CI job additionally verifies native drive-letter path semantics and
+Job Object cancellation.
+
 The Codebase Memory MCP index is refreshed after structural changes. Graph
 queries are used to verify that adapters depend on core and not vice versa.

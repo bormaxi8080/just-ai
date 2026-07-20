@@ -8,6 +8,9 @@ parsed without invoking a shell or duplicating the upstream parser.
   deterministic risk derivation.
 - `just-dump-rich.json` covers nested modules, structured body interpolation,
   shebang metadata, visibility/quiet flags, and singular/plus/star parameters.
+- `just-dump-windows.json` covers drive-letter source/default paths,
+  PowerShell/cmd bodies, structured interpolation, and nested module paths. It
+  is parsed everywhere; Windows CI additionally checks native path semantics.
 
 When the bundled upstream `just` JSON schema changes, add a new fixture instead
 of silently rewriting old coverage. Keep platform-only shapes in a separate

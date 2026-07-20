@@ -343,4 +343,42 @@ mod tests {
     assert_eq!(nested.module_path, "tools:ci");
     assert_eq!(nested.body, ["cargo test"]);
   }
+
+  #[test]
+  fn parses_versioned_windows_dump_fixture() {
+    let dump: DumpModule =
+      serde_json::from_str(include_str!("../tests/fixtures/just-dump-windows.json")).unwrap();
+    let context = ProjectContext::from_dump(dump);
+
+    assert_eq!(context.warnings, ["windows fixture warning"]);
+    assert_eq!(context.modules.len(), 2);
+    assert_eq!(
+      context.modules[0].source,
+      PathBuf::from(r"C:\workspace\justfile")
+    );
+    assert_eq!(
+      context.modules[1].source,
+      PathBuf::from(r"C:\workspace\tools.just")
+    );
+
+    let build = context.find_recipe("build").unwrap();
+    assert_eq!(build.dependencies, ["prepare"]);
+    assert_eq!(
+      build.body,
+      [r#"powershell.exe -NoProfile -Command "Write-Output {{TARGET:...}}""#]
+    );
+    assert_eq!(
+      build.parameters[0].default.as_deref(),
+      Some(r"C:\Program Files\just-ai")
+    );
+    assert_eq!(build.parameters[1].kind, "star");
+    assert!(build.quiet);
+
+    let nested = context.find_recipe("tools::status").unwrap();
+    assert_eq!(nested.module_path, "tools");
+    assert_eq!(nested.body, ["git status --short"]);
+
+    #[cfg(windows)]
+    assert!(context.root_source().unwrap().is_absolute());
+  }
 }
