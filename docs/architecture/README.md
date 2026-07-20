@@ -40,6 +40,8 @@ Presentation adapters must never accept or execute arbitrary shell strings.
     redirect inspection or preparation to another project root.
 12. MCP tool arguments are runtime-validated against explicit per-tool
     allowlists before any filesystem or process operation.
+13. Preparation rejects structured function calls and `dotenv-command` before
+    invoking dry-run, since upstream may evaluate them during preview.
 
 ## Packages
 
@@ -51,6 +53,7 @@ crates/just-ai/src/
   lib.rs             19-line public composition API
   cli.rs             Clap adapter and terminal rendering
   inspection.rs      just JSON dump boundary and project context
+  just_dump.rs       shared non-evaluating JSON dump process boundary
   ai_responses.rs    typed model responses and JSON Schemas
   proposal.rs        validation, rendering, diff, guarded application
   provider.rs        native provider adapter

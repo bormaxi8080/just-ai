@@ -5,7 +5,7 @@ use {
     application,
     cli::print_section,
     domain::risk::{RiskFinding, RiskLevel},
-    inspection::DumpError,
+    just_dump::DumpError,
   },
   similar::{ChangeTag, TextDiff},
   std::{

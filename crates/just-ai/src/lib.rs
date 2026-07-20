@@ -6,6 +6,7 @@ pub mod provider;
 mod ai_responses;
 mod cli;
 mod inspection;
+mod just_dump;
 mod proposal;
 
 pub use inspection::{

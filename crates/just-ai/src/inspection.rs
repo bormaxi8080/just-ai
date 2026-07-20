@@ -2,15 +2,14 @@ use {
   crate::{
     application,
     domain::risk::{RiskFinding, RiskLevel},
+    just_dump,
   },
   serde::{Deserialize, Serialize},
   serde_json::Value,
   std::{
     collections::BTreeMap,
     error::Error,
-    fmt::{self, Display, Formatter},
     path::{Path, PathBuf},
-    process::Command,
   },
 };
 
@@ -26,24 +25,10 @@ fn load_dump_at(
   just_binary: &Path,
   project_root: Option<&Path>,
 ) -> Result<DumpModule, Box<dyn Error>> {
-  let mut command = Command::new(just_binary);
-  command.args(["--dump", "--dump-format", "json"]);
-  if let Some(project_root) = project_root {
-    command.current_dir(project_root);
-  }
-  let output = command.output()?;
-
-  if !output.status.success() {
-    return Err(
-      DumpError {
-        status: output.status.to_string(),
-        stderr: String::from_utf8_lossy(&output.stderr).trim().to_owned(),
-      }
-      .into(),
-    );
-  }
-
-  Ok(serde_json::from_slice(&output.stdout)?)
+  Ok(serde_json::from_value(just_dump::load_at(
+    just_binary,
+    project_root,
+  )?)?)
 }
 
 /// Inspect the project discovered by `just` and return a stable, serializable
@@ -73,24 +58,6 @@ pub fn inspect_project_at(
     Some(project_root),
   )?))
 }
-
-#[derive(Debug)]
-pub(crate) struct DumpError {
-  pub(crate) status: String,
-  pub(crate) stderr: String,
-}
-
-impl Display for DumpError {
-  fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-    if self.stderr.is_empty() {
-      write!(f, "just dump failed with {}", self.status)
-    } else {
-      write!(f, "just dump failed with {}: {}", self.status, self.stderr)
-    }
-  }
-}
-
-impl Error for DumpError {}
 
 #[derive(Debug, Deserialize)]
 struct DumpModule {

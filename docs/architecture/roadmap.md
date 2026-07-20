@@ -51,6 +51,8 @@
 - server-controlled MCP `just` executable with no client-provided binary path;
 - working-directory-confined MCP tools with no client-provided project root;
 - runtime MCP tool-argument allowlists that reject unknown boundary inputs;
+- shared JSON-dump process boundary and pre-dry-run rejection of function calls
+  and `dotenv-command`;
 - dedicated layered CI workflow;
 - local ADRs and Codebase Memory MCP ADR/index.
 

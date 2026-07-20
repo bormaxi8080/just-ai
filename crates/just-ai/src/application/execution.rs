@@ -105,6 +105,18 @@ impl RecipeExecutor {
 
   pub fn prepare(&self, request: RunRequest) -> Result<PreparedRun, ExecutionError> {
     validate_request(&request)?;
+    let dump = crate::just_dump::load_at(&self.just_binary, Some(&request.project_root))
+      .map_err(|error| ExecutionError(format!("just safety inspection failed: {error}")))?;
+    if let Some(function) = crate::just_dump::first_function_call(&dump) {
+      return Err(ExecutionError(format!(
+        "safe preview unavailable: project contains function call `{function}()`"
+      )));
+    }
+    if crate::just_dump::contains_non_empty_field(&dump, "dotenv_command") {
+      return Err(ExecutionError(
+        "safe preview unavailable: project configures dotenv-command".into(),
+      ));
+    }
     let output = self.prepare_command(&request).output().map_err(io_error)?;
     if !output.status.success() {
       return Err(command_error("just dry-run", &output.stderr));
@@ -370,6 +382,74 @@ mod tests {
     );
   }
 
+  #[cfg(unix)]
+  #[test]
+  fn prepare_rejects_function_call_before_dry_run() {
+    use std::{fs, os::unix::fs::PermissionsExt};
+    let directory = tempfile::tempdir().unwrap();
+    let binary = directory.path().join("fake-just");
+    let marker = directory.path().join("dry-run-started");
+    fs::write(
+      &binary,
+      format!(
+        "#!/bin/sh\nif [ \"$1\" = \"--dump\" ]; then echo '{{\"assignments\":{{\"x\":{{\"value\":[\"call\",\"shell\",\"touch marker\"]}}}}}}'; exit 0; fi\ntouch '{}'\n",
+        marker.display()
+      ),
+    )
+    .unwrap();
+    let mut permissions = fs::metadata(&binary).unwrap().permissions();
+    permissions.set_mode(0o700);
+    fs::set_permissions(&binary, permissions).unwrap();
+
+    let error = RecipeExecutor::new(&binary)
+      .prepare(RunRequest {
+        project_root: directory.path().into(),
+        recipe: "test".into(),
+        arguments: Vec::new(),
+      })
+      .unwrap_err();
+
+    assert_eq!(
+      error.to_string(),
+      "safe preview unavailable: project contains function call `shell()`"
+    );
+    assert!(!marker.exists());
+  }
+
+  #[cfg(unix)]
+  #[test]
+  fn prepare_rejects_dotenv_command_before_dry_run() {
+    use std::{fs, os::unix::fs::PermissionsExt};
+    let directory = tempfile::tempdir().unwrap();
+    let binary = directory.path().join("fake-just");
+    let marker = directory.path().join("dry-run-started");
+    fs::write(
+      &binary,
+      format!(
+        "#!/bin/sh\nif [ \"$1\" = \"--dump\" ]; then echo '{{\"settings\":{{\"dotenv_command\":[\"generate-env\"]}}}}'; exit 0; fi\ntouch '{}'\n",
+        marker.display()
+      ),
+    )
+    .unwrap();
+    let mut permissions = fs::metadata(&binary).unwrap().permissions();
+    permissions.set_mode(0o700);
+    fs::set_permissions(&binary, permissions).unwrap();
+
+    let error = RecipeExecutor::new(&binary)
+      .prepare(RunRequest {
+        project_root: directory.path().into(),
+        recipe: "test".into(),
+        arguments: Vec::new(),
+      })
+      .unwrap_err();
+
+    assert_eq!(
+      error.to_string(),
+      "safe preview unavailable: project configures dotenv-command"
+    );
+    assert!(!marker.exists());
+  }
+
   #[test]
   fn typed_confirmation_must_match() {
     let decision = PolicyDecision::ConfirmTyped {
@@ -411,7 +491,7 @@ mod tests {
     let binary = directory.path().join("fake-just");
     fs::write(
       &binary,
-      "#!/bin/sh\nif [ \"$1\" = \"--dry-run\" ]; then echo 'echo safe'; exit 0; fi\nprintf out\nprintf err >&2\n",
+      "#!/bin/sh\nif [ \"$1\" = \"--dump\" ]; then echo '{}'; exit 0; fi\nif [ \"$1\" = \"--dry-run\" ]; then echo 'echo safe'; exit 0; fi\nprintf out\nprintf err >&2\n",
     )
     .unwrap();
     let mut permissions = fs::metadata(&binary).unwrap().permissions();
@@ -458,7 +538,7 @@ mod tests {
     let binary = directory.path().join("fake-just");
     fs::write(
       &binary,
-      "#!/bin/sh\nif [ \"$1\" = \"--dry-run\" ]; then echo 'sleep 30'; exit 0; fi\nsleep 30 &\nwait\n",
+      "#!/bin/sh\nif [ \"$1\" = \"--dump\" ]; then echo '{}'; exit 0; fi\nif [ \"$1\" = \"--dry-run\" ]; then echo 'sleep 30'; exit 0; fi\nsleep 30 &\nwait\n",
     )
     .unwrap();
     let mut permissions = fs::metadata(&binary).unwrap().permissions();
@@ -507,7 +587,7 @@ mod tests {
     let binary = directory.path().join("fake-just.cmd");
     fs::write(
       &binary,
-      "@echo off\r\nif \"%1\"==\"--dry-run\" (\r\n  echo powershell.exe -NoProfile -Command \"Start-Sleep -Seconds 30\"\r\n  exit /b 0\r\n)\r\nstart \"\" /b powershell.exe -NoProfile -Command \"Start-Sleep -Seconds 30\"\r\npowershell.exe -NoProfile -Command \"Start-Sleep -Seconds 30\"\r\n",
+      "@echo off\r\nif \"%1\"==\"--dump\" (\r\n  echo {}\r\n  exit /b 0\r\n)\r\nif \"%1\"==\"--dry-run\" (\r\n  echo powershell.exe -NoProfile -Command \"Start-Sleep -Seconds 30\"\r\n  exit /b 0\r\n)\r\nstart \"\" /b powershell.exe -NoProfile -Command \"Start-Sleep -Seconds 30\"\r\npowershell.exe -NoProfile -Command \"Start-Sleep -Seconds 30\"\r\n",
     )
     .unwrap();
 

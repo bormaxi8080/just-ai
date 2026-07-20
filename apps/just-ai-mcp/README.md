@@ -25,6 +25,10 @@ Tools:
 - `doctor` — deterministic per-recipe risk reports;
 - `prepare_run` — `just --dry-run` preview, risk, and confirmation policy.
 
+`prepare_run` refuses projects whose structured JSON dump contains function
+calls or `dotenv-command`, because upstream may evaluate them during dry-run.
+This keeps the MCP surface read-only.
+
 Tool inputs cannot select an executable or project root. The adapter always
 resolves `just` from its server-controlled process environment and operates on
 the server working directory; the MCP client can provide only recipe and

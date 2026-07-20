@@ -132,7 +132,7 @@ mod tests {
     let binary = directory.path().join("fake-just");
     fs::write(
       &binary,
-      "#!/bin/sh\n[ \"$1\" = \"--dry-run\" ] || exit 91\necho 'echo safe'\n",
+      "#!/bin/sh\nif [ \"$1\" = \"--dump\" ]; then echo '{}'; exit 0; fi\n[ \"$1\" = \"--dry-run\" ] || exit 91\necho 'echo safe'\n",
     )
     .unwrap();
     let mut permissions = fs::metadata(&binary).unwrap().permissions();

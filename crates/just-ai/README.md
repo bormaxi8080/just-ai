@@ -44,6 +44,11 @@ just-ai agent review-architecture
 Removing `just-ai` from a machine does not affect a valid `justfile`. Recipes
 continue to run through `just` exactly as before.
 
+Before producing a run preview, `just-ai` inspects the non-evaluating JSON dump
+and refuses function-call expressions or `dotenv-command`. Upstream `just` may
+evaluate these during dry-run, so refusing the preview preserves the rule that
+authorization must happen before project-defined commands run.
+
 ## Requirements
 
 - Rust 1.89.0 or newer, matching the workspace `rust-version`.
