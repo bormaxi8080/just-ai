@@ -7,6 +7,8 @@
 - two-phase prepare/execute API with preview revalidation and explicit
   confirmation types;
 - direct argv execution without shell construction;
+- `--` option termination before recipe names and arguments in prepare and
+  execute commands;
 - atomic, optimistic-concurrency-protected proposal writes;
 - provider subprocess arguments no longer contain credentials or prompt bodies;
 - versioned product prompts and project-agent commands;

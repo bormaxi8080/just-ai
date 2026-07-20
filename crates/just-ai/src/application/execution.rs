@@ -105,13 +105,7 @@ impl RecipeExecutor {
 
   pub fn prepare(&self, request: RunRequest) -> Result<PreparedRun, ExecutionError> {
     validate_request(&request)?;
-    let mut command = Command::new(&self.just_binary);
-    command
-      .current_dir(&request.project_root)
-      .arg("--dry-run")
-      .arg(&request.recipe)
-      .args(&request.arguments);
-    let output = command.output().map_err(io_error)?;
+    let output = self.prepare_command(&request).output().map_err(io_error)?;
     if !output.status.success() {
       return Err(command_error("just dry-run", &output.stderr));
     }
@@ -239,6 +233,18 @@ impl RecipeExecutor {
     let mut command = Command::new(&self.just_binary);
     command
       .current_dir(&request.project_root)
+      .arg("--")
+      .arg(&request.recipe)
+      .args(&request.arguments);
+    command
+  }
+
+  fn prepare_command(&self, request: &RunRequest) -> Command {
+    let mut command = Command::new(&self.just_binary);
+    command
+      .current_dir(&request.project_root)
+      .arg("--dry-run")
+      .arg("--")
       .arg(&request.recipe)
       .args(&request.arguments);
     command
@@ -339,19 +345,29 @@ mod tests {
   }
 
   #[test]
-  fn command_uses_argv_without_shell() {
+  fn commands_use_argv_and_separate_just_options() {
     let executor = RecipeExecutor::new("just");
     let request = RunRequest {
       project_root: PathBuf::from("."),
       recipe: "test".into(),
-      arguments: vec!["a; rm -rf /".into()],
+      arguments: vec!["--shell".into(), "a; rm -rf /".into()],
     };
     let command = executor.command(&request);
     let args = command
       .get_args()
       .map(|arg| arg.to_string_lossy().into_owned())
       .collect::<Vec<_>>();
-    assert_eq!(args, ["test", "a; rm -rf /"]);
+    assert_eq!(args, ["--", "test", "--shell", "a; rm -rf /"]);
+
+    let prepare = executor.prepare_command(&request);
+    let prepare_args = prepare
+      .get_args()
+      .map(|arg| arg.to_string_lossy().into_owned())
+      .collect::<Vec<_>>();
+    assert_eq!(
+      prepare_args,
+      ["--dry-run", "--", "test", "--shell", "a; rm -rf /"]
+    );
   }
 
   #[test]

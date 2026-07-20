@@ -26,6 +26,8 @@ Presentation adapters must never accept or execute arbitrary shell strings.
 3. CLI and GUI depend inward on core contracts.
 4. AI produces proposals. Local deterministic code validates and applies them.
 5. Recipe execution is always delegated to the configured `just` binary.
+   A `--` terminator separates just-ai-controlled options from the recipe name
+   and every user-supplied recipe argument.
 6. File writes are workspace-confined, hash-guarded, validated, and atomic.
 7. Secrets and excluded files never enter remote AI context.
 8. Provider transport is native Rust behind `AiProvider`; model responses must
