@@ -1,4 +1,5 @@
 use {
+  crate::bounded_output,
   serde_json::Value,
   std::{
     error::Error,
@@ -17,7 +18,7 @@ pub(crate) fn load_at(
   if let Some(project_root) = project_root {
     command.current_dir(project_root);
   }
-  let output = command.output()?;
+  let output = bounded_output::capture(&mut command)?;
   if !output.status.success() {
     return Err(
       DumpError {

@@ -29,6 +29,10 @@ Tools:
 calls or `dotenv-command`, because upstream may evaluate them during dry-run.
 This keeps the MCP surface read-only.
 
+Project inspection and preparation also cap each child-process output stream
+at 8 MiB. Oversized dumps, previews, or diagnostics fail as tool errors instead
+of being accumulated without a memory bound.
+
 Tool inputs cannot select an executable or project root. The adapter always
 resolves `just` from its server-controlled process environment and operates on
 the server working directory; the MCP client can provide only recipe and

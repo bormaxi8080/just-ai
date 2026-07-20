@@ -117,7 +117,8 @@ impl RecipeExecutor {
         "safe preview unavailable: project configures dotenv-command".into(),
       ));
     }
-    let output = self.prepare_command(&request).output().map_err(io_error)?;
+    let output = crate::bounded_output::capture(&mut self.prepare_command(&request))
+      .map_err(|error| ExecutionError(format!("just dry-run output capture failed: {error}")))?;
     if !output.status.success() {
       return Err(command_error("just dry-run", &output.stderr));
     }

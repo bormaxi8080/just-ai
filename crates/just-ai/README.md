@@ -49,6 +49,11 @@ and refuses function-call expressions or `dotenv-command`. Upstream `just` may
 evaluate these during dry-run, so refusing the preview preserves the rule that
 authorization must happen before project-defined commands run.
 
+JSON dumps and dry-run previews are captured through a shared bounded process
+adapter. Stdout and stderr are each limited to 8 MiB; exceeding either limit
+terminates the child and returns an error instead of growing memory without a
+bound.
+
 ## Requirements
 
 - Rust 1.89.0 or newer, matching the workspace `rust-version`.

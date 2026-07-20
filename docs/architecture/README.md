@@ -42,6 +42,8 @@ Presentation adapters must never accept or execute arbitrary shell strings.
     allowlists before any filesystem or process operation.
 13. Preparation rejects structured function calls and `dotenv-command` before
     invoking dry-run, since upstream may evaluate them during preview.
+14. JSON-dump and dry-run subprocesses share a bounded capture adapter; stdout
+    and stderr are each capped at 8 MiB and overflow terminates the child.
 
 ## Packages
 
@@ -50,7 +52,8 @@ modules are physically separate while the CLI contract stays stable.
 
 ```text
 crates/just-ai/src/
-  lib.rs             19-line public composition API
+  lib.rs             small public composition API
+  bounded_output.rs  bounded concurrent subprocess output capture
   cli.rs             Clap adapter and terminal rendering
   inspection.rs      just JSON dump boundary and project context
   just_dump.rs       shared non-evaluating JSON dump process boundary

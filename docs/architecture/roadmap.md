@@ -53,6 +53,7 @@
 - runtime MCP tool-argument allowlists that reject unknown boundary inputs;
 - shared JSON-dump process boundary and pre-dry-run rejection of function calls
   and `dotenv-command`;
+- bounded JSON-dump and dry-run subprocess capture with overflow termination;
 - dedicated layered CI workflow;
 - local ADRs and Codebase Memory MCP ADR/index.
 
