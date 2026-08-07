@@ -1,30 +1,31 @@
-use {
-  crate::domain::{
-    policy::{DefaultPolicy, PolicyDecision},
-    risk::{RiskFinding, RiskLevel},
-  },
-  serde::{Deserialize, Serialize},
-  std::{
+use crate::{
+    config::ExecutionConfig,
+    domain::{
+        policy::{DefaultPolicy, PolicyDecision},
+        risk::{RiskFinding, RiskLevel},
+    },
+};
+use serde::{Deserialize, Serialize};
+use std::{
     error::Error,
     fmt::{self, Display, Formatter},
     io::Read,
     path::PathBuf,
     process::{Command, ExitStatus, Stdio},
     sync::{
-      Arc,
-      atomic::{AtomicBool, Ordering},
-      mpsc,
+        Arc,
+        atomic::{AtomicBool, Ordering},
+        mpsc,
     },
     thread,
     time::{Duration, SystemTime, UNIX_EPOCH},
-  },
 };
 
 mod process_tree;
 
 use process_tree::ProcessTree;
 
-const STREAM_QUEUE_CAPACITY: usize = 32;
+
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct RunRequest {
@@ -94,16 +95,26 @@ impl Error for ExecutionError {}
 
 #[derive(Clone, Debug)]
 pub struct RecipeExecutor {
-  just_binary: PathBuf,
+    just_binary: PathBuf,
+    config: ExecutionConfig,
 }
 
 impl RecipeExecutor {
-  #[must_use]
-  pub fn new(just_binary: impl Into<PathBuf>) -> Self {
-    Self {
-      just_binary: just_binary.into(),
+    #[must_use]
+    pub fn new(just_binary: impl Into<PathBuf>) -> Self {
+        Self {
+            just_binary: just_binary.into(),
+            config: ExecutionConfig::default(),
+        }
     }
-  }
+
+    #[must_use]
+    pub fn with_config(just_binary: impl Into<PathBuf>, config: ExecutionConfig) -> Self {
+        Self {
+            just_binary: just_binary.into(),
+            config,
+        }
+    }
 
   pub fn prepare(&self, request: RunRequest) -> Result<PreparedRun, ExecutionError> {
     validate_request(&request)?;
@@ -149,7 +160,7 @@ impl RecipeExecutor {
       prepared,
       confirmation,
       &CancellationToken::default(),
-      crate::bounded_output::MAX_CAPTURE_BYTES,
+      self.config.max_capture_bytes,
       |_| {},
     )
   }
@@ -168,7 +179,7 @@ impl RecipeExecutor {
       prepared,
       confirmation,
       cancellation,
-      crate::bounded_output::MAX_CAPTURE_BYTES,
+      self.config.max_capture_bytes,
       emit,
     )
   }
@@ -212,7 +223,7 @@ impl RecipeExecutor {
       process_tree.terminate(&mut child)?;
       return Err(ExecutionError("stderr pipe missing".into()));
     };
-    let (sender, receiver) = mpsc::sync_channel(STREAM_QUEUE_CAPACITY);
+    let (sender, receiver) = mpsc::sync_channel(self.config.stream_queue_capacity);
     stream_reader(stdout, StreamKind::Stdout, sender.clone());
     stream_reader(stderr, StreamKind::Stderr, sender);
 
@@ -230,7 +241,7 @@ impl RecipeExecutor {
         }
         cancelled = true;
       }
-      match receiver.recv_timeout(Duration::from_millis(25)) {
+      match receiver.recv_timeout(self.config.cancellation_poll_interval()) {
         Ok(StreamMessage::Data(StreamKind::Stdout, bytes)) => {
           if output_error.is_none() {
             match crate::bounded_output::extend_with_limit(

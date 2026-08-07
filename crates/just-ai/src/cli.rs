@@ -183,8 +183,10 @@ fn try_main() -> Result<(), Box<dyn Error>> {
         execution::{RecipeExecutor, RunConfirmation, RunRequest},
         history::{JsonLineHistory, RunHistory, RunRecord, project_history_path},
       };
+      use crate::config::Config;
       use std::time::{Instant, SystemTime, UNIX_EPOCH};
       let project_root = env::current_dir()?;
+      let config = Config::load(&project_root)?;
       let executor = RecipeExecutor::new(&cli.just_binary);
       let prepared = executor.prepare(RunRequest {
         project_root: project_root.clone(),
@@ -208,8 +210,10 @@ fn try_main() -> Result<(), Box<dyn Error>> {
         started_at_ms,
         started.elapsed().as_millis(),
         &completed,
+        &config.history,
       );
-      JsonLineHistory::new(project_history_path(&project_root), 500).append(&record)?;
+      let history_path = project_history_path(&project_root, &config.history.file_name);
+      JsonLineHistory::new(history_path, config.history).append(&record)?;
       std::io::stdout().write_all(&completed.stdout)?;
       std::io::stderr().write_all(&completed.stderr)?;
       if !completed.status.success() {
@@ -218,7 +222,11 @@ fn try_main() -> Result<(), Box<dyn Error>> {
     }
     Commands::History { limit, json } => {
       use application::history::{JsonLineHistory, RunHistory, project_history_path};
-      let history = JsonLineHistory::new(project_history_path(&env::current_dir()?), 500);
+      use crate::config::Config;
+      let project_root = env::current_dir()?;
+      let config = Config::load(&project_root)?;
+      let history_path = project_history_path(&project_root, &config.history.file_name);
+      let history = JsonLineHistory::new(history_path, config.history);
       let records = history.recent(limit)?;
       if json {
         println!("{}", serde_json::to_string_pretty(&records)?);

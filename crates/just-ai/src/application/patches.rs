@@ -1,5 +1,5 @@
 use {
-  crate::bounded_file::{self, MAX_EDITABLE_FILE_BYTES},
+  crate::bounded_file::{self, max_editable_file_bytes},
   std::{
     fs,
     io::{self, Write},
@@ -14,9 +14,9 @@ use {
 /// displayed. The temporary file is created beside the target so persistence
 /// remains an atomic same-filesystem rename.
 pub fn apply_reviewed_change(path: &Path, reviewed: &str, proposed: &str) -> io::Result<()> {
-  bounded_file::ensure_text_limit(reviewed, "reviewed content", MAX_EDITABLE_FILE_BYTES)?;
-  bounded_file::ensure_text_limit(proposed, "proposed content", MAX_EDITABLE_FILE_BYTES)?;
-  let current = bounded_file::read_utf8(path, MAX_EDITABLE_FILE_BYTES)?;
+  bounded_file::ensure_text_limit(reviewed, "reviewed content", max_editable_file_bytes())?;
+  bounded_file::ensure_text_limit(proposed, "proposed content", max_editable_file_bytes())?;
+  let current = bounded_file::read_utf8(path, max_editable_file_bytes())?;
   if current != reviewed {
     return Err(io::Error::new(
       io::ErrorKind::AlreadyExists,
@@ -72,13 +72,13 @@ mod tests {
   fn rejects_oversized_current_file_without_writing() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("justfile");
-    fs::write(&path, vec![b'a'; MAX_EDITABLE_FILE_BYTES + 1]).unwrap();
+    fs::write(&path, vec![b'a'; max_editable_file_bytes() + 1]).unwrap();
 
     let error = apply_reviewed_change(&path, "reviewed", "proposed").unwrap_err();
     assert_eq!(error.kind(), io::ErrorKind::InvalidData);
     assert_eq!(
       fs::metadata(path).unwrap().len(),
-      u64::try_from(MAX_EDITABLE_FILE_BYTES + 1).unwrap()
+      u64::try_from(max_editable_file_bytes() + 1).unwrap()
     );
   }
 
@@ -87,7 +87,7 @@ mod tests {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("justfile");
     fs::write(&path, "reviewed").unwrap();
-    let proposed = "x".repeat(MAX_EDITABLE_FILE_BYTES + 1);
+    let proposed = "x".repeat(max_editable_file_bytes() + 1);
 
     let error = apply_reviewed_change(&path, "reviewed", &proposed).unwrap_err();
     assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
