@@ -1,10 +1,13 @@
 //! Provider-neutral AI boundary with native OpenAI, Ollama, and compatible adapters.
 
 use {
+  futures::Stream,
   serde_json::Value,
   std::{
     error::Error,
     fmt::{self, Display, Formatter},
+    io::{BufRead, BufReader},
+    pin::Pin,
     time::Duration,
   },
 };
@@ -67,7 +70,16 @@ impl OpenAiResponsesProvider {
 
 pub trait AiProvider {
   fn complete(&self, request: &AiRequest) -> Result<String, ProviderError>;
+  fn complete_stream(&self, request: &AiRequest) -> Result<AiStream, ProviderError> {
+    // Default implementation: wrap complete() in a single-chunk stream
+    let content = self.complete(request)?;
+    let stream = futures::stream::once(async move { Ok(content) });
+    Ok(Box::pin(stream))
+  }
 }
+
+/// A stream of response chunks from an AI provider.
+pub type AiStream = Pin<Box<dyn Stream<Item = Result<String, ProviderError>> + Send>>;
 
 #[derive(Clone, Debug)]
 pub struct OpenAiCompatibleProvider {
@@ -133,6 +145,77 @@ impl AiProvider for OpenAiResponsesProvider {
       .map(str::to_owned)
       .ok_or_else(|| ProviderError::new("OpenAI response contains no output_text content"))
   }
+
+  fn complete_stream(&self, request: &AiRequest) -> Result<AiStream, ProviderError> {
+    let url = format!("{}/responses", self.base_url.trim_end_matches('/'));
+    let body = serde_json::json!({
+      "model": self.model,
+      "reasoning": { "effort": "none" },
+      "instructions": request.system,
+      "input": request.user,
+      "text": { "format": {
+        "type": "json_schema",
+        "name": request.schema_name,
+        "strict": true,
+        "schema": request.schema
+      }},
+      "stream": true
+    });
+    let agent = self.agent.clone();
+    let api_key = self.api_key.clone();
+    let stream = async_stream::stream! {
+      let mut request = agent.post(&url).header("Content-Type", "application/json");
+      let request = request.header("Authorization", &format!("Bearer {api_key}"));
+      let mut response = match request.send_json(body) {
+        Ok(r) => r,
+        Err(e) => {
+          yield Err(ProviderError::new(format!("provider request failed: {e}")));
+          return;
+        }
+      };
+      let mut reader = BufReader::new(response.body_mut().as_reader());
+      let mut line = String::new();
+      loop {
+        line.clear();
+        match reader.read_line(&mut line) {
+          Ok(0) => break, // EOF
+          Ok(_) => {}
+          Err(e) => {
+            yield Err(ProviderError::new(format!("stream read error: {e}")));
+            break;
+          }
+        }
+        let line = line.trim();
+        if line.is_empty() {
+          continue;
+        }
+        if let Some(data) = line.strip_prefix("data: ") {
+          if data == "[DONE]" {
+            break;
+          }
+          if let Ok(json) = serde_json::from_str::<Value>(data) {
+            // Extract output_text chunks
+            if let Some(output) = json.pointer("/output") {
+              if let Some(array) = output.as_array() {
+                for item in array {
+                  if let Some(content_array) = item.pointer("/content").and_then(|c| c.as_array()) {
+                    for content in content_array {
+                      if content.get("type").and_then(Value::as_str) == Some("output_text") {
+                        if let Some(text) = content.get("text").and_then(Value::as_str) {
+                          yield Ok(text.to_string());
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    };
+    Ok(Box::pin(stream))
+  }
 }
 
 impl AiProvider for OllamaProvider {
@@ -160,6 +243,63 @@ impl AiProvider for OllamaProvider {
       .map(str::to_owned)
       .ok_or_else(|| ProviderError::new("Ollama response contains no message content"))
   }
+
+  fn complete_stream(&self, request: &AiRequest) -> Result<AiStream, ProviderError> {
+    let url = format!("{}/api/chat", self.base_url.trim_end_matches('/'));
+    let body = serde_json::json!({
+      "model": self.model,
+      "messages": [
+        { "role": "system", "content": request.system },
+        { "role": "user", "content": request.user }
+      ],
+      "format": request.schema,
+      "stream": true,
+      "options": { "temperature": 0 }
+    });
+    let agent = self.agent.clone();
+    let api_key = self.api_key.clone();
+    let stream = async_stream::stream! {
+      let mut req = agent.post(&url).header("Content-Type", "application/json");
+      if let Some(key) = api_key {
+        req = req.header("Authorization", &format!("Bearer {key}"));
+      }
+      let mut response = match req.send_json(body) {
+        Ok(r) => r,
+        Err(e) => {
+          yield Err(ProviderError::new(format!("provider request failed: {e}")));
+          return;
+        }
+      };
+      let mut reader = BufReader::new(response.body_mut().as_reader());
+      let mut line = String::new();
+      loop {
+        line.clear();
+        match reader.read_line(&mut line) {
+          Ok(0) => break,
+          Ok(_) => {}
+          Err(e) => {
+            yield Err(ProviderError::new(format!("stream read error: {e}")));
+            break;
+          }
+        }
+        let line = line.trim();
+        if line.is_empty() {
+          continue;
+        }
+        if let Ok(json) = serde_json::from_str::<Value>(line) {
+          if let Some(content) = json.pointer("/message/content").and_then(Value::as_str) {
+            if !content.is_empty() {
+              yield Ok(content.to_string());
+            }
+          }
+          if json.get("done").and_then(Value::as_bool) == Some(true) {
+            break;
+          }
+        }
+      }
+    };
+    Ok(Box::pin(stream))
+  }
 }
 
 impl AiProvider for OpenAiCompatibleProvider {
@@ -179,6 +319,64 @@ impl AiProvider for OpenAiCompatibleProvider {
       .and_then(Value::as_str)
       .map(str::to_owned)
       .ok_or_else(|| ProviderError::new("provider response contains no message content"))
+  }
+
+  fn complete_stream(&self, request: &AiRequest) -> Result<AiStream, ProviderError> {
+    let url = format!("{}/chat/completions", self.base_url.trim_end_matches('/'));
+    let body = serde_json::json!({
+      "model": self.model,
+      "messages": [
+        { "role": "system", "content": request.system },
+        { "role": "user", "content": request.user }
+      ],
+      "response_format": { "type": "json_object" },
+      "stream": true
+    });
+    let agent = self.agent.clone();
+    let api_key = self.api_key.clone();
+    let stream = async_stream::stream! {
+      let mut req = agent.post(&url).header("Content-Type", "application/json");
+      if let Some(key) = api_key {
+        req = req.header("Authorization", &format!("Bearer {key}"));
+      }
+      let mut response = match req.send_json(body) {
+        Ok(r) => r,
+        Err(e) => {
+          yield Err(ProviderError::new(format!("provider request failed: {e}")));
+          return;
+        }
+      };
+      let mut reader = BufReader::new(response.body_mut().as_reader());
+      let mut line = String::new();
+      loop {
+        line.clear();
+        match reader.read_line(&mut line) {
+          Ok(0) => break,
+          Ok(_) => {}
+          Err(e) => {
+            yield Err(ProviderError::new(format!("stream read error: {e}")));
+            break;
+          }
+        }
+        let line = line.trim();
+        if line.is_empty() {
+          continue;
+        }
+        if let Some(data) = line.strip_prefix("data: ") {
+          if data == "[DONE]" {
+            break;
+          }
+          if let Ok(json) = serde_json::from_str::<Value>(data) {
+            if let Some(content) = json.pointer("/choices/0/delta/content").and_then(Value::as_str) {
+              if !content.is_empty() {
+                yield Ok(content.to_string());
+              }
+            }
+          }
+        }
+      }
+    };
+    Ok(Box::pin(stream))
   }
 }
 
