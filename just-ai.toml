@@ -3,18 +3,22 @@
 # All sections and keys are optional - defaults shown in comments.
 
 [history]
+# Storage backend: "jsonl" or "sqlite" (default: "sqlite")
+backend = "sqlite"
 # Maximum number of history records to retain (default: 500)
 max_records = 500
 # Maximum size of a single history record in bytes (default: 64KB)
 max_record_bytes = 65536
-# Maximum total history file size in bytes (default: ~32MB)
+# Maximum total history file size in bytes (default: ~32MB, JSONL only)
 max_file_bytes = 32768500
 # Number of bytes to keep from stdout/stderr tails (default: 16KB)
 output_tail_bytes = 16384
 # Additional secret patterns to redact (regex patterns)
 # redact_patterns = ["my-custom-secret-pattern"]
-# History file name relative to data directory (default: ".just-ai/history.jsonl")
+# History file name relative to data directory for JSONL backend (default: ".just-ai/history.jsonl")
 file_name = ".just-ai/history.jsonl"
+# Database file name for SQLite backend (default: "history.db")
+database_file = "history.db"
 
 [execution]
 # Maximum captured output per stream (stdout/stderr) in bytes (default: 8MB)

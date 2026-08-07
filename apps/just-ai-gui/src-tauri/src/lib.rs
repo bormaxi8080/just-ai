@@ -6,8 +6,9 @@ use std::{
 
 use just_ai::application::{
   execution::{CancellationToken, PreparedRun, RecipeExecutor, RunConfirmation, RunRequest},
-  history::{JsonLineHistory, RunHistory, RunRecord, project_history_path},
+  history::{RunHistory, RunRecord, create_history, SqliteHistory, SqliteRunRecord},
 };
+use just_ai::config::HistoryConfig;
 use tauri::Emitter;
 
 #[tauri::command]
@@ -31,16 +32,16 @@ async fn prepare_run(request: RunRequest) -> Result<PreparedRun, String> {
 }
 
 #[tauri::command]
-fn recent_runs(project_root: PathBuf, limit: usize) -> Result<Vec<RunRecord>, String> {
+async fn recent_runs(project_root: PathBuf, limit: usize) -> Result<Vec<RunRecord>, String> {
   if !project_root.is_dir() {
     return Err(format!(
       "project root is not a directory: {}",
       project_root.display()
     ));
   }
-  JsonLineHistory::new(project_history_path(&project_root), 500)
-    .recent(limit.min(100))
-    .map_err(|error| error.to_string())
+  let config = HistoryConfig::default();
+  let history = create_history(config).map_err(|error| error.to_string())?;
+  history.recent(limit.min(100)).map_err(|error| error.to_string())
 }
 
 #[derive(serde::Serialize)]
@@ -86,10 +87,11 @@ async fn execute_run(
       started_at_ms,
       started.elapsed().as_millis(),
       &completed,
+      &HistoryConfig::default(),
     );
-    JsonLineHistory::new(project_history_path(&project_root), 500)
-      .append(&record)
-      .map_err(|error| error.to_string())?;
+    let config = HistoryConfig::default();
+    let history = create_history(config).map_err(|error| error.to_string())?;
+    history.append(&record).map_err(|error| error.to_string())?;
     Ok(RunResult {
       success: completed.status.success(),
       exit_code: completed.status.code(),

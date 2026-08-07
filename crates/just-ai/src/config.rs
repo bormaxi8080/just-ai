@@ -87,16 +87,33 @@ impl std::fmt::Display for ConfigError {
 
 impl std::error::Error for ConfigError {}
 
-/// History configuration (JSONL run history).
+/// History configuration (JSONL or SQLite run history).
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum HistoryBackend {
+    Jsonl,
+    Sqlite,
+}
+
+impl Default for HistoryBackend {
+    fn default() -> Self {
+        Self::Sqlite
+    }
+}
+
+/// History configuration (JSONL or SQLite run history).
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct HistoryConfig {
+    /// Storage backend: "jsonl" or "sqlite" (default: "sqlite")
+    #[serde(default)]
+    pub backend: HistoryBackend,
     /// Maximum number of history records to retain.
     #[serde(default = "default_max_records")]
     pub max_records: usize,
     /// Maximum size of a single history record in bytes.
     #[serde(default = "default_max_record_bytes")]
     pub max_record_bytes: usize,
-    /// Maximum total history file size in bytes.
+    /// Maximum total history file size in bytes (JSONL only).
     #[serde(default = "default_max_file_bytes")]
     pub max_file_bytes: usize,
     /// Number of bytes to keep from stdout/stderr tails.
@@ -105,20 +122,25 @@ pub struct HistoryConfig {
     /// Additional secret patterns to redact (regex).
     #[serde(default)]
     pub redact_patterns: Vec<String>,
-    /// History file name (relative to project root).
+    /// History file name (relative to project root) for JSONL backend.
     #[serde(default = "default_history_file")]
     pub file_name: String,
+    /// Database file path for SQLite backend (relative to data dir).
+    #[serde(default = "default_database_file")]
+    pub database_file: String,
 }
 
 impl Default for HistoryConfig {
     fn default() -> Self {
         Self {
+            backend: HistoryBackend::default(),
             max_records: default_max_records(),
             max_record_bytes: default_max_record_bytes(),
             max_file_bytes: default_max_file_bytes(),
             output_tail_bytes: default_output_tail_bytes(),
             redact_patterns: vec![],
             file_name: default_history_file(),
+            database_file: default_database_file(),
         }
     }
 }
@@ -128,6 +150,7 @@ fn default_max_record_bytes() -> usize { 64 * 1024 }
 fn default_max_file_bytes() -> usize { 500 * (64 * 1024 + 1) }
 fn default_output_tail_bytes() -> usize { 16 * 1024 }
 fn default_history_file() -> String { ".just-ai/history.jsonl".to_string() }
+fn default_database_file() -> String { "history.db".to_string() }
 
 impl HistoryConfig {
     /// Effective max file bytes (computed from records × record_bytes if not explicitly set).

@@ -1,11 +1,13 @@
 use {
-    crate::config::HistoryConfig,
+    crate::config::{HistoryBackend, HistoryConfig},
     super::{
         execution::{CompletedRun, RunRequest},
         project_context::redact_text,
     },
     crate::bounded_file,
+    chrono::{DateTime, Utc},
     serde::{Deserialize, Serialize},
+    sqlx::{sqlite::SqlitePoolOptions, Pool, Sqlite, Row},
     std::{
         fs,
         hash::{DefaultHasher, Hash, Hasher},
@@ -55,14 +57,76 @@ impl RunRecord {
     }
 }
 
+/// SQLite-based run record with additional metadata for queries
+#[derive(Debug)]
+struct SqliteRunRecord {
+    id: String,
+    recipe: String,
+    arguments: String, // JSON serialized
+    started_at_ms: i64,
+    duration_ms: i64,
+    exit_code: Option<i32>,
+    success: bool,
+    cancelled: bool,
+    stdout_tail: String,
+    stderr_tail: String,
+    started_at: DateTime<Utc>,
+}
+
+impl From<RunRecord> for SqliteRunRecord {
+    fn from(record: RunRecord) -> Self {
+        let started_at = DateTime::from_timestamp_millis(
+            i64::try_from(record.started_at_ms).unwrap_or(0)
+        ).unwrap_or_else(|| Utc::now());
+        Self {
+            id: record.id,
+            recipe: record.recipe,
+            arguments: serde_json::to_string(&record.arguments).unwrap_or_default(),
+            started_at_ms: i64::try_from(record.started_at_ms).unwrap_or(0),
+            duration_ms: i64::try_from(record.duration_ms).unwrap_or(0),
+            exit_code: record.exit_code,
+            success: record.success,
+            cancelled: record.cancelled,
+            stdout_tail: record.stdout_tail,
+            stderr_tail: record.stderr_tail,
+            started_at,
+        }
+    }
+}
+
+impl From<SqliteRunRecord> for RunRecord {
+    fn from(record: SqliteRunRecord) -> Self {
+        let arguments: Vec<String> = serde_json::from_str(&record.arguments).unwrap_or_default();
+        Self {
+            id: record.id,
+            recipe: record.recipe,
+            arguments,
+            started_at_ms: u128::try_from(record.started_at_ms).unwrap_or(0),
+            duration_ms: u128::try_from(record.duration_ms).unwrap_or(0),
+            exit_code: record.exit_code,
+            success: record.success,
+            cancelled: record.cancelled,
+            stdout_tail: record.stdout_tail,
+            stderr_tail: record.stderr_tail,
+        }
+    }
+}
+
 pub trait RunHistory {
     fn append(&self, record: &RunRecord) -> io::Result<()>;
     fn recent(&self, limit: usize) -> io::Result<Vec<RunRecord>>;
+    fn query(&self, recipe: Option<&str>, success: Option<bool>, limit: usize) -> io::Result<Vec<RunRecord>>;
 }
 
 #[derive(Clone, Debug)]
 pub struct JsonLineHistory {
     path: PathBuf,
+    config: HistoryConfig,
+}
+
+#[derive(Clone)]
+pub struct SqliteHistory {
+    pool: Pool<Sqlite>,
     config: HistoryConfig,
 }
 
@@ -153,16 +217,244 @@ impl RunHistory for JsonLineHistory {
         let from = records.len().saturating_sub(limit);
         Ok(records[from..].iter().rev().cloned().collect())
     }
+
+    fn query(&self, recipe: Option<&str>, success: Option<bool>, limit: usize) -> io::Result<Vec<RunRecord>> {
+        let records = self.read_all()?;
+        let mut filtered: Vec<RunRecord> = records
+            .into_iter()
+            .filter(|r| recipe.map_or(true, |recipe_name| r.recipe == recipe_name))
+            .filter(|r| success.map_or(true, |s| r.success == s))
+            .rev()
+            .take(limit)
+            .collect();
+        filtered.reverse();
+        Ok(filtered)
+    }
+}
+
+impl SqliteHistory {
+    pub async fn new(config: HistoryConfig) -> io::Result<Self> {
+        let base = std::env::var_os("JUST_AI_DATA_DIR")
+            .map(PathBuf::from)
+            .or_else(dirs::data_local_dir)
+            .unwrap_or_else(std::env::temp_dir)
+            .join("just-ai");
+        fs::create_dir_all(&base)?;
+        let db_path = base.join(&config.database_file);
+        let db_url = format!("sqlite://{}?mode=rwc", db_path.display());
+
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect(&db_url)
+            .await
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS runs (
+                id TEXT PRIMARY KEY,
+                recipe TEXT NOT NULL,
+                arguments TEXT NOT NULL DEFAULT '[]',
+                started_at_ms INTEGER NOT NULL,
+                duration_ms INTEGER NOT NULL,
+                exit_code INTEGER,
+                success BOOLEAN NOT NULL,
+                cancelled BOOLEAN NOT NULL DEFAULT FALSE,
+                stdout_tail TEXT NOT NULL DEFAULT '',
+                stderr_tail TEXT NOT NULL DEFAULT '',
+                started_at DATETIME NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_runs_recipe ON runs(recipe);
+            CREATE INDEX IF NOT EXISTS idx_runs_started_at ON runs(started_at);
+            CREATE INDEX IF NOT EXISTS idx_runs_success ON runs(success);
+            "#
+        )
+        .execute(&pool)
+        .await
+        .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+
+        Ok(Self { pool, config })
+    }
+
+    async fn enforce_retention(&self) -> io::Result<()> {
+        sqlx::query(
+            r#"
+            DELETE FROM runs
+            WHERE id IN (
+                SELECT id FROM runs
+                ORDER BY started_at DESC
+                LIMIT -1 OFFSET ?
+            )
+            "#
+        )
+        .bind(i64::try_from(self.config.max_records).unwrap_or(500))
+        .execute(&self.pool)
+        .await
+        .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+        Ok(())
+    }
+}
+
+impl RunHistory for SqliteHistory {
+    fn append(&self, record: &RunRecord) -> io::Result<()> {
+        // For synchronous interface, we block on the async operation
+        let rt = tokio::runtime::Handle::try_current()
+            .map_err(|_| io::Error::new(io::ErrorKind::Other, "no tokio runtime"))?;
+        rt.block_on(self.append_async(record))
+    }
+
+    fn recent(&self, limit: usize) -> io::Result<Vec<RunRecord>> {
+        let rt = tokio::runtime::Handle::try_current()
+            .map_err(|_| io::Error::new(io::ErrorKind::Other, "no tokio runtime"))?;
+        rt.block_on(self.recent_async(limit))
+    }
+
+    fn query(&self, recipe: Option<&str>, success: Option<bool>, limit: usize) -> io::Result<Vec<RunRecord>> {
+        let rt = tokio::runtime::Handle::try_current()
+            .map_err(|_| io::Error::new(io::ErrorKind::Other, "no tokio runtime"))?;
+        rt.block_on(self.query_async(recipe, success, limit))
+    }
+}
+
+impl SqliteHistory {
+    async fn append_async(&self, record: &RunRecord) -> io::Result<()> {
+        let sqlite_record: SqliteRunRecord = record.clone().into();
+        sqlx::query(
+            r#"
+            INSERT OR REPLACE INTO runs (id, recipe, arguments, started_at_ms, duration_ms, exit_code, success, cancelled, stdout_tail, stderr_tail, started_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            "#
+        )
+        .bind(&sqlite_record.id)
+        .bind(&sqlite_record.recipe)
+        .bind(&sqlite_record.arguments)
+        .bind(sqlite_record.started_at_ms)
+        .bind(sqlite_record.duration_ms)
+        .bind(sqlite_record.exit_code)
+        .bind(sqlite_record.success)
+        .bind(sqlite_record.cancelled)
+        .bind(&sqlite_record.stdout_tail)
+        .bind(&sqlite_record.stderr_tail)
+        .bind(sqlite_record.started_at)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+
+        self.enforce_retention().await
+    }
+
+    async fn recent_async(&self, limit: usize) -> io::Result<Vec<RunRecord>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT id, recipe, arguments, started_at_ms, duration_ms, exit_code, success, cancelled, stdout_tail, stderr_tail, started_at
+            FROM runs
+            ORDER BY started_at DESC
+            LIMIT ?
+            "#
+        )
+        .bind(i64::try_from(limit).unwrap_or(50))
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+
+        let mut records: Vec<RunRecord> = rows
+            .into_iter()
+            .map(|row| {
+                SqliteRunRecord {
+                    id: row.get("id"),
+                    recipe: row.get("recipe"),
+                    arguments: row.get("arguments"),
+                    started_at_ms: row.get("started_at_ms"),
+                    duration_ms: row.get("duration_ms"),
+                    exit_code: row.get("exit_code"),
+                    success: row.get("success"),
+                    cancelled: row.get("cancelled"),
+                    stdout_tail: row.get("stdout_tail"),
+                    stderr_tail: row.get("stderr_tail"),
+                    started_at: row.get("started_at"),
+                }.into()
+            })
+            .collect();
+        records.reverse();
+        Ok(records)
+    }
+
+    async fn query_async(&self, recipe: Option<&str>, success: Option<bool>, limit: usize) -> io::Result<Vec<RunRecord>> {
+        let mut query = String::from(
+            r#"
+            SELECT id, recipe, arguments, started_at_ms, duration_ms, exit_code, success, cancelled, stdout_tail, stderr_tail, started_at
+            FROM runs
+            WHERE 1=1
+            "#
+        );
+        if recipe.is_some() {
+            query.push_str(" AND recipe = ?");
+        }
+        if success.is_some() {
+            query.push_str(" AND success = ?");
+        }
+        query.push_str(" ORDER BY started_at DESC LIMIT ?");
+
+        let mut q = sqlx::query(&query);
+        if let Some(recipe_name) = recipe {
+            q = q.bind(recipe_name);
+        }
+        if let Some(s) = success {
+            q = q.bind(s);
+        }
+        q = q.bind(i64::try_from(limit).unwrap_or(50));
+
+        let rows = q.fetch_all(&self.pool).await.map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+
+        let mut records: Vec<RunRecord> = rows
+            .into_iter()
+            .map(|row| {
+                SqliteRunRecord {
+                    id: row.get("id"),
+                    recipe: row.get("recipe"),
+                    arguments: row.get("arguments"),
+                    started_at_ms: row.get("started_at_ms"),
+                    duration_ms: row.get("duration_ms"),
+                    exit_code: row.get("exit_code"),
+                    success: row.get("success"),
+                    cancelled: row.get("cancelled"),
+                    stdout_tail: row.get("stdout_tail"),
+                    stderr_tail: row.get("stderr_tail"),
+                    started_at: row.get("started_at"),
+                }.into()
+            })
+            .collect();
+        records.reverse();
+        Ok(records)
+    }
+}
+
+pub fn create_history(config: HistoryConfig) -> io::Result<Box<dyn RunHistory>> {
+    match config.backend {
+        HistoryBackend::Jsonl => {
+            let path = project_history_path(Path::new("."), &config.file_name);
+            Ok(Box::new(JsonLineHistory::new(path, config)))
+        }
+        HistoryBackend::Sqlite => {
+            // This creates the history in a blocking manner - caller should use async version
+            // For backward compatibility, we provide a synchronous factory that works with existing code
+            let rt = tokio::runtime::Runtime::new()
+                .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+            let history = rt.block_on(SqliteHistory::new(config))?;
+            Ok(Box::new(history))
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::HistoryConfig;
+    use crate::config::{HistoryBackend, HistoryConfig};
 
     fn config() -> HistoryConfig {
         let mut config = HistoryConfig::default();
         config.max_records = 2;
+        config.backend = HistoryBackend::Jsonl;
         config
     }
 
@@ -290,19 +582,6 @@ mod tests {
         assert_eq!(record.stderr_tail, "API_KEY = <redacted>");
     }
 
-    #[cfg(unix)]
-    fn successful_status() -> std::process::ExitStatus {
-        std::process::Command::new("true").status().unwrap()
-    }
-
-    #[cfg(windows)]
-    fn successful_status() -> std::process::ExitStatus {
-        std::process::Command::new("cmd")
-            .args(["/C", "exit", "0"])
-            .status()
-            .unwrap()
-    }
-
     #[test]
     fn legacy_records_default_new_observability_fields() {
         let record: RunRecord = serde_json::from_str(
@@ -326,5 +605,51 @@ mod tests {
         let recent = history.recent(20).unwrap();
         assert_eq!(recent.len(), 10);
         assert_eq!(recent[0].id, "record-14");
+    }
+
+    #[test]
+    fn jsonl_query_filters_by_recipe() {
+        let directory = tempfile::tempdir().unwrap();
+        let history = JsonLineHistory::new(directory.path().join("history.jsonl"), config());
+        history.append(&record("1")).unwrap();
+        let mut r2 = record("2");
+        r2.recipe = "build".into();
+        history.append(&r2).unwrap();
+        let mut r3 = record("3");
+        r3.recipe = "test".into();
+        history.append(&r3).unwrap();
+
+        let results = history.query(Some("test"), None, 10).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].recipe, "test");
+    }
+
+    #[test]
+    fn jsonl_query_filters_by_success() {
+        let directory = tempfile::tempdir().unwrap();
+        let history = JsonLineHistory::new(directory.path().join("history.jsonl"), config());
+        let mut r1 = record("1");
+        r1.success = true;
+        history.append(&r1).unwrap();
+        let mut r2 = record("2");
+        r2.success = false;
+        history.append(&r2).unwrap();
+
+        let results = history.query(None, Some(false), 10).unwrap();
+        assert_eq!(results.len(), 1);
+        assert!(!results[0].success);
+    }
+
+    #[cfg(unix)]
+    fn successful_status() -> std::process::ExitStatus {
+        std::process::Command::new("true").status().unwrap()
+    }
+
+    #[cfg(windows)]
+    fn successful_status() -> std::process::ExitStatus {
+        std::process::Command::new("cmd")
+            .args(["/C", "exit", "0"])
+            .status()
+            .unwrap()
     }
 }

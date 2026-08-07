@@ -15,9 +15,13 @@ jsonschema = { version = "0.48.0", default-features = false }
 serde = { version = "1.0.130", features = ["derive"] }
 serde_json = "1.0.68"
 similar = "3.0.0"
+chrono = { version = "0.4", features = ["serde"] }
+sqlx = { version = "0.8", features = ["sqlite", "json", "chrono", "uuid", "runtime-tokio-native-tls"] }
 tempfile = "3.0.0"
+tokio = { version = "1.0", features = ["rt", "rt-multi-thread", "macros", "time", "fs"] }
 toml = "0.8"
 ureq = { version = "3.2.0", features = ["json"] }
+uuid = { version = "1.0", features = ["v4", "serde"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2.0"
