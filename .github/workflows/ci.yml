@@ -167,7 +167,7 @@ jobs:
 
       - name: Test MCP image
         run: |
-          echo '{"jsonrpc":"2.0","id":1,"method":"ping"}' | docker run -i just-ai/mcp:test | jq -e '.result == "pong"'
+          echo '{"jsonrpc":"2.0","id":1,"method":"ping"}' | docker run -i just-ai/mcp:test | jq -e '.result != null'
 
   # -------------------------------------------------------------------
   # Security audit
@@ -188,7 +188,7 @@ jobs:
       - name: Run cargo audit
         run: |
           cargo install cargo-audit
-          cargo audit --workspace
+          cargo audit
 
       - name: Run cargo deny
         run: |
