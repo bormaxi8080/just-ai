@@ -14,4 +14,5 @@
 /test-utilities/target
 /tmp
 
+.docker/
 .DS_Store

@@ -8,7 +8,7 @@ services:
       dockerfile: Dockerfile.cli
     volumes:
       - ${PWD}:/workspace
-      - just-ai-data:/home/justai/.local/share/just-ai
+      - ${PWD}/.docker/data/cli:/home/justai/.local/share/just-ai
     working_dir: /workspace
     environment:
       - JUST_AI_DATA_DIR=/home/justai/.local/share/just-ai
@@ -25,7 +25,7 @@ services:
       dockerfile: Dockerfile.mcp
     volumes:
       - ${PWD}:/workspace
-      - just-ai-data:/home/justai/.local/share/just-ai
+      - ${PWD}/.docker/data/mcp:/home/justai/.local/share/just-ai
     working_dir: /workspace
     environment:
       - JUST_AI_DATA_DIR=/home/justai/.local/share/just-ai
@@ -43,9 +43,9 @@ services:
       dockerfile: Dockerfile.dev
     volumes:
       - ${PWD}:/workspace
-      - just-ai-data:/home/justai/.local/share/just-ai
-      - cargo-cache:/usr/local/cargo/registry
-      - cargo-target:/workspace/target
+      - ${PWD}/.docker/data/dev:/home/justai/.local/share/just-ai
+      - ${PWD}/.docker/cache/cargo:/usr/local/cargo/registry
+      - ${PWD}/.docker/cache/target:/workspace/target
     working_dir: /workspace
     environment:
       - JUST_AI_DATA_DIR=/home/justai/.local/share/just-ai
@@ -55,7 +55,5 @@ services:
       - JUST_AI_BASE_URL=${JUST_AI_BASE_URL:-}
     command: sleep infinity
 
-volumes:
-  just-ai-data:
-  cargo-cache:
-  cargo-target:
+# Named volumes removed — all data now lives in .docker/ (bind mounts)
+# Add .docker/ to .gitignore to keep container data out of git

@@ -8,7 +8,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     pkg-config \
     libssl-dev \
     ca-certificates \
-    just \
     git \
     curl \
     build-essential \
@@ -20,11 +19,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     npm \
     && rm -rf /var/lib/apt/lists/*
 
+# Install just via cargo (not in Debian repos)
+RUN cargo install just --locked
+
 # Create non-root user
 RUN useradd -m -u 1000 -s /bin/bash justai
 
-# Install cargo tools
-RUN cargo install cargo-watch cargo-expand cargo-audit cargo-outdated cargo-deny
+# Install cargo tools compatible with Rust 1.89
+RUN cargo install cargo-watch cargo-expand cargo-deny
 
 # Switch to non-root user
 USER justai
