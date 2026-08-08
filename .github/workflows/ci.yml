@@ -120,13 +120,13 @@ jobs:
           key: cargo-${{ runner.os }}-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Build MCP
-        run: cargo build --release --package just-ai-mcp --target ${{ matrix.target }}
+        run: cargo build --release --manifest-path apps/just-ai-mcp/Cargo.toml --target ${{ matrix.target }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
-          path: target/${{ matrix.target }}/release/just-ai-mcp*
+          path: apps/just-ai-mcp/target/${{ matrix.target }}/release/just-ai-mcp*
 
   # -------------------------------------------------------------------
   # Docker images
@@ -163,7 +163,7 @@ jobs:
       - name: Test CLI image
         run: |
           docker run --rm just-ai/cli:test --help
-          docker run --rm just-ai/cli:test doctor
+          docker run --rm -v ${{ github.workspace }}:/workspace -w /workspace just-ai/cli:test doctor
 
       - name: Test MCP image
         run: |
