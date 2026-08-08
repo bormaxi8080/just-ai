@@ -502,7 +502,7 @@ mod tests {
   #[cfg(unix)]
   #[test]
   fn prepare_rejects_dotenv_command_before_dry_run() {
-    use std::{fs, os::unix::fs::PermissionsExt};
+    use std::{fs, os::unix::fs::PermissionsExt, thread, time::Duration};
     let directory = tempfile::tempdir().unwrap();
     let binary = directory.path().join("fake-just");
     let marker = directory.path().join("dry-run-started");
@@ -517,6 +517,8 @@ mod tests {
     let mut permissions = fs::metadata(&binary).unwrap().permissions();
     permissions.set_mode(0o700);
     fs::set_permissions(&binary, permissions).unwrap();
+    // Small delay to avoid "Text file busy" on some filesystems (CI)
+    thread::sleep(Duration::from_millis(100));
 
     let error = RecipeExecutor::new(&binary)
       .prepare(RunRequest {

@@ -6,7 +6,7 @@ use std::{
 
 use just_ai::application::{
   execution::{CancellationToken, PreparedRun, RecipeExecutor, RunConfirmation, RunRequest},
-  history::{RunRecord, create_history, SqliteHistory},
+  history::{RunRecord, create_history},
 };
 use just_ai::config::HistoryConfig;
 use tauri::Emitter;
@@ -76,7 +76,7 @@ async fn execute_run(
       .map_err(|error| error.to_string())?
       .as_millis();
     let started = Instant::now();
-    let project_root = prepared.request.project_root.clone();
+    let _project_root = prepared.request.project_root.clone();
     let completed = RecipeExecutor::new("just")
       .execute_streaming(&prepared, &confirmation, &cancellation, |event| {
         let _ = app.emit("run-event", event);

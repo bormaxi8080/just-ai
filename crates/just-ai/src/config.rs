@@ -112,17 +112,12 @@ impl std::fmt::Display for ConfigError {
 impl std::error::Error for ConfigError {}
 
 /// History configuration (JSONL or SQLite run history).
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum HistoryBackend {
   Jsonl,
+  #[default]
   Sqlite,
-}
-
-impl Default for HistoryBackend {
-  fn default() -> Self {
-    Self::Sqlite
-  }
 }
 
 /// History configuration (JSONL or SQLite run history).
