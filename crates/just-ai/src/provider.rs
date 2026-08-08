@@ -164,7 +164,7 @@ impl AiProvider for OpenAiResponsesProvider {
     let agent = self.agent.clone();
     let api_key = self.api_key.clone();
     let stream = async_stream::stream! {
-      let mut request = agent.post(&url).header("Content-Type", "application/json");
+      let request = agent.post(&url).header("Content-Type", "application/json");
       let request = request.header("Authorization", &format!("Bearer {api_key}"));
       let mut response = match request.send_json(body) {
         Ok(r) => r,
@@ -195,16 +195,16 @@ impl AiProvider for OpenAiResponsesProvider {
           }
           if let Ok(json) = serde_json::from_str::<Value>(data) {
             // Extract output_text chunks
-            if let Some(output) = json.pointer("/output") {
-              if let Some(array) = output.as_array() {
-                for item in array {
-                  if let Some(content_array) = item.pointer("/content").and_then(|c| c.as_array()) {
-                    for content in content_array {
-                      if content.get("type").and_then(Value::as_str) == Some("output_text") {
-                        if let Some(text) = content.get("text").and_then(Value::as_str) {
-                          yield Ok(text.to_string());
-                        }
-                      }
+            if let Some(output) = json.pointer("/output")
+              && let Some(array) = output.as_array()
+            {
+              for item in array {
+                if let Some(content_array) = item.pointer("/content").and_then(|c| c.as_array()) {
+                  for content in content_array {
+                    if content.get("type").and_then(Value::as_str) == Some("output_text")
+                      && let Some(text) = content.get("text").and_then(Value::as_str)
+                    {
+                      yield Ok(text.to_string());
                     }
                   }
                 }
@@ -287,10 +287,10 @@ impl AiProvider for OllamaProvider {
           continue;
         }
         if let Ok(json) = serde_json::from_str::<Value>(line) {
-          if let Some(content) = json.pointer("/message/content").and_then(Value::as_str) {
-            if !content.is_empty() {
-              yield Ok(content.to_string());
-            }
+          if let Some(content) = json.pointer("/message/content").and_then(Value::as_str)
+            && !content.is_empty()
+          {
+            yield Ok(content.to_string());
           }
           if json.get("done").and_then(Value::as_bool) == Some(true) {
             break;
@@ -366,12 +366,11 @@ impl AiProvider for OpenAiCompatibleProvider {
           if data == "[DONE]" {
             break;
           }
-          if let Ok(json) = serde_json::from_str::<Value>(data) {
-            if let Some(content) = json.pointer("/choices/0/delta/content").and_then(Value::as_str) {
-              if !content.is_empty() {
-                yield Ok(content.to_string());
-              }
-            }
+          if let Ok(json) = serde_json::from_str::<Value>(data)
+            && let Some(content) = json.pointer("/choices/0/delta/content").and_then(Value::as_str)
+            && !content.is_empty()
+          {
+            yield Ok(content.to_string());
           }
         }
       }

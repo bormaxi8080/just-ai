@@ -1,31 +1,29 @@
 use crate::{
-    config::ExecutionConfig,
-    domain::{
-        policy::{DefaultPolicy, PolicyDecision},
-        risk::{RiskFinding, RiskLevel},
-    },
+  config::ExecutionConfig,
+  domain::{
+    policy::{DefaultPolicy, PolicyDecision},
+    risk::{RiskFinding, RiskLevel},
+  },
 };
 use serde::{Deserialize, Serialize};
 use std::{
-    error::Error,
-    fmt::{self, Display, Formatter},
-    io::Read,
-    path::PathBuf,
-    process::{Command, ExitStatus, Stdio},
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-        mpsc,
-    },
-    thread,
-    time::{Duration, SystemTime, UNIX_EPOCH},
+  error::Error,
+  fmt::{self, Display, Formatter},
+  io::Read,
+  path::PathBuf,
+  process::{Command, ExitStatus, Stdio},
+  sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+    mpsc,
+  },
+  thread,
+  time::{SystemTime, UNIX_EPOCH},
 };
 
 mod process_tree;
 
 use process_tree::ProcessTree;
-
-
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct RunRequest {
@@ -95,26 +93,26 @@ impl Error for ExecutionError {}
 
 #[derive(Clone, Debug)]
 pub struct RecipeExecutor {
-    just_binary: PathBuf,
-    config: ExecutionConfig,
+  just_binary: PathBuf,
+  config: ExecutionConfig,
 }
 
 impl RecipeExecutor {
-    #[must_use]
-    pub fn new(just_binary: impl Into<PathBuf>) -> Self {
-        Self {
-            just_binary: just_binary.into(),
-            config: ExecutionConfig::default(),
-        }
+  #[must_use]
+  pub fn new(just_binary: impl Into<PathBuf>) -> Self {
+    Self {
+      just_binary: just_binary.into(),
+      config: ExecutionConfig::default(),
     }
+  }
 
-    #[must_use]
-    pub fn with_config(just_binary: impl Into<PathBuf>, config: ExecutionConfig) -> Self {
-        Self {
-            just_binary: just_binary.into(),
-            config,
-        }
+  #[must_use]
+  pub fn with_config(just_binary: impl Into<PathBuf>, config: ExecutionConfig) -> Self {
+    Self {
+      just_binary: just_binary.into(),
+      config,
     }
+  }
 
   pub fn prepare(&self, request: RunRequest) -> Result<PreparedRun, ExecutionError> {
     validate_request(&request)?;
@@ -429,6 +427,7 @@ fn command_error(action: &str, stderr: &[u8]) -> ExecutionError {
 #[cfg(test)]
 mod tests {
   use super::*;
+  use std::time::Duration;
 
   #[test]
   fn rejects_option_instead_of_recipe() {

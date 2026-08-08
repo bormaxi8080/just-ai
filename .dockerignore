@@ -1,0 +1,16 @@
+target/
+.git/
+.gitignore
+*.md
+!just-ai.toml
+!README.md
+!CHANGELOG.md
+!LICENSE
+!LICENSE*
+!.vscode/
+!.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+*.log

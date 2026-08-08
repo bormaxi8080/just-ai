@@ -1,0 +1,61 @@
+version: '3.8'
+
+services:
+  # CLI tool - runs just-ai commands
+  cli:
+    build:
+      context: .
+      dockerfile: Dockerfile.cli
+    volumes:
+      - ${PWD}:/workspace
+      - just-ai-data:/home/justai/.local/share/just-ai
+    working_dir: /workspace
+    environment:
+      - JUST_AI_DATA_DIR=/home/justai/.local/share/just-ai
+      - JUST_AI_API_KEY=${JUST_AI_API_KEY:-}
+      - JUST_AI_PROVIDER=${JUST_AI_PROVIDER:-openai}
+      - JUST_AI_MODEL=${JUST_AI_MODEL:-}
+      - JUST_AI_BASE_URL=${JUST_AI_BASE_URL:-}
+    entrypoint: just-ai
+
+  # MCP Server - runs as stdio server
+  mcp:
+    build:
+      context: .
+      dockerfile: Dockerfile.mcp
+    volumes:
+      - ${PWD}:/workspace
+      - just-ai-data:/home/justai/.local/share/just-ai
+    working_dir: /workspace
+    environment:
+      - JUST_AI_DATA_DIR=/home/justai/.local/share/just-ai
+      - JUST_AI_API_KEY=${JUST_AI_API_KEY:-}
+      - JUST_AI_PROVIDER=${JUST_AI_PROVIDER:-openai}
+      - JUST_AI_MODEL=${JUST_AI_MODEL:-}
+      - JUST_AI_BASE_URL=${JUST_AI_BASE_URL:-}
+    stdin_open: true
+    tty: true
+
+  # Development container with all tools
+  dev:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    volumes:
+      - ${PWD}:/workspace
+      - just-ai-data:/home/justai/.local/share/just-ai
+      - cargo-cache:/usr/local/cargo/registry
+      - cargo-target:/workspace/target
+    working_dir: /workspace
+    environment:
+      - JUST_AI_DATA_DIR=/home/justai/.local/share/just-ai
+      - JUST_AI_API_KEY=${JUST_AI_API_KEY:-}
+      - JUST_AI_PROVIDER=${JUST_AI_PROVIDER:-openai}
+      - JUST_AI_MODEL=${JUST_AI_MODEL:-}
+      - JUST_AI_BASE_URL=${JUST_AI_BASE_URL:-}
+    command: sleep infinity
+
+volumes:
+  just-ai-data:
+  cargo-cache:
+  cargo-target:

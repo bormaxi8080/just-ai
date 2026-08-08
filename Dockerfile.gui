@@ -1,0 +1,98 @@
+# ===================================================================
+# just-ai GUI - Multi-stage Docker Build (Tauri)
+# ===================================================================
+# Stage 1: Frontend build
+FROM node:20-bookworm-slim AS frontend-builder
+
+WORKDIR /app
+
+# Copy package files
+COPY apps/just-ai-gui/package.json apps/just-ai-gui/package-lock.json* ./
+
+# Install dependencies
+RUN npm ci
+
+# Copy frontend source
+COPY apps/just-ai-gui/src ./src
+COPY apps/just-ai-gui/index.html apps/just-ai-gui/vite.config.ts apps/just-ai-gui/tsconfig.json ./
+
+# Build frontend
+RUN npm run build
+
+# ===================================================================
+# Stage 2: Rust build (using rust image with Tauri dependencies)
+FROM rust:1.89-slim-bookworm AS tauri-builder
+
+# Install Tauri system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    pkg-config \
+    libssl-dev \
+    libwebkit2gtk-4.1-dev \
+    libgtk-4-dev \
+    libayatana-appindicator3-dev \
+    librsvg2-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy Cargo files for caching - only what the GUI crate needs
+COPY crates/just-ai/Cargo.toml crates/just-ai/Cargo.toml
+COPY apps/just-ai-gui/src-tauri/Cargo.toml apps/just-ai-gui/src-tauri/Cargo.toml
+COPY apps/just-ai-gui/src-tauri/Cargo.lock apps/just-ai-gui/src-tauri/Cargo.lock
+
+# Create dummy src to cache dependencies
+RUN mkdir -p crates/just-ai/src apps/just-ai-gui/src-tauri/src && \
+    echo "fn main() {}" > crates/just-ai/src/main.rs && \
+    echo "fn main() {}" > apps/just-ai-gui/src-tauri/src/main.rs
+
+# Build dependencies
+RUN cargo build --release --manifest-path apps/just-ai-gui/src-tauri/Cargo.toml 2>/dev/null || true
+
+# Copy actual source
+COPY crates/just-ai/src crates/just-ai/src
+COPY apps/just-ai-gui/src-tauri/src apps/just-ai-gui/src-tauri/src
+COPY apps/just-ai-gui/src-tauri/build.rs apps/just-ai-gui/src-tauri/build.rs
+COPY apps/just-ai-gui/src-tauri/tauri.conf.json apps/just-ai-gui/src-tauri/tauri.conf.json
+COPY apps/just-ai-gui/src-tauri/icons apps/just-ai-gui/src-tauri/icons
+COPY apps/just-ai-gui/src-tauri/gen apps/just-ai-gui/src-tauri/gen
+COPY agent/ agent/
+
+# Copy built frontend
+COPY --from=frontend-builder /app/dist apps/just-ai-gui/dist
+
+# Build the Tauri app (binary only, not bundle)
+WORKDIR /app/apps/just-ai-gui/src-tauri
+RUN cargo build --release --manifest-path Cargo.toml
+
+# ===================================================================
+# Stage 3: Runtime
+FROM debian:bookworm-slim AS runtime
+
+# Install runtime dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    libssl3 \
+    libwebkit2gtk-4.1-0 \
+    libgtk-4-1 \
+    libayatana-appindicator3-1 \
+    librsvg2-2 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create non-root user
+RUN useradd -m -u 1000 -s /bin/bash justai
+
+# Copy the binary
+COPY --from=tauri-builder /app/apps/just-ai-gui/src-tauri/target/release/just-ai-gui /usr/local/bin/just-ai-gui
+
+# Set up data directory
+RUN mkdir -p /home/justai/.local/share/just-ai && chown -R justai:justai /home/justai/.local
+
+# Switch to non-root user
+USER justai
+WORKDIR /workspace
+
+# Default environment
+ENV JUST_AI_DATA_DIR=/home/justai/.local/share/just-ai
+
+# Entrypoint
+ENTRYPOINT ["just-ai-gui"]

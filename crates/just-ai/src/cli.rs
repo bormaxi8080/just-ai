@@ -179,11 +179,11 @@ fn try_main() -> Result<(), Box<dyn Error>> {
       confirm,
       arguments,
     } => {
+      use crate::config::Config;
       use application::{
         execution::{RecipeExecutor, RunConfirmation, RunRequest},
         history::{RunRecord, create_history},
       };
-      use crate::config::Config;
       use std::time::{Instant, SystemTime, UNIX_EPOCH};
       let project_root = env::current_dir()?;
       let config = Config::load(&project_root)?;
@@ -221,8 +221,8 @@ fn try_main() -> Result<(), Box<dyn Error>> {
       }
     }
     Commands::History { limit, json } => {
-      use application::history::{RunRecord, create_history};
       use crate::config::Config;
+      use application::history::create_history;
       let project_root = env::current_dir()?;
       let config = Config::load(&project_root)?;
       let history = create_history(config.history)?;

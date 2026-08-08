@@ -6,7 +6,7 @@ use std::{
 
 use just_ai::application::{
   execution::{CancellationToken, PreparedRun, RecipeExecutor, RunConfirmation, RunRequest},
-  history::{RunHistory, RunRecord, create_history, SqliteHistory, SqliteRunRecord},
+  history::{RunRecord, create_history, SqliteHistory},
 };
 use just_ai::config::HistoryConfig;
 use tauri::Emitter;
