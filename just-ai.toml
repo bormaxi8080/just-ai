@@ -1,0 +1,113 @@
+# just-ai Configuration
+# Place this file in your project root or any parent directory.
+# All sections and keys are optional - defaults shown in comments.
+
+[history]
+# Storage backend: "jsonl" or "sqlite" (default: "sqlite")
+backend = "sqlite"
+# Maximum number of history records to retain (default: 500)
+max_records = 500
+# Maximum size of a single history record in bytes (default: 64KB)
+max_record_bytes = 65536
+# Maximum total history file size in bytes (default: ~32MB, JSONL only)
+max_file_bytes = 32768500
+# Number of bytes to keep from stdout/stderr tails (default: 16KB)
+output_tail_bytes = 16384
+# Additional secret patterns to redact (regex patterns)
+# redact_patterns = ["my-custom-secret-pattern"]
+# History file name relative to data directory for JSONL backend (default: ".just-ai/history.jsonl")
+file_name = ".just-ai/history.jsonl"
+# Database file name for SQLite backend (default: "history.db")
+database_file = "history.db"
+
+[execution]
+# Maximum captured output per stream (stdout/stderr) in bytes (default: 8MB)
+max_capture_bytes = 8388608
+# Internal streaming queue capacity for run events (default: 32)
+stream_queue_capacity = 32
+# Cancellation poll interval in milliseconds (default: 25)
+cancellation_poll_ms = 25
+# Default just binary name or path (default: "just")
+just_binary = "just"
+# Read timeout for process output streams in seconds (default: 30)
+read_timeout_secs = 30
+
+[risk]
+# Enable built-in risk rules (default: true)
+builtin_rules = true
+# Custom blocked patterns: pattern -> reason
+# Uses normalized command (lowercase, whitespace collapsed)
+blocked_patterns = { }
+# Example:
+# blocked_patterns = { "rm -rf /data" = "protects data directory" }
+
+# Custom high-risk patterns: pattern -> reason
+high_patterns = { }
+# Example:
+# high_patterns = { "kubectl delete" = "kubernetes resource deletion" }
+
+# Custom medium-risk patterns: pattern -> reason
+medium_patterns = { }
+# Example:
+# medium_patterns = { "helm upgrade" = "kubernetes release upgrade" }
+
+[policy]
+# Default phrase template for ConfirmTyped (available vars: {recipe})
+confirm_typed_phrase = "run {recipe}"
+# Custom policy decisions per risk level (low, medium, high, blocked)
+# If not set, defaults apply:
+#   Low=Allow, Medium=Confirm, High=ConfirmTyped, Blocked=Deny
+[policy.decisions]
+# Example:
+# low = { type = "allow" }
+# medium = { type = "confirm" }
+# high = { type = "confirm_typed", phrase = "I confirm running {recipe}" }
+# blocked = { type = "deny", reason = "custom block reason" }
+
+[ai]
+# Provider name: openai, ollama, openai-compatible (default: "openai")
+provider = "openai"
+# Model name (default: provider-specific)
+# model = "gpt-5-mini"
+# Base URL for the API (default: provider-specific)
+# base_url = "https://api.openai.com/v1"
+# API key (can also be set via JUST_AI_API_KEY env var)
+# api_key = "sk-..."
+# Request timeout in seconds (default: 60)
+timeout_secs = 60
+# Maximum tokens for completion (if supported)
+# max_tokens = 4096
+# Temperature for sampling (if supported)
+# temperature = 0.7
+
+[scanner]
+# Per-file budget in bytes (default: 16KB)
+file_budget = 16384
+# Total budget in bytes (default: 64KB)
+total_budget = 65536
+# Allowlisted file names to scan (default: common project files)
+allowlist = [
+    "Cargo.toml",
+    "pyproject.toml",
+    "package.json",
+    "compose.yaml",
+    "compose.yml",
+    "docker-compose.yaml",
+    "docker-compose.yml",
+    "Makefile",
+    "README.md",
+]
+
+[bounded_file]
+# Maximum size of an editable file in bytes (default: 1MB)
+max_editable_file_bytes = 1048576
+# Default prefix read limit in bytes (default: 16KB)
+prefix_limit = 16384
+
+[mcp]
+# Maximum JSON-RPC frame size in bytes (default: 1MB)
+max_message_bytes = 1048576
+# Whether to enable stdio transport (default: true)
+stdio_enabled = true
+# Allowed tool names (empty = all built-in tools)
+# allowed_tools = ["inspect_project", "doctor"]

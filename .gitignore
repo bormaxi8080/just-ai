@@ -13,3 +13,6 @@
 /test-utilities/Cargo.lock
 /test-utilities/target
 /tmp
+
+.docker/
+.DS_Store

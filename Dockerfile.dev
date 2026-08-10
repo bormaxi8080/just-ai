@@ -1,0 +1,40 @@
+# ===================================================================
+# just-ai Development Container
+# ===================================================================
+FROM rust:1.89-bookworm
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    pkg-config \
+    libssl-dev \
+    ca-certificates \
+    git \
+    curl \
+    build-essential \
+    libwebkit2gtk-4.1-dev \
+    libgtk-4-dev \
+    libayatana-appindicator3-dev \
+    librsvg2-dev \
+    nodejs \
+    npm \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install just via cargo (not in Debian repos)
+RUN cargo install just --locked
+
+# Create non-root user
+RUN useradd -m -u 1000 -s /bin/bash justai
+
+# Install cargo tools compatible with Rust 1.89
+RUN cargo install cargo-watch cargo-expand cargo-deny
+
+# Switch to non-root user
+USER justai
+WORKDIR /workspace
+
+# Environment
+ENV CARGO_HOME=/usr/local/cargo
+ENV PATH="/usr/local/cargo/bin:${PATH}"
+
+# Default command
+CMD ["sleep", "infinity"]

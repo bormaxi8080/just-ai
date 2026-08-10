@@ -1,0 +1,75 @@
+# ===================================================================
+# just-ai CLI - Multi-stage Docker Build
+# ===================================================================
+# Build stage
+FROM rust:1.89-slim-bookworm AS builder
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    pkg-config \
+    libssl-dev \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set working directory
+WORKDIR /app
+
+# Copy just-ai crate files for dependency caching
+COPY crates/just-ai/Cargo.toml crates/just-ai/Cargo.toml
+COPY crates/action-versions/Cargo.toml crates/action-versions/Cargo.toml
+COPY crates/generate-book/Cargo.toml crates/generate-book/Cargo.toml
+
+# Create dummy src to cache dependencies
+RUN mkdir -p crates/just-ai/src crates/action-versions/src crates/generate-book/src && \
+    echo "fn main() {}" > crates/just-ai/src/main.rs && \
+    echo "fn main() {}" > crates/action-versions/src/main.rs && \
+    echo "fn main() {}" > crates/generate-book/src/main.rs
+
+# Build dependencies - build from crate root (not workspace)
+RUN cargo build --release --manifest-path crates/just-ai/Cargo.toml 2>/dev/null || true
+
+# Copy actual source
+COPY crates/just-ai/src crates/just-ai/src
+COPY crates/action-versions/src crates/action-versions/src
+COPY crates/generate-book/src crates/generate-book/src
+COPY agent/ agent/
+COPY just-ai.toml ./
+
+# Build the binary
+RUN cargo build --release --manifest-path crates/just-ai/Cargo.toml --locked
+
+# Build just for justfile execution
+RUN cargo install just --locked --root /app/just-install
+
+# ===================================================================
+# Runtime stage
+FROM debian:bookworm-slim AS runtime
+
+# Install runtime dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    libssl3 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy just from builder
+COPY --from=builder /app/just-install/bin/just /usr/local/bin/just
+
+# Create non-root user
+RUN useradd -m -u 1000 -s /bin/bash justai
+
+# Copy binary from builder
+COPY --from=builder /app/crates/just-ai/target/release/just-ai /usr/local/bin/just-ai
+
+# Set up data directory
+RUN mkdir -p /home/justai/.local/share/just-ai && chown -R justai:justai /home/justai/.local
+
+# Switch to non-root user
+USER justai
+WORKDIR /workspace
+
+# Default environment
+ENV JUST_AI_DATA_DIR=/home/justai/.local/share/just-ai
+
+# Entrypoint
+ENTRYPOINT ["just-ai"]
+CMD ["--help"]

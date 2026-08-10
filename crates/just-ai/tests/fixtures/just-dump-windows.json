@@ -1,0 +1,57 @@
+{
+  "source": "C:\\workspace\\justfile",
+  "warnings": ["windows fixture warning"],
+  "recipes": {
+    "prepare": {
+      "name": "prepare",
+      "namepath": "prepare",
+      "doc": "Prepare Windows artifacts",
+      "body": [["cmd.exe /D /C echo preparing"]],
+      "dependencies": [],
+      "parameters": [],
+      "private": false,
+      "quiet": false,
+      "shebang": false
+    },
+    "build": {
+      "name": "build",
+      "namepath": "build",
+      "doc": "Build with PowerShell",
+      "body": [
+        ["powershell.exe -NoProfile -Command \"Write-Output ", ["TARGET"], "\""]
+      ],
+      "dependencies": [{"recipe": "prepare"}],
+      "parameters": [
+        {
+          "name": "TARGET",
+          "kind": "singular",
+          "default": "C:\\Program Files\\just-ai"
+        },
+        {"name": "ARGS", "kind": "star", "default": null}
+      ],
+      "private": false,
+      "quiet": true,
+      "shebang": false
+    }
+  },
+  "modules": {
+    "tools": {
+      "source": "C:\\workspace\\tools.just",
+      "warnings": [],
+      "recipes": {
+        "status": {
+          "name": "status",
+          "namepath": "tools::status",
+          "doc": null,
+          "body": [["git status --short"]],
+          "dependencies": [],
+          "parameters": [],
+          "private": false,
+          "quiet": false,
+          "shebang": false
+        }
+      },
+      "modules": {}
+    }
+  }
+}
