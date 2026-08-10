@@ -193,7 +193,7 @@ jobs:
       - name: Run cargo deny
         run: |
           cargo install cargo-deny
-          cargo deny check advisories licenses bans sources
+          cargo deny --config deny.toml check advisories licenses bans sources
 
   # -------------------------------------------------------------------
   # Release on tag
