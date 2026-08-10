@@ -15,8 +15,11 @@ jobs:
   # Code checks
   # -------------------------------------------------------------------
   check:
-    name: Check & Test
-    runs-on: ubuntu-latest
+    name: Check & Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -142,32 +145,58 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build CLI image
+      - name: Docker meta (CLI)
+        id: meta-cli
+        uses: docker/metadata-action@v5
+        with:
+          images: just-ai/cli
+          tags: |
+            type=sha
+            type=ref,event=branch
+            type=raw,value=test,enable={{is_default_branch}}
+
+      - name: Build CLI image (multi-arch)
         uses: docker/build-push-action@v5
         with:
           context: .
           file: Dockerfile.cli
           push: false
-          load: true
-          tags: just-ai/cli:test
+          load: false
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ steps.meta-cli.outputs.tags }}
+          labels: ${{ steps.meta-cli.outputs.labels }}
 
-      - name: Build MCP image
+      - name: Docker meta (MCP)
+        id: meta-mcp
+        uses: docker/metadata-action@v5
+        with:
+          images: just-ai/mcp
+          tags: |
+            type=sha
+            type=ref,event=branch
+            type=raw,value=test,enable={{is_default_branch}}
+
+      - name: Build MCP image (multi-arch)
         uses: docker/build-push-action@v5
         with:
           context: .
           file: Dockerfile.mcp
           push: false
-          load: true
-          tags: just-ai/mcp:test
+          load: false
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ steps.meta-mcp.outputs.tags }}
+          labels: ${{ steps.meta-mcp.outputs.labels }}
 
-      - name: Test CLI image
+      - name: Test CLI image (amd64)
         run: |
-          docker run --rm just-ai/cli:test --help
-          docker run --rm -v ${{ github.workspace }}:/workspace -w /workspace just-ai/cli:test doctor
+          docker buildx build --load --platform linux/amd64 -t just-ai/cli:test-amd64 -f Dockerfile.cli .
+          docker run --rm just-ai/cli:test-amd64 --help
+          docker run --rm -v ${{ github.workspace }}:/workspace -w /workspace just-ai/cli:test-amd64 doctor
 
-      - name: Test MCP image
+      - name: Test MCP image (amd64)
         run: |
-          echo '{"jsonrpc":"2.0","id":1,"method":"ping"}' | docker run -i just-ai/mcp:test | jq -e '.result != null'
+          docker buildx build --load --platform linux/amd64 -t just-ai/mcp:test-amd64 -f Dockerfile.mcp .
+          echo '{"jsonrpc":"2.0","id":1,"method":"ping"}' | docker run -i just-ai/mcp:test-amd64 | jq -e '.result != null'
 
   # -------------------------------------------------------------------
   # Security audit

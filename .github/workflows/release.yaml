@@ -3,7 +3,7 @@ name: Release
 on:
   push:
     tags:
-    - '*'
+      - 'v*'
 
 defaults:
   run:
@@ -11,6 +11,8 @@ defaults:
 
 env:
   RUSTFLAGS: --deny warnings
+  REGISTRY: ghcr.io
+  IMAGE_ORG: ${{ github.repository_owner }}
 
 jobs:
   prerelease:
@@ -23,12 +25,13 @@ jobs:
     - name: Prerelease Check
       id: prerelease
       run: |
-        if [[ ${{ github.ref_name }} =~ ^[0-9]+[.][0-9]+[.][0-9]+$ ]]; then
+        if [[ ${{ github.ref_name }} =~ ^v[0-9]+[.][0-9]+[.][0-9]+$ ]]; then
             echo value=false >> $GITHUB_OUTPUT
         else
             echo value=true >> $GITHUB_OUTPUT
         fi
 
+  # Build binaries for all platforms (reuses the package script logic)
   package:
     strategy:
       matrix:
@@ -106,179 +109,267 @@ jobs:
             ;;
         esac
 
-    - name: Generate Manpage
+    - name: Build CLI
+      run: cargo build --release --package just-ai --target ${{ matrix.target }}
+
+    - name: Build MCP
+      run: cargo build --release --manifest-path apps/just-ai-mcp/Cargo.toml --target ${{ matrix.target }}
+
+    - name: Package CLI
+      id: package-cli
       run: |
-        set -euxo pipefail
-        cargo build
-        mkdir -p man
-        ./target/debug/just --man > man/just.1
+       mkdir -p dist
+        TARGET=${{ matrix.target }}
+        VERSION=${{ github.ref_name }}
+        BINARY=target/${TARGET}/release/just-ai
+        [[ "$TARGET" == *windows* ]] && BINARY="${BINARY}.exe"
+        ARCHIVE="just-ai-${VERSION}-${TARGET}.tar.gz"
+        tar czf "dist/${ARCHIVE}" -C target/${TARGET}/release just-ai*
+        echo "archive=dist/${ARCHIVE}" >> $GITHUB_OUTPUT
 
-    - name: Package
-      id: package
-      env:
-        TARGET: ${{ matrix.target }}
-        REF: ${{ github.ref }}
-        OS: ${{ matrix.os }}
-        TARGET_RUSTFLAGS: ${{ matrix.target_rustflags }}
-      run: ./bin/package
-      shell: bash
+    - name: Package MCP
+      id: package-mcp
+      run: |
+        mkdir -p dist
+        TARGET=${{ matrix.target }}
+        VERSION=${{ github.ref_name }}
+        BINARY=apps/just-ai-mcp/target/${TARGET}/release/just-ai-mcp
+        [[ "$TARGET" == *windows* ]] && BINARY="${BINARY}.exe"
+        ARCHIVE="just-ai-mcp-${VERSION}-${TARGET}.tar.gz"
+        tar czf "dist/${ARCHIVE}" -C apps/just-ai-mcp/target/${TARGET}/release just-ai-mcp*
+        echo "archive=dist/${ARCHIVE}" >> $GITHUB_OUTPUT
 
-    - name: Publish Archive
-      uses: softprops/action-gh-release@v2.6.1
-      if: ${{ startsWith(github.ref, 'refs/tags/') }}
+    - name: Upload CLI Artifacts
+      uses: actions/upload-artifact@v4
       with:
-        draft: false
-        files: ${{ steps.package.outputs.archive }}
-        prerelease: ${{ needs.prerelease.outputs.value }}
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        name: just-ai-${{ matrix.target }}
+        path: ${{ steps.package-cli.outputs.archive }}
 
-    - name: Publish Changelog
-      uses: softprops/action-gh-release@v2.6.1
+    - name: Upload MCP Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: just-ai-mcp-${{ matrix.target }}
+        path: ${{ steps.package-mcp.outputs.archive }}
+
+    - name: Upload for Checksums
       if: >-
-        ${{
-          startsWith(github.ref, 'refs/tags/')
-          && matrix.target == 'x86_64-unknown-linux-musl'
-        }}
+        matrix.target == 'aarch64-unknown-linux-musl'
+        || matrix.target == 'x86_64-unknown-linux-musl'
+      uses: actions/upload-artifact@v4
       with:
-        draft: false
-        files: CHANGELOG.md
-        prerelease: ${{ needs.prerelease.outputs.value }}
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        name: checksum-${{ matrix.target }}
+        path: dist/*.tar.gz
 
-    - name: Upload Artifacts
-      if: >-
-        ${{
-          matrix.target == 'aarch64-unknown-linux-musl'
-          || matrix.target == 'x86_64-unknown-linux-musl'
-        }}
-      uses: actions/upload-artifact@v7
-      with:
-        name: ${{ matrix.target }}
-        path: ${{ steps.package.outputs.archive }}
-
-  checksum:
+  # Create GitHub Release with all artifacts
+  release:
     runs-on: ubuntu-latest
-
-    needs:
-    - package
-    - prerelease
+    needs: [package, prerelease]
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
 
     steps:
-    - name: Download Release Archives
-      env:
-        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      run: >-
-        gh release download
-        --repo casey/just
-        --pattern '*'
-        --dir release
-        ${{ github.ref_name }}
-
-    - name: Create Checksums
-      run: |
-        cd release
-        shasum -a 256 * > ../SHA256SUMS
-
-    - name: Publish Checksums
-      uses: softprops/action-gh-release@v2.6.1
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
       with:
-        draft: false
-        files: SHA256SUMS
-        prerelease: ${{ needs.prerelease.outputs.value }}
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        pattern: just-ai*-*
+        path: dist/
+        merge-multiple: true
 
+    - name: Create checksums
+      run: |
+        cd dist
+        sha256sum * > SHA256SUMS.txt
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v2
+      with:
+        files: |
+          dist/*
+        generate_release_notes: true
+        prerelease: ${{ needs.prerelease.outputs.value }}
+
+  # Build and push multi-arch Docker images
   docker:
     runs-on: ubuntu-latest
-
-    needs:
-    - package
-    - prerelease
-
+    needs: [release, prerelease]
     permissions:
       contents: read
       packages: write
 
     steps:
-    - uses: actions/checkout@v6
+    - uses: actions/checkout@v4
 
     - name: Log in to GitHub Container Registry
-      uses: docker/login-action@v4
+      uses: docker/login-action@v3
       with:
-        registry: ghcr.io
+        registry: ${{ env.REGISTRY }}
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v4
+      uses: docker/setup-buildx-action@v3
 
-    - name: Download x86_64 Artifact
-      uses: actions/download-artifact@v8
+    - name: Docker meta (CLI)
+      id: meta-cli
+      uses: docker/metadata-action@v5
       with:
-        name: x86_64-unknown-linux-musl
+        images: ${{ env.REGISTRY }}/${{ env.IMAGE_ORG }}/just-ai/cli
+        tags: |
+          type=semver,pattern={{version}}
+          type=semver,pattern={{major}}.{{minor}}
+          type=semver,pattern={{major}}
+          type=ref,event=tag
+          type=raw,value=latest,enable={{is_default_branch}}
 
-    - name: Download aarch64 Artifact
-      uses: actions/download-artifact@v8
-      with:
-        name: aarch64-unknown-linux-musl
-
-    - name: Extract Binaries
-      run: |
-        mkdir -p amd64 arm64
-        tar xzf just-${{ github.ref_name }}-x86_64-unknown-linux-musl.tar.gz --directory amd64 just
-        tar xzf just-${{ github.ref_name }}-aarch64-unknown-linux-musl.tar.gz --directory arm64 just
-
-    - name: Determine Tags
-      id: tags
-      run: |
-        VERSION=${{ github.ref_name }}
-        TAGS=ghcr.io/casey/just:${VERSION}
-        if [[ ${{ needs.prerelease.outputs.value }} == false ]]; then
-          TAGS=${TAGS},ghcr.io/casey/just:latest
-        fi
-        echo tags=${TAGS} >> $GITHUB_OUTPUT
-
-    - name: Build and Push
-      uses: docker/build-push-action@v7
+    - name: Build and push CLI (multi-arch)
+      uses: docker/build-push-action@v5
       with:
         context: .
-        file: etc/Dockerfile
-        platforms: linux/amd64,linux/arm64
+        file: Dockerfile.cli
         push: true
-        tags: ${{ steps.tags.outputs.tags }}
+        platforms: linux/amd64,linux/arm64
+        tags: ${{ steps.meta-cli.outputs.tags }}
+        labels: ${{ steps.meta-cli.outputs.labels }}
+        provenance: true
+        sbom: true
 
-  pages:
+    - name: Docker meta (MCP)
+      id: meta-mcp
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.REGISTRY }}/${{ env.IMAGE_ORG }}/just-ai/mcp
+        tags: |
+          type=semver,pattern={{version}}
+          type=semver,pattern={{major}}.{{minor}}
+          type=semver,pattern={{major}}
+          type=ref,event=tag
+          type=raw,value=latest,enable={{is_default_branch}}
+
+    - name: Build and push MCP (multi-arch)
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        file: Dockerfile.mcp
+        push: true
+        platforms: linux/amd64,linux/arm64
+        tags: ${{ steps.meta-mcp.outputs.tags }}
+        labels: ${{ steps.meta-mcp.outputs.labels }}
+        provenance: true
+        sbom: true
+
+    - name: Docker meta (GUI)
+      id: meta-gui
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.REGISTRY }}/${{ env.IMAGE_ORG }}/just-ai/gui
+        tags: |
+          type=semver,pattern={{version}}
+          type=semver,pattern={{major}}.{{minor}}
+          type=semver,pattern={{major}}
+          type=ref,event=tag
+          type=raw,value=latest,enable={{is_default_branch}}
+
+    - name: Build and push GUI (multi-arch)
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        file: Dockerfile.gui
+        push: true
+        platforms: linux/amd64,linux/arm64
+        tags: ${{ steps.meta-gui.outputs.tags }}
+        labels: ${{ steps.meta-gui.outputs.labels }}
+        provenance: true
+        sbom: true
+
+  # Generate SBOM for the workspace
+  sbom:
     runs-on: ubuntu-latest
-
-    needs:
-    - prerelease
-
+    needs: [release]
     permissions:
       contents: write
 
     steps:
-    - uses: actions/checkout@v6
+    - uses: actions/checkout@v4
 
-    - uses: Swatinem/rust-cache@v2
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
 
-    - name: Install `mdbook`
-      run: cargo install --locked mdbook@0.4.52
+    - name: Cache Cargo
+      uses: Swatinem/rust-cache@v2
 
-    - name: Install `mdbook-linkcheck`
-      run: cargo install --locked mdbook-linkcheck@0.7.7
+    - name: Install cargo-sbom
+      run: cargo install cargo-sbom
 
-    - name: Build book
+    - name: Generate SBOM
       run: |
-        cargo run --package generate-book
-        mdbook build book/en
-        mdbook build book/zh
+        cargo sbom --format spdx-json --output target/sbom.spdx.json
 
-    - name: Deploy Pages
-      uses: peaceiris/actions-gh-pages@v4
-      if: ${{ needs.prerelease.outputs.value == 'false' }}
+    - name: Upload SBOM to Release
+      uses: softprops/action-gh-release@v2
       with:
-        github_token: ${{ secrets.GITHUB_TOKEN }}
-        publish_branch: gh-pages
-        publish_dir: www
+        files: target/sbom.spdx.json
+        prerelease: ${{ needs.prerelease.outputs.value }}
+
+  # SLSA Provenance Generation
+  slsa:
+    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v1.9.0
+    needs: [release, docker]
+    permissions:
+      contents: write
+      id-token: write
+      packages: read
+    with:
+      provenance-name: slsa-provenance.intoto.jsonl
+
+  # Sign artifacts with cosign (keyless)
+  sign:
+    runs-on: ubuntu-latest
+    needs: [release, docker, sbom, slsa]
+    permissions:
+      contents: write
+      id-token: write
+      packages: read
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install cosign
+      uses: sigstore/cosign-installer@v3
+      with:
+        cosign-release: 'v2.4.0'
+
+    - name: Download release artifacts
+      uses: actions/download-artifact@v4
+      with:
+        pattern: just-ai*-*
+        path: dist/
+        merge-multiple: true
+
+    - name: Sign binaries
+      run: |
+        cd dist
+        for file in *; do
+          [[ "$file" == *.sig ]] && continue
+          [[ "$file" == *.txt ]] && continue
+          cosign sign-blob --yes --bundle "${file}.sig" "${file}"
+        done
+
+    - name: Sign SBOM
+      run: |
+        cosign sign-blob --yes --bundle target/sbom.spdx.json.sig target/sbom.spdx.json
+
+    - name: Sign Docker images
+      run: |
+        cosign sign --yes \
+          ${{ env.REGISTRY }}/${{ env.IMAGE_ORG }}/just-ai/cli:${{ github.ref_name }} \
+          ${{ env.REGISTRY }}/${{ env.IMAGE_ORG }}/just-ai/mcp:${{ github.ref_name }} \
+          ${{ env.REGISTRY }}/${{ env.IMAGE_ORG }}/just-ai/gui:${{ github.ref_name }}
+
+    - name: Upload signatures to Release
+      uses: softprops/action-gh-release@v2
+      with:
+        files: |
+          dist/*.sig
+          target/sbom.spdx.json.sig
+        prerelease: ${{ needs.prerelease.outputs.value }}

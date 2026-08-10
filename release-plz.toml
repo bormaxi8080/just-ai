@@ -1,0 +1,14 @@
+[workspace]
+# All packages in this workspace use the same version
+# Release them together
+changelog_config = "release-plz-changelog.toml"
+
+# GitHub repository for creating releases
+[[workspace.release]]
+repo_url = "https://github.com/bormaxi8080/just-ai"
+
+# Package configuration
+[packages]
+just-ai = { path = "crates/just-ai", release_always = false }
+just-ai-mcp = { path = "apps/just-ai-mcp", release_always = false }
+just-ai-gui = { path = "apps/just-ai-gui/src-tauri", release_always = false }

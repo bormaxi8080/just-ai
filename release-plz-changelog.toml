@@ -1,0 +1,109 @@
+# release-plz changelog configuration
+# See https://github.com/MarcoIeni/release-plz/blob/main/docs/release-plz-changelog.md
+
+[header_template]
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+[release_template]
+## [{{version}}] - {{date}}
+
+{{#if participants}}
+### Contributors
+{{#each participants}}
+- {{author}} ({{commit_count}} commit{{#if (gt commit_count 1)}}s{{/if}})
+{{/each}}
+
+{{/if}}
+{{#if commit_groups}}
+{{#each commit_groups}}
+### {{title}}
+
+{{#each commits}}
+- {{message}} ([`{{id}}`]({{commit_url}}))
+{{/each}}
+
+{{/each}}
+{{/if}}
+
+[commit_groups]
+# Order matters - first match wins
+[[commit_groups]]
+title = "🚀 Features"
+pattern = "^feat"
+order = 1
+
+[[commit_groups]]
+title = "🐛 Bug Fixes"
+pattern = "^fix"
+order = 2
+
+[[commit_groups]]
+title = "📝 Documentation"
+pattern = "^docs"
+order = 3
+
+[[commit_groups]]
+title = "💄 Style"
+pattern = "^style"
+order = 4
+
+[[commit_groups]]
+title = "♻️ Refactoring"
+pattern = "^refactor"
+order = 5
+
+[[commit_groups]]
+title = "⚡ Performance"
+pattern = "^perf"
+order = 6
+
+[[commit_groups]]
+title = "✅ Tests"
+pattern = "^test"
+order = 7
+
+[[commit_groups]]
+title = "🔧 Chores"
+pattern = "^chore"
+order = 8
+
+[[commit_groups]]
+title = "🏗️ Build System"
+pattern = "^build"
+order = 9
+
+[[commit_groups]]
+title = "🔀 CI/CD"
+pattern = "^ci"
+order = 10
+
+[[commit_groups]]
+title = "Other"
+pattern = "."
+order = 11
+
+[parser.conventional_commits]
+# Parse commits like: feat: add new feature
+# Supports: feat, fix, docs, style, refactor, perf, test, chore, build, ci
+# Also supports scopes: feat(core): ...
+# And breaking changes: feat!: or feat: ... BREAKING CHANGE: ...
+types = ["feat", "fix", "docs", "style", "refactor", "perf", "test", "chore", "build", "ci"]
+breaking_types = ["feat", "fix"]
+
+# Ignore these commits (e.g., merge commits)
+ignore_commits = [
+    "Merge pull request",
+    "Merge branch",
+    "Release",
+    "release",
+    "chore: release",
+    "ci: release",
+]
+
+# Include commits that don't match conventional format
+include_non_conventional = false
