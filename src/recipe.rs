@@ -14,6 +14,8 @@ pub(crate) struct Recipe<'src, D = Dependency<'src>> {
   #[serde(skip)]
   pub(crate) module_path: Option<Modulepath>,
   pub(crate) name: Name<'src>,
+  #[serde(skip)]
+  pub(crate) number: Number,
   pub(crate) parameters: Vec<Parameter<'src>>,
   pub(crate) priors: usize,
   pub(crate) private: bool,
@@ -26,37 +28,6 @@ pub(crate) struct Recipe<'src, D = Dependency<'src>> {
 }
 
 impl<'src, D> Recipe<'src, D> {
-  pub(crate) fn enabled(&self) -> bool {
-    let android = self.attributes.contains(AttributeKind::Android);
-    let dragonfly = self.attributes.contains(AttributeKind::Dragonfly);
-    let freebsd = self.attributes.contains(AttributeKind::Freebsd);
-    let linux = self.attributes.contains(AttributeKind::Linux);
-    let macos = self.attributes.contains(AttributeKind::Macos);
-    let netbsd = self.attributes.contains(AttributeKind::Netbsd);
-    let openbsd = self.attributes.contains(AttributeKind::Openbsd);
-    let unix = self.attributes.contains(AttributeKind::Unix);
-    let windows = self.attributes.contains(AttributeKind::Windows);
-
-    (!windows
-      && !linux
-      && !macos
-      && !openbsd
-      && !freebsd
-      && !dragonfly
-      && !netbsd
-      && !unix
-      && !android)
-      || (cfg!(target_os = "android") && android)
-      || (cfg!(target_os = "dragonfly") && dragonfly)
-      || (cfg!(target_os = "freebsd") && freebsd)
-      || (cfg!(target_os = "linux") && linux)
-      || (cfg!(target_os = "macos") && macos)
-      || (cfg!(target_os = "netbsd") && netbsd)
-      || (cfg!(target_os = "openbsd") && openbsd)
-      || (cfg!(unix) && unix)
-      || (cfg!(windows) && windows)
-  }
-
   pub(crate) fn is_script(&self, settings: &Settings) -> bool {
     if self.attributes.contains(AttributeKind::Shell) {
       false
@@ -102,7 +73,6 @@ impl<'src> Recipe<'src> {
         rest = &rest[1..];
         vec![argument.clone()]
       } else {
-        debug_assert!(parameter.default.is_some() || parameter.kind == ParameterKind::Star);
         Vec::new()
       };
 
@@ -175,7 +145,7 @@ impl<'src> Recipe<'src> {
   }
 
   pub(crate) fn is_public(&self) -> bool {
-    !self.private && !self.attributes.contains(AttributeKind::Private)
+    !self.private && !self.attributes.private()
   }
 
   pub(crate) fn takes_positional_arguments(&self, settings: &Settings) -> bool {
@@ -231,6 +201,34 @@ impl<'src> Recipe<'src> {
     self.attributes.contains(AttributeKind::NoQuiet)
   }
 
+  fn timestamp_format(
+    &self,
+    config: &Config,
+    evaluator: &mut Evaluator<'src, '_>,
+  ) -> RunResult<'src, Option<String>> {
+    if let Some(attribute) = self.attributes.get(AttributeKind::Timestamp) {
+      let Attribute::Timestamp(format) = attribute else {
+        unreachable!();
+      };
+      Ok(Some(
+        format
+          .as_ref()
+          .map(|expression| {
+            evaluator.evaluate_string(
+              expression,
+              StringContext::TimestampAttribute(self.attributes.name(attribute)),
+            )
+          })
+          .transpose()?
+          .unwrap_or_else(|| config.timestamp_format.clone()),
+      ))
+    } else if config.timestamp {
+      Ok(Some(config.timestamp_format.clone()))
+    } else {
+      Ok(None)
+    }
+  }
+
   pub(crate) fn run<'run>(
     &self,
     context: &ExecutionContext<'src, 'run>,
@@ -239,7 +237,10 @@ impl<'src> Recipe<'src> {
     positional: &[String],
     scope: &Scope<'src, 'run>,
     cache: &Cache,
+    jobs: &Semaphore,
   ) -> RunResult<'src> {
+    let _guard = jobs.acquire();
+
     let color = context.config.color.stderr().banner();
     let prefix = color.prefix();
     let suffix = color.suffix();
@@ -257,13 +258,7 @@ impl<'src> Recipe<'src> {
       eprintln!("{prefix}#### {doc}{suffix}");
     }
 
-    let evaluator = Evaluator::new(
-      context,
-      BTreeMap::new(),
-      is_dependency,
-      Some(self.name),
-      scope,
-    );
+    let evaluator = Evaluator::new(context, env.clone(), is_dependency, Some(self.name), scope);
 
     let start = Instant::now();
     let result = if self.is_script(&context.module.settings) {
@@ -310,6 +305,8 @@ impl<'src> Recipe<'src> {
 
     let working_directory = self.working_directory(context, &mut evaluator)?;
 
+    let timestamp_format = self.timestamp_format(config, &mut evaluator)?;
+
     loop {
       let Some(line) = lines.peek() else {
         return Ok(());
@@ -326,7 +323,7 @@ impl<'src> Recipe<'src> {
           break;
         }
         let line = lines.next().unwrap();
-        line_number += 1;
+        line_number = line.number + 1;
         if !comment_line {
           evaluated += &evaluator.evaluate_line(line, continued)?;
         }
@@ -354,9 +351,14 @@ impl<'src> Recipe<'src> {
       let infallible = sigils.contains(&Sigil::Infallible);
       let quiet = sigils.contains(&Sigil::Quiet);
 
+      let timestamp = timestamp_format
+        .as_deref()
+        .map(|format| datetime_format(chrono::Local::now(), format).map_err(Error::DatetimeFormat))
+        .transpose()?;
+
       if config.dry_run
         || config.verbosity.loquacious()
-        || config.timestamp
+        || timestamp.is_some()
         || !((quiet ^ self.quiet)
           || (settings.quiet && !self.no_quiet())
           || config.verbosity.quiet())
@@ -368,7 +370,7 @@ impl<'src> Recipe<'src> {
         }
         .stderr();
 
-        if let Some(timestamp) = config.timestamp() {
+        if let Some(timestamp) = timestamp {
           eprint!("[{}] ", color.paint(&timestamp));
         }
 
@@ -385,7 +387,7 @@ impl<'src> Recipe<'src> {
         cmd.current_dir(working_directory);
       }
 
-      cmd.arg(command);
+      cmd.shell_arg(command);
 
       if self.takes_positional_arguments(settings) {
         cmd.arg(self.name.lexeme());
@@ -470,7 +472,10 @@ impl<'src> Recipe<'src> {
   ) -> RunResult<'src> {
     let config = &context.config;
 
-    if let Some(timestamp) = config.timestamp() {
+    if let Some(format) = self.timestamp_format(config, &mut evaluator)? {
+      let timestamp =
+        datetime_format(chrono::Local::now(), &format).map_err(Error::DatetimeFormat)?;
+
       let color = if config.highlight {
         config.color.command(config.command_color)
       } else {
@@ -487,15 +492,15 @@ impl<'src> Recipe<'src> {
     }
 
     if config.verbosity.loud() && (config.dry_run || self.quiet) {
+      let color = if config.highlight {
+        config.color.command(config.command_color)
+      } else {
+        config.color
+      }
+      .stderr();
+
       for line in &evaluated_lines {
-        eprintln!(
-          "{}",
-          config
-            .color
-            .command(config.command_color)
-            .stderr()
-            .paint(line)
-        );
+        eprintln!("{}", color.paint(line));
       }
     }
 
@@ -522,14 +527,11 @@ impl<'src> Recipe<'src> {
           .unwrap_or_else(|| Interpreter::default_script_interpreter().clone()),
       )
     } else if self.body.first().is_some_and(Line::is_shebang) {
-      let line = evaluated_lines
-        .first()
-        .ok_or_else(|| Error::internal("evaluated_lines was empty"))?;
-
-      let shebang =
-        Shebang::new(line).ok_or_else(|| Error::internal(format!("bad shebang line: {line}")))?;
-
-      Executor::Shebang(shebang)
+      let shebang = &evaluated_lines[0];
+      Executor::Shebang(Shebang::new(shebang).ok_or_else(|| Error::InvalidShebang {
+        recipe: self.name,
+        shebang: shebang.into(),
+      })?)
     } else {
       Executor::Command(
         context
@@ -555,6 +557,14 @@ impl<'src> Recipe<'src> {
         .variables
         .insert(name.clone(), Some(value.clone()));
     }
+
+    let extension = self.attributes.iter().find_map(|attribute| {
+      if let Attribute::Extension(extension) = attribute {
+        Some(extension.cooked.as_str())
+      } else {
+        None
+      }
+    });
 
     let (cache_lock, outputs) = if !config.no_cache
       && let Some(Attribute::Cache {
@@ -600,6 +610,7 @@ impl<'src> Recipe<'src> {
         body: &evaluated_lines,
         environment: &environment,
         executor: &executor,
+        extension,
         extra,
         inputs,
         positional: self
@@ -635,14 +646,6 @@ impl<'src> Recipe<'src> {
     let tempdir = context.tempdir(self)?;
 
     let mut path = tempdir.path().to_path_buf();
-
-    let extension = self.attributes.iter().find_map(|attribute| {
-      if let Attribute::Extension(extension) = attribute {
-        Some(extension.cooked.as_str())
-      } else {
-        None
-      }
-    });
 
     path.push(executor.script_filename(self.name(), extension));
 
@@ -723,24 +726,13 @@ impl<'src> Recipe<'src> {
   pub(crate) fn groups(&self) -> BTreeSet<String> {
     self
       .attributes
-      .iter()
-      .filter_map(|attribute| {
-        if let Attribute::Group(group) = attribute {
-          Some(group.cooked.clone())
-        } else {
-          None
-        }
-      })
+      .groups()
+      .into_iter()
+      .map(|group| group.cooked)
       .collect()
   }
 
   pub(crate) fn doc(&self) -> Option<&str> {
-    for attribute in &self.attributes {
-      if let Attribute::Doc(doc) = attribute {
-        return doc.as_ref().map(|s| s.cooked.as_ref());
-      }
-    }
-
     self.doc.as_deref()
   }
 
@@ -755,19 +747,6 @@ impl<'src> Recipe<'src> {
 
 impl<D: Display> ColorDisplay for Recipe<'_, D> {
   fn fmt(&self, f: &mut Formatter, color: Color) -> fmt::Result {
-    if !self
-      .attributes
-      .iter()
-      .any(|attribute| matches!(attribute, Attribute::Doc(_)))
-      && let Some(doc) = &self.doc
-    {
-      writeln!(f, "# {doc}")?;
-    }
-
-    for attribute in &self.attributes {
-      writeln!(f, "[{attribute}]")?;
-    }
-
     if self.quiet {
       write!(f, "@{}", self.name)?;
     } else {

@@ -17,6 +17,7 @@ pub(crate) enum Function {
   UnaryToValue(fn(Context, &str) -> ValueResult),
   Binary(fn(Context, &str, &str) -> StringResult),
   BinaryOptToValue(fn(Context, &str, Option<&str>) -> ValueResult),
+  BinaryOptValueStr(fn(Context, &Value, Option<&str>) -> StringResult),
   BinaryOptValueStrToValue(fn(Context, &Value, Option<&str>) -> ValueResult),
   BinaryPlus(fn(Context, &str, &str, &[String]) -> StringResult),
   BinaryStrValue(fn(Context, &str, &Value) -> ValueResult),
@@ -33,7 +34,10 @@ impl Function {
     match self {
       Nullary(_) | ValueNullary(_) => 0..=0,
       Unary(_) | ValueUnary(_) | UnaryMap(_) | UnaryToValue(_) => 1..=1,
-      ValueBinaryOpt(_) | BinaryOptToValue(_) | BinaryOptValueStrToValue(_) => 1..=2,
+      ValueBinaryOpt(_)
+      | BinaryOptToValue(_)
+      | BinaryOptValueStrToValue(_)
+      | BinaryOptValueStr(_) => 1..=2,
       UnaryPlus(_) => 1..=usize::MAX,
       Binary(_) | BinaryStrValue(_) | ValueBinary(_) | BinaryToValue(_) => 2..=2,
       BinaryPlus(_) => 2..=usize::MAX,
@@ -42,7 +46,9 @@ impl Function {
   }
 }
 
+#[derive(Clone, Copy)]
 pub(crate) struct Context<'src: 'run, 'run> {
+  pub(crate) env: &'run BTreeMap<String, String>,
   pub(crate) execution_context: &'run ExecutionContext<'src, 'run>,
   pub(crate) is_dependency: bool,
   pub(crate) name: Name<'src>,
@@ -94,15 +100,18 @@ pub(crate) fn get(name: &str) -> Option<Function> {
     "join_list" => BinaryOptValueStrToValue(join_list),
     "just_executable" => Nullary(just_executable),
     "just_pid" => Nullary(just_pid),
+    "just_version" => Nullary(just_version),
     "justfile" => Nullary(justfile),
     "justfile_directory" => Nullary(justfile_directory),
     "kebabcase" => Unary(kebabcase),
+    "len" => ValueUnary(len),
     "lowercamelcase" => Unary(lowercamelcase),
     "lowercase" => Unary(lowercase),
     "module_directory" => Nullary(module_directory),
     "module_file" => Nullary(module_file),
     "module_path" => Nullary(module_path),
     "num_cpus" => Nullary(num_cpus),
+    "num_jobs" => ValueNullary(num_jobs),
     "os" => Nullary(os),
     "os_family" => Nullary(os_family),
     "parent_directory" => Unary(parent_directory),
@@ -126,7 +135,7 @@ pub(crate) fn get(name: &str) -> Option<Function> {
     "source_directory" => Nullary(source_directory),
     "source_file" => Nullary(source_file),
     "split" => BinaryOptToValue(split),
-    "style" => Unary(style),
+    "style" => BinaryOptValueStr(style),
     "titlecase" => Unary(titlecase),
     "trim" => Unary(trim),
     "trim_end" => Unary(trim_end),
@@ -173,7 +182,7 @@ fn absolute_path(context: Context, path: &str) -> StringResult {
     .execution_context
     .working_directory()
     .join(path)
-    .lexiclean();
+    .clean();
   match abs_path_unchecked.to_str() {
     Some(absolute_path) => Ok(absolute_path.to_owned()),
     None => Err(format!(
@@ -218,7 +227,7 @@ fn blake3_file(context: Context, path: &str) -> StringResult {
 
 fn canonicalize(context: Context, path: &str) -> StringResult {
   let canonical = std::fs::canonicalize(context.execution_context.working_directory().join(path))
-    .map_err(|err| format!("I/O error canonicalizing path: {err}"))?;
+    .map_err(|err| format!("I/O error canonicalizing `{path}`: {err}"))?;
 
   canonical.to_str().map(str::to_string).ok_or_else(|| {
     format!(
@@ -241,6 +250,10 @@ fn capitalize(_context: Context, s: &str) -> StringResult {
 }
 
 fn choose(_context: Context, n: &str, alphabet: &str) -> StringResult {
+  if alphabet.is_empty() {
+    return Err("empty alphabet".to_string());
+  }
+
   let mut chars = HashSet::<char>::with_capacity(alphabet.len());
 
   for c in alphabet.chars() {
@@ -257,17 +270,11 @@ fn choose(_context: Context, n: &str, alphabet: &str) -> StringResult {
 
   let mut rng = rand::rng();
 
-  (0..n)
-    .map(|_| {
-      alphabet
-        .choose(&mut rng)
-        .ok_or_else(|| "empty alphabet".to_string())
-    })
-    .collect()
+  Ok((0..n).map(|_| alphabet.choose(&mut rng).unwrap()).collect())
 }
 
 fn clean(_context: Context, path: &str) -> StringResult {
-  Ok(Path::new(path).lexiclean().to_str().unwrap().to_owned())
+  Ok(Path::new(path).clean().to_str().unwrap().to_owned())
 }
 
 fn dir(name: &'static str, f: fn() -> Option<PathBuf>) -> StringResult {
@@ -287,25 +294,11 @@ fn dir(name: &'static str, f: fn() -> Option<PathBuf>) -> StringResult {
 }
 
 fn datetime(_context: Context, format: &str) -> StringResult {
-  Ok(
-    chrono::Local::now()
-      .format_with_items(datetime_parse(format)?.iter())
-      .to_string(),
-  )
-}
-
-fn datetime_parse(format: &str) -> Result<Vec<chrono::format::Item>, String> {
-  chrono::format::StrftimeItems::new(format)
-    .parse()
-    .map_err(|err| format!("invalid format string `{format}`: {err}"))
+  datetime_format(Local::now(), format).map_err(|err| err.to_string())
 }
 
 fn datetime_utc(_context: Context, format: &str) -> StringResult {
-  Ok(
-    chrono::Utc::now()
-      .format_with_items(datetime_parse(format)?.iter())
-      .to_string(),
-  )
+  datetime_format(Utc::now(), format).map_err(|err| err.to_string())
 }
 
 fn encode_uri_component(_context: Context, s: &str) -> StringResult {
@@ -323,7 +316,7 @@ fn encode_uri_component(_context: Context, s: &str) -> StringResult {
 }
 
 fn env(context: Context, keys: &Value, default: Option<&Value>) -> ValueResult {
-  for key in keys.elements() {
+  for key in keys {
     if let Some(value) = context.execution_context.dotenv.get(key) {
       return Ok(value.into());
     }
@@ -464,6 +457,10 @@ fn just_pid(_context: Context) -> StringResult {
   Ok(std::process::id().to_string())
 }
 
+fn just_version(_context: Context) -> StringResult {
+  Ok(VERSION.into())
+}
+
 fn justfile(context: Context) -> StringResult {
   context
     .execution_context
@@ -507,6 +504,10 @@ fn kebabcase(_context: Context, s: &str) -> StringResult {
   Ok(s.to_kebab_case())
 }
 
+fn len(_context: Context, value: &Value) -> ValueResult {
+  Ok(Value::from(value.len().to_string()))
+}
+
 fn lowercamelcase(_context: Context, s: &str) -> StringResult {
   Ok(s.to_lower_camel_case())
 }
@@ -544,6 +545,17 @@ fn num_cpus(_context: Context) -> StringResult {
   Ok(num.to_string())
 }
 
+fn num_jobs(context: Context) -> ValueResult {
+  Ok(
+    context
+      .execution_context
+      .config
+      .jobs
+      .map(|jobs| Value::from(jobs.to_string()))
+      .unwrap_or_default(),
+  )
+}
+
 fn os(_context: Context) -> StringResult {
   Ok(env::consts::OS.to_owned())
 }
@@ -568,11 +580,12 @@ fn parent_directory(_context: Context, path: &str) -> StringResult {
 fn path_exists(context: Context, path: &str) -> ValueResult {
   Ok(boolean(
     &context,
-    context
-      .execution_context
-      .working_directory()
-      .join(path)
-      .exists(),
+    !path.is_empty()
+      && context
+        .execution_context
+        .working_directory()
+        .join(path)
+        .exists(),
   ))
 }
 
@@ -610,29 +623,41 @@ fn replace_regex(_context: Context, s: &str, regex: &str, replacement: &str) -> 
 }
 
 fn sha256(_context: Context, s: &str) -> StringResult {
-  use sha2::{Digest, Sha256};
   let mut hasher = Sha256::new();
   hasher.update(s);
-  let hash = hasher.finalize();
-  Ok(format!("{hash:x}"))
+  Ok(hex::encode(hasher.finalize()))
 }
 
 fn sha256_file(context: Context, path: &str) -> StringResult {
-  use sha2::{Digest, Sha256};
   let path = context.execution_context.working_directory().join(path);
-  let mut hasher = Sha256::new();
   let mut file =
-    fs::File::open(&path).map_err(|err| format!("failed to open `{}`: {err}", path.display()))?;
-  std::io::copy(&mut file, &mut hasher)
+    File::open(&path).map_err(|err| format!("failed to open `{}`: {err}", path.display()))?;
+  let mut writer = HashWriter::<Sha256, Sink>::new(io::sink());
+  io::copy(&mut file, &mut writer)
     .map_err(|err| format!("failed to read `{}`: {err}", path.display()))?;
-  let hash = hasher.finalize();
-  Ok(format!("{hash:x}"))
+  Ok(hex::encode(writer.finalize()))
 }
 
 fn shell(context: Context, command: &str, args: &[String]) -> StringResult {
+  if context.execution_context.config.dry_run {
+    let mut output = String::from("shell(");
+    for (i, arg) in iter::once(command)
+      .chain(args.iter().map(String::as_str))
+      .enumerate()
+    {
+      if i > 0 {
+        output.push_str(", ");
+      }
+      output.push_str(&Element(arg).color_display(Color::never()).to_string());
+    }
+    output.push(')');
+
+    return Ok(output);
+  }
+
   Evaluator::run_command(
     context.execution_context,
-    &BTreeMap::new(),
+    context.env,
     context.scope,
     command,
     Some(args),
@@ -695,25 +720,118 @@ fn source_file(context: Context) -> StringResult {
 }
 
 fn split(_context: Context, s: &str, separator: Option<&str>) -> ValueResult {
-  Ok(if let Some(separator) = separator {
-    s.split(separator).map(str::to_string).collect()
-  } else {
-    s.split_whitespace().map(str::to_string).collect()
+  Ok(match separator {
+    None => s.split_whitespace().map(str::to_string).collect(),
+    Some("") => s.chars().map(String::from).collect(),
+    Some(separator) => s.split(separator).map(str::to_string).collect(),
   })
 }
 
-fn style(context: Context, s: &str) -> StringResult {
-  match s {
-    "command" => Ok(
-      Color::always()
-        .command(context.execution_context.config.command_color)
-        .prefix()
-        .to_string(),
-    ),
-    "error" => Ok(Color::always().error().prefix().to_string()),
-    "warning" => Ok(Color::always().warning().prefix().to_string()),
-    _ => Err(format!("unknown style: `{s}`")),
+fn style(context: Context, styles: &Value, text: Option<&str>) -> StringResult {
+  use nu_ansi_term::Color::*;
+
+  static FIXED: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new("^(fg:|bg:)?(0|[1-9][0-9]{0,2})$").unwrap());
+
+  static RGB_LONG: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new("^(fg:|bg:)?#([[:xdigit:]]{6})$").unwrap());
+
+  static RGB_SHORT: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new("^(fg:|bg:)?#([[:xdigit:]]{3})$").unwrap());
+
+  fn layer(captures: regex::Captures) -> Layer {
+    match captures.get(1).map(|capture| capture.as_str()) {
+      Some("bg:") => Layer::Background,
+      Some("fg:") | None => Layer::Foreground,
+      _ => unreachable!(),
+    }
   }
+
+  let config = context.execution_context.config;
+
+  let mut style = Style::new();
+  let mut active = true;
+
+  for token in styles {
+    let error = || format!("invalid style: `{token}`");
+
+    if let Some(captures) = FIXED.captures(token) {
+      let Ok(color) = captures[2].parse::<u8>() else {
+        return Err(error());
+      };
+      style.color(Fixed(color), layer(captures));
+    } else if let Some(captures) = RGB_LONG.captures(token) {
+      let [_, r, g, b] = u32::from_str_radix(&captures[2], 16).unwrap().to_be_bytes();
+      style.color(Rgb(r, g, b), layer(captures));
+    } else if let Some(captures) = RGB_SHORT.captures(token) {
+      let n = u16::from_str_radix(&captures[2], 16).unwrap();
+      let r = u8::try_from((n >> 8) & 0xf).unwrap() * 0x11;
+      let g = u8::try_from((n >> 4) & 0xf).unwrap() * 0x11;
+      let b = u8::try_from(n & 0xf).unwrap() * 0x11;
+      style.color(Rgb(r, g, b), layer(captures));
+    } else {
+      match token.as_str() {
+        // foreground
+        "fg:black" | "black" => style.fg(Black),
+        "fg:blue" | "blue" => style.fg(Blue),
+        "fg:cyan" | "cyan" => style.fg(Cyan),
+        "fg:green" | "green" => style.fg(Green),
+        "fg:magenta" | "magenta" => style.fg(Magenta),
+        "fg:red" | "red" => style.fg(Red),
+        "fg:white" | "white" => style.fg(White),
+        "fg:yellow" | "yellow" => style.fg(Yellow),
+        // background
+        "bg:black" => style.bg(Black),
+        "bg:blue" => style.bg(Blue),
+        "bg:cyan" => style.bg(Cyan),
+        "bg:green" => style.bg(Green),
+        "bg:magenta" => style.bg(Magenta),
+        "bg:red" => style.bg(Red),
+        "bg:white" => style.bg(White),
+        "bg:yellow" => style.bg(Yellow),
+        // properties
+        "blink" => style.blink(),
+        "bold" => style.bold(),
+        "dim" => style.dim(),
+        "hidden" => style.hidden(),
+        "italic" => style.italic(),
+        "reverse" => style.reverse(),
+        "strikethrough" => style.strikethrough(),
+        "underline" => style.underline(),
+        // streams
+        "stdout" => active = config.color.stdout().active(),
+        "stderr" => active = config.color.stderr().active(),
+        // roles
+        "command" => {
+          if let Some(color) = config.command_color {
+            style.fg(color);
+          }
+          style.bold();
+        }
+        "error" => {
+          style.fg(Red);
+          style.bold();
+        }
+        "warning" => {
+          style.fg(Yellow);
+          style.bold();
+        }
+        _ => return Err(error()),
+      }
+    }
+  }
+
+  Ok(if active {
+    match text {
+      Some(text) => style.paint(text),
+      None => style.prefix(),
+    }
+  } else {
+    match text {
+      Some(text) => text.into(),
+      None => String::new(),
+    }
+  })
 }
 
 fn titlecase(_context: Context, s: &str) -> StringResult {

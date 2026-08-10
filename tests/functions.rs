@@ -670,50 +670,50 @@ fn semver_matches() {
 
 #[test]
 fn trim_end_matches() {
-  assert_eval_eq("trim_end_matches('foo', 'o')", "f");
-  assert_eval_eq("trim_end_matches('fabab', 'ab')", "f");
-  assert_eval_eq("trim_end_matches('fbaabab', 'ab')", "fba");
+  assert_eval("trim_end_matches('foo', 'o')", "f");
+  assert_eval("trim_end_matches('fabab', 'ab')", "f");
+  assert_eval("trim_end_matches('fbaabab', 'ab')", "fba");
 }
 
 #[test]
 fn trim_end_match() {
-  assert_eval_eq("trim_end_match('foo', 'o')", "fo");
-  assert_eval_eq("trim_end_match('fabab', 'ab')", "fab");
+  assert_eval("trim_end_match('foo', 'o')", "fo");
+  assert_eval("trim_end_match('fabab', 'ab')", "fab");
 }
 
 #[test]
 fn trim_start_matches() {
-  assert_eval_eq("trim_start_matches('oof', 'o')", "f");
-  assert_eval_eq("trim_start_matches('ababf', 'ab')", "f");
-  assert_eval_eq("trim_start_matches('ababbaf', 'ab')", "baf");
+  assert_eval("trim_start_matches('oof', 'o')", "f");
+  assert_eval("trim_start_matches('ababf', 'ab')", "f");
+  assert_eval("trim_start_matches('ababbaf', 'ab')", "baf");
 }
 
 #[test]
 fn trim_start_match() {
-  assert_eval_eq("trim_start_match('oof', 'o')", "of");
-  assert_eval_eq("trim_start_match('ababf', 'ab')", "abf");
+  assert_eval("trim_start_match('oof', 'o')", "of");
+  assert_eval("trim_start_match('ababf', 'ab')", "abf");
 }
 
 #[test]
 fn trim_start() {
-  assert_eval_eq("trim_start('  f  ')", "f  ");
+  assert_eval("trim_start('  f  ')", "f  ");
 }
 
 #[test]
 fn trim_end() {
-  assert_eval_eq("trim_end('  f  ')", "  f");
+  assert_eval("trim_end('  f  ')", "  f");
 }
 
 #[test]
 fn append() {
-  assert_eval_eq("append('8', 'r s t')", "r8 s8 t8");
-  assert_eval_eq("append('.c', 'main sar x11')", "main.c sar.c x11.c");
-  assert_eval_eq("append('-', 'c v h y')", "c- v- h- y-");
-  assert_eval_eq(
+  assert_eval("append('8', 'r s t')", "r8 s8 t8");
+  assert_eval("append('.c', 'main sar x11')", "main.c sar.c x11.c");
+  assert_eval("append('-', 'c v h y')", "c- v- h- y-");
+  assert_eval(
     "append('0000', '11 10 01 00')",
     "110000 100000 010000 000000",
   );
-  assert_eval_eq(
+  assert_eval(
     "append('tion', '
     Determina
     Acquisi
@@ -726,17 +726,17 @@ fn append() {
 
 #[test]
 fn prepend() {
-  assert_eval_eq("prepend('8', 'r s t\n  \n  ')", "8r 8s 8t");
-  assert_eval_eq(
+  assert_eval("prepend('8', 'r s t\n  \n  ')", "8r 8s 8t");
+  assert_eval(
     "prepend('src/', 'main sar x11')",
     "src/main src/sar src/x11",
   );
-  assert_eval_eq("prepend('-', 'c\tv h\ny')", "-c -v -h -y");
-  assert_eval_eq(
+  assert_eval("prepend('-', 'c\tv h\ny')", "-c -v -h -y");
+  assert_eval(
     "prepend('0000', '11 10 01 00')",
     "000011 000010 000001 000000",
   );
-  assert_eval_eq(
+  assert_eval(
     "prepend('April-', '
       1st,
         17th,
@@ -748,12 +748,12 @@ fn prepend() {
 
 #[test]
 fn show_string() {
-  assert_list_eq(r#""foo""#, r#""foo""#);
+  assert_list(r#""foo""#, r#""foo""#);
 }
 
 #[test]
 fn show_escapes_contents() {
-  assert_list_eq(r#""a\tb\"c""#, r#""a\tb\"c""#);
+  assert_list(r#""a\tb\"c""#, r#""a\tb\"c""#);
 }
 
 #[test]
@@ -775,34 +775,15 @@ fn show_requires_lists_setting() {
 
 #[test]
 fn show_list() {
-  Test::new()
-    .justfile(
-      r#"
-        set lists
-
-        x := show(["foo", "bar baz", "qux"])
-      "#,
-    )
-    .env("JUST_UNSTABLE", "1")
-    .args(["--evaluate", "x"])
-    .stdout(r#"["foo", "bar baz", "qux"]"#)
-    .success();
+  assert_list(
+    r#"["foo", "bar baz", "qux"]"#,
+    r#"["foo", "bar baz", "qux"]"#,
+  );
 }
 
 #[test]
 fn show_empty_list() {
-  Test::new()
-    .justfile(
-      r"
-        set lists
-
-        x := show([])
-      ",
-    )
-    .env("JUST_UNSTABLE", "1")
-    .args(["--evaluate", "x"])
-    .stdout("[]")
-    .success();
+  assert_list("[]", "[]");
 }
 
 #[test]
@@ -810,10 +791,10 @@ fn join_unix() {
   if cfg!(windows) {
     return;
   }
-  assert_eval_eq("join('a', 'b', 'c', 'd')", "a/b/c/d");
-  assert_eval_eq("join('a', '/b', 'c', 'd')", "/b/c/d");
-  assert_eval_eq("join('a', '/b', '/c', 'd')", "/c/d");
-  assert_eval_eq("join('a', '/b', '/c', '/d')", "/d");
+  assert_eval("join('a', 'b', 'c', 'd')", "a/b/c/d");
+  assert_eval("join('a', '/b', 'c', 'd')", "/b/c/d");
+  assert_eval("join('a', '/b', '/c', 'd')", "/c/d");
+  assert_eval("join('a', '/b', '/c', '/d')", "/d");
 }
 
 #[test]
@@ -821,10 +802,10 @@ fn join_windows() {
   if cfg!(not(windows)) {
     return;
   }
-  assert_eval_eq("join('a', 'b', 'c', 'd')", "a\\b\\c\\d");
-  assert_eval_eq("join('a', '\\b', 'c', 'd')", "\\b\\c\\d");
-  assert_eval_eq("join('a', '\\b', '\\c', 'd')", "\\c\\d");
-  assert_eval_eq("join('a', '\\b', '\\c', '\\d')", "\\d");
+  assert_eval("join('a', 'b', 'c', 'd')", "a\\b\\c\\d");
+  assert_eval("join('a', '\\b', 'c', 'd')", "\\b\\c\\d");
+  assert_eval("join('a', '\\b', '\\c', 'd')", "\\c\\d");
+  assert_eval("join('a', '\\b', '\\c', '\\d')", "\\d");
 }
 
 #[test]
@@ -847,9 +828,7 @@ fn join_argument_count_error() {
 #[test]
 fn test_path_exists_filepath_exist() {
   Test::new()
-    .tree(tree! {
-      testfile: ""
-    })
+    .write("testfile", "")
     .justfile("x := path_exists('testfile')")
     .args(["--evaluate", "x"])
     .stdout("true")
@@ -858,11 +837,7 @@ fn test_path_exists_filepath_exist() {
 
 #[test]
 fn test_path_exists_filepath_doesnt_exist() {
-  Test::new()
-    .justfile("x := path_exists('testfile')")
-    .args(["--evaluate", "x"])
-    .stdout("false")
-    .success();
+  assert_eval("path_exists('testfile')", "false");
 }
 
 #[test]
@@ -933,16 +908,18 @@ fn test_absolute_path_resolves_parent() {
 #[test]
 fn path_exists_subdir() {
   Test::new()
-    .tree(tree! {
-      foo: "",
-      bar: {
-      }
-    })
+    .write("foo", "")
+    .create_dir("bar")
     .justfile("x := path_exists('foo')")
     .current_dir("bar")
     .args(["--evaluate", "x"])
     .stdout("true")
     .success();
+}
+
+#[test]
+fn path_exists_empty_path() {
+  assert_eval("path_exists('')", "false");
 }
 
 #[test]
@@ -974,6 +951,23 @@ fn choose_bad_alphabet_empty() {
          ——▶ justfile:1:6
           │
         1 │ x := choose('10', '')
+          │      ^^^^^^
+      ",
+    )
+    .failure();
+}
+
+#[test]
+fn reject_empty_alphabet_when_count_is_zero() {
+  Test::new()
+    .justfile("x := choose('0', '')")
+    .args(["--evaluate"])
+    .stderr(
+      "
+        error: call to function `choose` failed: empty alphabet
+         ——▶ justfile:1:6
+          │
+        1 │ x := choose('0', '')
           │      ^^^^^^
       ",
     )
@@ -1016,22 +1010,17 @@ fn choose_bad_length() {
 
 #[test]
 fn sha256() {
-  Test::new()
-    .justfile("x := sha256('5943ee37-0000-1000-8000-010203040506')")
-    .args(["--evaluate", "x"])
-    .stdout("2330d7f5eb94a820b54fed59a8eced236f80b633a504289c030b6a65aef58871")
-    .success();
+  assert_eval(
+    "sha256('5943ee37-0000-1000-8000-010203040506')",
+    "2330d7f5eb94a820b54fed59a8eced236f80b633a504289c030b6a65aef58871",
+  );
 }
 
 #[test]
 fn sha256_file() {
   Test::new()
     .justfile("x := sha256_file('sub/shafile')")
-    .tree(tree! {
-      sub: {
-        shafile: "just is great\n",
-      }
-    })
+    .write("sub/shafile", "just is great\n")
     .current_dir("sub")
     .args(["--evaluate", "x"])
     .stdout("177b3d79aaafb53a7a4d7aaba99a82f27c73370e8cb0295571aade1e4fea1cd2")
@@ -1047,6 +1036,11 @@ fn just_pid() {
     .success();
 
   assert_eq!(stdout.parse::<u32>().unwrap(), pid);
+}
+
+#[test]
+fn just_version() {
+  assert_eval("just_version()", env!("CARGO_PKG_VERSION"));
 }
 
 #[test]
@@ -1068,17 +1062,17 @@ fn shell_no_argument() {
 
 #[test]
 fn shell_minimal() {
-  assert_eval_eq("shell('echo $1 $2', 'justice', 'legs')", "justice legs");
+  assert_eval("shell('echo $1 $2', 'justice', 'legs')", "justice legs");
 }
 
 #[test]
 fn shell_args() {
-  assert_eval_eq("shell('echo $@', 'justice', 'legs')", "justice legs");
+  assert_eval("shell('echo $@', 'justice', 'legs')", "justice legs");
 }
 
 #[test]
 fn shell_first_arg() {
-  assert_eval_eq("shell('echo $0')", "echo $0");
+  assert_eval("shell('echo $0')", "echo $0");
 }
 
 #[test]
@@ -1100,22 +1094,17 @@ fn shell_error() {
 
 #[test]
 fn blake3() {
-  Test::new()
-    .justfile("x := blake3('5943ee37-0000-1000-8000-010203040506')")
-    .args(["--evaluate", "x"])
-    .stdout("026c9f740a793ff536ddf05f8915ea4179421f47f0fa9545476076e9ba8f3f2b")
-    .success();
+  assert_eval(
+    "blake3('5943ee37-0000-1000-8000-010203040506')",
+    "026c9f740a793ff536ddf05f8915ea4179421f47f0fa9545476076e9ba8f3f2b",
+  );
 }
 
 #[test]
 fn blake3_file() {
   Test::new()
     .justfile("x := blake3_file('sub/blakefile')")
-    .tree(tree! {
-      sub: {
-        blakefile: "just is great\n",
-      }
-    })
+    .write("sub/blakefile", "just is great\n")
     .current_dir("sub")
     .args(["--evaluate", "x"])
     .stdout("8379241877190ca4b94076a8c8f89fe5747f95c62f3e4bf41f7408a0088ae16d")
@@ -1134,12 +1123,22 @@ fn canonicalize() {
 }
 
 #[test]
-fn encode_uri_component() {
+fn canonicalize_error_omits_path() {
   Test::new()
-    .justfile("x := encode_uri_component(\"0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ!\\\"#$%&'()*+,-./:;<=>?@[\\\\]^_`{|}~ \\t\\r\\n🌐\")")
+    .justfile("x := canonicalize('foo')")
     .args(["--evaluate", "x"])
-    .stdout("0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ!%22%23%24%25%26'()*%2B%2C-.%2F%3A%3B%3C%3D%3E%3F%40%5B%5C%5D%5E_%60%7B%7C%7D~%20%09%0D%0A%F0%9F%8C%90")
-    .success();
+    .stderr_regex(
+      "error: call to function `canonicalize` failed: I/O error canonicalizing `foo`: .*",
+    )
+    .failure();
+}
+
+#[test]
+fn encode_uri_component() {
+  assert_eval(
+    "encode_uri_component(\"0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ!\\\"#$%&'()*+,-./:;<=>?@[\\\\]^_`{|}~ \\t\\r\\n🌐\")",
+    "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ!%22%23%24%25%26'()*%2B%2C-.%2F%3A%3B%3C%3D%3E%3F%40%5B%5C%5D%5E_%60%7B%7C%7D~%20%09%0D%0A%F0%9F%8C%90",
+  );
 }
 
 #[test]
@@ -1168,7 +1167,14 @@ fn source_file() {
         mod foo
       ",
     )
-    .write("foo.just", "x := source_file()\nbar:\n @echo '{{x}}'")
+    .write(
+      "foo.just",
+      "
+        x := source_file()
+        bar:
+         @echo '{{x}}'
+      ",
+    )
     .stdout_regex(r".*[/\\]foo.just\n")
     .success();
 }
@@ -1184,7 +1190,11 @@ fn source_directory() {
     )
     .write(
       "foo/mod.just",
-      "x := source_directory()\nbar:\n @echo '{{x}}'",
+      "
+        x := source_directory()
+        bar:
+         @echo '{{x}}'
+      ",
     )
     .stdout_regex(r".*[/\\]foo\n")
     .success();
@@ -1196,57 +1206,57 @@ fn module_paths() {
     .write(
       "foo/bar.just",
       "
-imf := module_file()
-imd := module_directory()
+        imf := module_file()
+        imd := module_directory()
 
-import-outer: import-inner
+        import-outer: import-inner
 
-@import-inner pmf=module_file() pmd=module_directory():
-  echo import
-  echo '{{ imf }}'
-  echo '{{ imd }}'
-  echo '{{ pmf }}'
-  echo '{{ pmd }}'
-  echo '{{ module_file() }}'
-  echo '{{ module_directory() }}'
+        @import-inner pmf=module_file() pmd=module_directory():
+          echo import
+          echo '{{ imf }}'
+          echo '{{ imd }}'
+          echo '{{ pmf }}'
+          echo '{{ pmd }}'
+          echo '{{ module_file() }}'
+          echo '{{ module_directory() }}'
       ",
     )
     .write(
       "baz/mod.just",
       "
-import 'foo/bar.just'
+        import 'foo/bar.just'
 
-mmf := module_file()
-mmd := module_directory()
+        mmf := module_file()
+        mmd := module_directory()
 
-outer: inner
+        outer: inner
 
-@inner pmf=module_file() pmd=module_directory():
-  echo module
-  echo '{{ mmf }}'
-  echo '{{ mmd }}'
-  echo '{{ pmf }}'
-  echo '{{ pmd }}'
-  echo '{{ module_file() }}'
-  echo '{{ module_directory() }}'
+        @inner pmf=module_file() pmd=module_directory():
+          echo module
+          echo '{{ mmf }}'
+          echo '{{ mmd }}'
+          echo '{{ pmf }}'
+          echo '{{ pmd }}'
+          echo '{{ module_file() }}'
+          echo '{{ module_directory() }}'
       ",
     )
     .write(
       "baz/foo/bar.just",
       "
-imf := module_file()
-imd := module_directory()
+        imf := module_file()
+        imd := module_directory()
 
-import-outer: import-inner
+        import-outer: import-inner
 
-@import-inner pmf=module_file() pmd=module_directory():
-  echo import
-  echo '{{ imf }}'
-  echo '{{ imd }}'
-  echo '{{ pmf }}'
-  echo '{{ pmd }}'
-  echo '{{ module_file() }}'
-  echo '{{ module_directory() }}'
+        @import-inner pmf=module_file() pmd=module_directory():
+          echo import
+          echo '{{ imf }}'
+          echo '{{ imd }}'
+          echo '{{ pmf }}'
+          echo '{{ pmd }}'
+          echo '{{ module_file() }}'
+          echo '{{ module_directory() }}'
       ",
     )
     .justfile(
@@ -1466,10 +1476,10 @@ fn absolute_path_argument_is_relative_to_submodule_working_directory() {
     .write("foo/baz", "")
     .write(
       "foo/mod.just",
-      r#"
-bar:
-  @echo "{{ absolute_path('baz') }}"
-"#,
+      "
+        bar:
+          @echo \"{{ absolute_path('baz') }}\"
+      ",
     )
     .stdout_regex(r".*[/\\]foo[/\\]baz\n")
     .args(["foo", "bar"])
@@ -1484,9 +1494,9 @@ fn blake3_file_argument_is_relative_to_submodule_working_directory() {
     .write(
       "foo/mod.just",
       "
-bar:
-  @echo {{ blake3_file('baz') }}
-",
+        bar:
+          @echo {{ blake3_file('baz') }}
+      ",
     )
     .stdout("af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262\n")
     .args(["foo", "bar"])
@@ -1500,10 +1510,10 @@ fn canonicalize_argument_is_relative_to_submodule_working_directory() {
     .write("foo/baz", "")
     .write(
       "foo/mod.just",
-      r#"
-bar:
-  @echo "{{ canonicalize('baz') }}"
-"#,
+      "
+        bar:
+          @echo \"{{ canonicalize('baz') }}\"
+      ",
     )
     .stdout_regex(r".*[/\\]foo[/\\]baz\n")
     .args(["foo", "bar"])
@@ -1518,9 +1528,9 @@ fn path_exists_argument_is_relative_to_submodule_working_directory() {
     .write(
       "foo/mod.just",
       "
-bar:
-  @echo {{ path_exists('baz') }}
-",
+        bar:
+          @echo {{ path_exists('baz') }}
+      ",
     )
     .stdout_regex("true\n")
     .args(["foo", "bar"])
@@ -1535,87 +1545,13 @@ fn sha256_file_argument_is_relative_to_submodule_working_directory() {
     .write(
       "foo/mod.just",
       "
-bar:
-  @echo {{ sha256_file('baz') }}
-",
+        bar:
+          @echo {{ sha256_file('baz') }}
+      ",
     )
     .stdout_regex("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\n")
     .args(["foo", "bar"])
     .success();
-}
-
-#[test]
-fn style_command_default() {
-  Test::new()
-    .justfile(
-      "
-        foo:
-          @echo '{{ style('command') }}foo{{NORMAL}}'
-      ",
-    )
-    .stdout("\x1b[1mfoo\x1b[0m\n")
-    .success();
-}
-
-#[test]
-fn style_command_non_default() {
-  Test::new()
-    .justfile(
-      "
-        foo:
-          @echo '{{ style('command') }}foo{{NORMAL}}'
-      ",
-    )
-    .args(["--command-color", "red"])
-    .stdout("\x1b[1;31mfoo\x1b[0m\n")
-    .success();
-}
-
-#[test]
-fn style_error() {
-  Test::new()
-    .justfile(
-      "
-        foo:
-          @echo '{{ style('error') }}foo{{NORMAL}}'
-      ",
-    )
-    .stdout("\x1b[1;31mfoo\x1b[0m\n")
-    .success();
-}
-
-#[test]
-fn style_warning() {
-  Test::new()
-    .justfile(
-      "
-        foo:
-          @echo '{{ style('warning') }}foo{{NORMAL}}'
-      ",
-    )
-    .stdout("\x1b[1;33mfoo\x1b[0m\n")
-    .success();
-}
-
-#[test]
-fn style_unknown() {
-  Test::new()
-    .justfile(
-      "
-        foo:
-          @echo '{{ style('hippo') }}foo{{NORMAL}}'
-      ",
-    )
-    .stderr(
-      "
-        error: call to function `style` failed: unknown style: `hippo`
-         ——▶ justfile:2:13
-          │
-        2 │   @echo '{{ style('hippo') }}foo{{NORMAL}}'
-          │             ^^^^^
-      ",
-    )
-    .failure();
 }
 
 #[test]
@@ -1661,11 +1597,7 @@ fn shell_with_powershell() {
 
 #[test]
 fn module_path() {
-  Test::new()
-    .justfile("foo := module_path()")
-    .args(["--evaluate", "foo"])
-    .stdout("")
-    .success();
+  assert_eval("module_path()", "");
 }
 
 #[test]
@@ -1676,5 +1608,91 @@ fn module_path_in_submodule() {
     .justfile("mod foo")
     .args(["--evaluate", "foo::bar::baz"])
     .stdout("foo::bar")
+    .success();
+}
+
+#[test]
+fn num_jobs_returns_jobs() {
+  Test::new()
+    .justfile(
+      "
+        set lists
+
+        foo:
+          @echo {{ num_jobs() }}
+      ",
+    )
+    .unstable()
+    .args(["--jobs", "9999"])
+    .stdout("9999\n")
+    .success();
+}
+
+#[test]
+fn num_jobs_falls_back_to_empty_list() {
+  Test::new()
+    .justfile(
+      "
+        set lists
+
+        foo:
+          @echo '{{ show(num_jobs()) }}'
+      ",
+    )
+    .unstable()
+    .stdout("[]\n")
+    .success();
+}
+
+#[test]
+fn num_jobs_requires_lists() {
+  Test::new()
+    .justfile(
+      "
+        foo:
+          @echo {{ num_jobs() }}
+      ",
+    )
+    .stderr(
+      "
+        error: the `num_jobs()` function requires `set lists`
+         ——▶ justfile:2:12
+          │
+        2 │   @echo {{ num_jobs() }}
+          │            ^^^^^^^^
+      ",
+    )
+    .failure();
+}
+
+#[test]
+fn dry_run_does_not_execute_shell_function() {
+  Test::new()
+    .justfile(
+      "
+        foo:
+          echo {{ shell('exit 1') }}
+      ",
+    )
+    .arg("--dry-run")
+    .stderr("echo shell(\"exit 1\")\n")
+    .success();
+}
+
+#[test]
+fn dry_run_shell_function_output_is_escaped() {
+  Test::new()
+    .justfile(
+      r#"
+        foo:
+          echo {{ shell('exit 1', '"') }}
+      "#,
+    )
+    .arg("--dry-run")
+    .stderr(
+      r#"
+        echo shell("exit 1", "\"")
+      "#,
+    )
     .success();
 }

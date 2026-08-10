@@ -133,6 +133,45 @@ a:"#,
 }
 
 #[test]
+fn cooked_string_crlf_line_continuation() {
+  Test::new()
+    .justfile("x := \"a\\\r\nb\"")
+    .args(["--evaluate", "x"])
+    .stdout("ab")
+    .success();
+}
+
+#[test]
+fn escaped_carriage_return_without_line_feed_is_an_error() {
+  Test::new()
+    .justfile("x := \"a\\\rb\"")
+    .stderr(
+      "error: `\\\\r` is not a valid escape sequence
+ ——▶ justfile:1:6
+  │
+1 │ x := \"a\\\rb\"
+  │      ^^^^^
+",
+    )
+    .failure();
+}
+
+#[test]
+fn escaped_carriage_return_at_end_of_string_is_an_error() {
+  Test::new()
+    .justfile("x := \"a\\\r\"")
+    .stderr(
+      "error: `\\\\r` is not a valid escape sequence
+ ——▶ justfile:1:6
+  │
+1 │ x := \"a\\\r\"
+  │      ^^^^
+",
+    )
+    .failure();
+}
+
+#[test]
 fn error_line_after_multiline_raw_string() {
   Test::new()
     .arg("a")
@@ -513,29 +552,20 @@ fn shebang_backtick() {
 
 #[test]
 fn valid_unicode_escape() {
-  Test::new()
-    .justfile(r#"x := "\u{1f916}\u{1F916}""#)
-    .args(["--evaluate", "x"])
-    .stdout("🤖🤖")
-    .success();
+  assert_eval(r#""\u{1f916}\u{1F916}""#, "🤖🤖");
 }
 
 #[test]
 fn unicode_escapes_with_all_hex_digits() {
-  Test::new()
-    .justfile(r#"x := "\u{012345}\u{6789a}\u{bcdef}\u{ABCDE}\u{F}""#)
-    .args(["--evaluate", "x"])
-    .stdout("\u{012345}\u{6789a}\u{bcdef}\u{ABCDE}\u{F}")
-    .success();
+  assert_eval(
+    r#""\u{012345}\u{6789a}\u{bcdef}\u{ABCDE}\u{F}""#,
+    "\u{012345}\u{6789a}\u{bcdef}\u{ABCDE}\u{F}",
+  );
 }
 
 #[test]
 fn maximum_valid_unicode_escape() {
-  Test::new()
-    .justfile(r#"x := "\u{10FFFF}""#)
-    .args(["--evaluate", "x"])
-    .stdout("\u{10FFFF}")
-    .success();
+  assert_eval(r#""\u{10FFFF}""#, "\u{10FFFF}");
 }
 
 #[test]
@@ -655,4 +685,19 @@ fn unicode_escape_unterminated() {
       "#,
     )
     .failure();
+}
+
+#[test]
+fn indented_string_crlf_blank_lines_keep_crlf() {
+  let test = Test::new();
+  fs::write(
+    test.justfile_path(),
+    "x := '''\r\nfoo\r\n\r\nbar\r\n'''\r\n",
+  )
+  .unwrap();
+  test
+    .args(["--evaluate", "x"])
+    .unindent_stdout(false)
+    .stdout("foo\r\n\r\nbar\r\n")
+    .success();
 }

@@ -62,8 +62,8 @@ pub(crate) fn analysis_error(
     .expect("Parsing failed in analysis test...");
 
   let root = PathBuf::from("justfile");
-  let mut asts: HashMap<PathBuf, Ast> = HashMap::new();
-  asts.insert(root.clone(), ast);
+  let mut asts: HashMap<(Modulepath, PathBuf), Ast> = HashMap::new();
+  asts.insert((Modulepath::default(), root.clone()), ast);
 
   let mut paths: HashMap<PathBuf, PathBuf> = HashMap::new();
   paths.insert("justfile".into(), "justfile".into());
@@ -74,6 +74,7 @@ pub(crate) fn analysis_error(
     None,
     &[],
     &[],
+    &Modulepath::default(),
     None,
     &mut HashMap::new(),
     &paths,
@@ -81,14 +82,7 @@ pub(crate) fn analysis_error(
     &root,
   ) {
     Ok(_) => panic!("Analysis unexpectedly succeeded"),
-    Err(have) => {
-      let Error::Compile { compile_error } = have else {
-        panic!(
-          "unexpected non-compile analysis error: {}",
-          have.color_display(Color::never()),
-        );
-      };
-
+    Err(compile_error) => {
       let want = CompileError {
         token: Token {
           kind: compile_error.token.kind,

@@ -2,10 +2,11 @@ use super::*;
 
 pub(crate) struct ArgAttribute<'src> {
   pub(crate) flag: bool,
-  pub(crate) help: Option<String>,
   pub(crate) long: Option<String>,
+  pub(crate) max: Option<(Name<'src>, u64)>,
+  pub(crate) min: Option<(Name<'src>, u64)>,
+  pub(crate) multiple: bool,
   pub(crate) name: Token<'src>,
-  pub(crate) pattern: Option<Pattern<'src>>,
   pub(crate) short: Option<char>,
   pub(crate) value: Option<Expression<'src>>,
 }

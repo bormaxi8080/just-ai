@@ -2,10 +2,12 @@ use super::*;
 
 pub(crate) fn load_dotenv(
   config: &Config,
-  settings: &Settings,
+  justfile: &Justfile,
   working_directory: &Path,
 ) -> RunResult<'static, BTreeMap<String, String>> {
-  let commands = if config.dotenv_command.is_empty() {
+  let settings = &justfile.settings;
+
+  let commands = if config.dotenv_command.is_empty() || justfile.is_submodule() {
     settings.dotenv_command.elements()
   } else {
     &config.dotenv_command
@@ -13,14 +15,18 @@ pub(crate) fn load_dotenv(
 
   if !commands.is_empty() {
     let mut dotenv = BTreeMap::new();
-    for command in commands {
-      dotenv.extend(load_from_command(
-        command,
-        config,
-        settings,
-        working_directory,
-      )?);
+
+    if !config.dry_run {
+      for command in commands {
+        dotenv.extend(load_from_command(
+          command,
+          config,
+          settings,
+          working_directory,
+        )?);
+      }
     }
+
     return Ok(dotenv);
   }
 
@@ -52,7 +58,7 @@ pub(crate) fn load_dotenv(
   let mut dotenv = BTreeMap::new();
   let mut found = false;
 
-  for path in paths.elements() {
+  for path in paths {
     let path = working_directory.join(path);
     if let Some(map) = load_from_file(&path, settings)? {
       dotenv.extend(map);
@@ -71,7 +77,7 @@ pub(crate) fn load_dotenv(
   };
 
   for directory in working_directory.ancestors() {
-    for filename in filenames.elements() {
+    for filename in &filenames {
       if let Some(map) = load_from_file(&directory.join(filename), settings)? {
         dotenv.extend(map);
         found = true;
@@ -99,7 +105,7 @@ fn load_from_command(
   let mut cmd = settings.shell_command(config);
 
   cmd
-    .arg(command)
+    .shell_arg(command)
     .current_dir(working_directory)
     .stdin(Stdio::inherit())
     .stderr(if config.verbosity.quiet() {

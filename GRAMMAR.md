@@ -84,8 +84,10 @@ setting       : 'allow-duplicate-recipes' boolean?
               | 'fallback' boolean?
               | 'guards' boolean?
               | 'ignore-comments' boolean?
+              | 'indentation' ':=' string
               | 'lazy' boolean?
               | 'lists' boolean?
+              | 'minimum-version' ':=' string
               | 'no-cd' boolean?
               | 'no-exit-message' boolean?
               | 'positional-arguments' boolean?
@@ -118,13 +120,18 @@ comparison    : conjunct '==' conjunct
               | conjunct '!~' conjunct
               | conjunct
 
-conjunct      : 'if' expression '{' expression '}' ('else' '{' expression '}')?
+conjunct      : conditional
               | 'assert' '(' expression ',' expression ')'
               | '/' expression
               | value '+' expression
               | value '++' expression
               | value '/' expression
               | value
+
+conditional   : 'if' expression '{' expression '}' alternative?
+
+alternative   : 'else' conditional
+              | 'else' '{' expression '}'
 
 value         : '!' value
               | NAME '(' sequence? ')'

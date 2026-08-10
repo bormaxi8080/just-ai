@@ -44,8 +44,6 @@ deny = []
 multiple-versions = "allow"
 # Skip specific crates when checking for multiple versions
 skip = [
-    "cpufeatures",
     "getrandom",
-    "shlex",
     "syn",
 ]

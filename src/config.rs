@@ -18,7 +18,9 @@ pub(crate) struct Config {
   pub(crate) explain: bool,
   pub(crate) groups: Vec<String>,
   pub(crate) highlight: bool,
+  pub(crate) indentation: Option<Indentation>,
   pub(crate) invocation_directory: PathBuf,
+  pub(crate) jobs: Option<NonZeroU64>,
   pub(crate) justfile_names: Option<Vec<String>>,
   pub(crate) list_heading: String,
   pub(crate) list_prefix: String,
@@ -63,7 +65,9 @@ impl Config {
       explain: false,
       groups: Vec::new(),
       highlight: true,
+      indentation: None,
       invocation_directory: env::current_dir().context(config_error::CurrentDir)?,
+      jobs: None,
       justfile_names: None,
       list_heading: Arguments::DEFAULT_LIST_HEADING.into(),
       list_prefix: Arguments::DEFAULT_LIST_PREFIX.into(),
@@ -112,19 +116,17 @@ impl Config {
   fn search_config(arguments: &Arguments, positional: &Positional) -> ConfigResult<SearchConfig> {
     const STANDARD_INPUT_ARGUMENT: &str = "-";
 
-    if arguments.global_justfile {
-      return Ok(SearchConfig::GlobalJustfile);
-    }
-
     let justfile = arguments.justfile.clone();
 
     let working_directory = arguments.working_directory.clone();
 
     if let Some(search_directory) = positional.search_directory.as_ref().map(PathBuf::from) {
-      if justfile.is_some() || working_directory.is_some() {
+      if arguments.global_justfile || justfile.is_some() || working_directory.is_some() {
         return Err(ConfigError::SearchDirConflict);
       }
       Ok(SearchConfig::FromSearchDirectory { search_directory })
+    } else if arguments.global_justfile {
+      Ok(SearchConfig::GlobalJustfile)
     } else {
       match (justfile, working_directory) {
         (None, None) => Ok(SearchConfig::FromInvocationDirectory),
@@ -145,14 +147,6 @@ impl Config {
         )),
       }
     }
-  }
-
-  pub(crate) fn timestamp(&self) -> Option<String> {
-    self.timestamp.then(|| {
-      chrono::Local::now()
-        .format(&self.timestamp_format)
-        .to_string()
-    })
   }
 
   fn parse_override(path: &str) -> ConfigResult<(Modulepath, String)> {
@@ -315,7 +309,7 @@ impl Config {
     }
 
     let unstable = arguments.unstable || subcommand == Subcommand::Summary;
-    let color = Color::new(arguments.indentation, arguments.color);
+    let color = Color::new(arguments.indentation.unwrap_or_default(), arguments.color);
 
     let invocation_directory = env::current_dir().context(config_error::CurrentDir)?;
 
@@ -338,7 +332,9 @@ impl Config {
       explain: arguments.explain,
       groups: arguments.group,
       highlight: !arguments.no_highlight,
+      indentation: arguments.indentation,
       invocation_directory,
+      jobs: arguments.jobs,
       justfile_names: arguments.justfile_names,
       list_heading: arguments.list_heading,
       list_prefix: arguments.list_prefix,

@@ -4,12 +4,12 @@ pub(crate) type UnresolvedRecipe<'src> = Recipe<'src, UnresolvedDependency<'src>
 
 impl<'src> UnresolvedRecipe<'src> {
   pub(crate) fn resolve(
-    self,
-    assignments: &Table<'src, Assignment<'src>>,
-    functions: &Table<'src, FunctionDefinition<'src>>,
+    mut self,
+    evaluator: &mut Evaluator<'src, '_>,
     modulepath: &Modulepath,
     resolved: Vec<Arc<Recipe<'src>>>,
     settings: &Settings,
+    variable_resolver: &VariableResolver<'src, '_>,
   ) -> CompileResult<'src, Recipe<'src>> {
     assert_eq!(
       self.dependencies.len(),
@@ -21,28 +21,22 @@ impl<'src> UnresolvedRecipe<'src> {
 
     let mut variable_references = HashSet::new();
 
-    for (i, parameter) in self.parameters.iter().enumerate() {
-      if let Some(expression) = &parameter.default {
-        Self::resolve_expression(
-          assignments,
-          expression,
-          functions,
-          &self.parameters[..i],
-          &mut variable_references,
-        )?;
+    for i in 0..self.parameters.len() {
+      let (resolved, rest) = self.parameters.split_at_mut(i);
+      let parameters = (*resolved).into();
+      let parameter = &mut rest[0];
+      if let Some(expression) = &mut parameter.default {
+        variable_resolver.resolve_expression(expression, &parameters, &mut variable_references)?;
       }
-      if let Some(expression) = &parameter.value {
-        Self::resolve_expression(
-          assignments,
-          expression,
-          functions,
-          &self.parameters[..i],
-          &mut variable_references,
-        )?;
+      if let Some(expression) = &mut parameter.value {
+        variable_resolver.resolve_expression(expression, &parameters, &mut variable_references)?;
       }
     }
 
-    for dependency in &self.dependencies {
+    let parameters = self.parameters.as_slice().into();
+    let empty = ExpressionContext::new();
+
+    for dependency in &mut self.dependencies {
       if dependency.starred() && !settings.lists {
         return Err(
           dependency
@@ -52,52 +46,171 @@ impl<'src> UnresolvedRecipe<'src> {
         );
       }
 
-      for argument in &dependency.arguments {
-        Self::resolve_expression(
-          assignments,
-          &argument.expression,
-          functions,
-          &self.parameters,
+      for argument in &mut dependency.arguments {
+        variable_resolver.resolve_expression(
+          &mut argument.expression,
+          &parameters,
           &mut variable_references,
         )?;
       }
     }
 
-    for attribute in &self.attributes {
-      match attribute {
-        Attribute::Confirm(Some(expression)) | Attribute::WorkingDirectory(expression) => {
-          Self::resolve_expression(
-            assignments,
-            expression,
-            functions,
-            &self.parameters,
-            &mut variable_references,
-          )?;
-        }
-        Attribute::Env(key, value) => {
-          Self::resolve_expression(assignments, key, functions, &[], &mut variable_references)?;
-          Self::resolve_expression(assignments, value, functions, &[], &mut variable_references)?;
-        }
-        _ => {}
-      }
-    }
+    let script = self.is_script(settings);
 
-    for line in &self.body {
-      if line.is_comment() && settings.ignore_comments {
+    let attributes = self
+      .attributes
+      .into_items()
+      .map(|(mut attribute, name)| {
+        match &mut attribute {
+          Attribute::Arg {
+            help_property,
+            pattern_property,
+            ..
+          } => {
+            if let Some((_key, expression)) = help_property {
+              variable_resolver.resolve_expression(expression, &empty, &mut variable_references)?;
+            }
+            if let Some((_key, expression)) = pattern_property {
+              variable_resolver.resolve_expression(expression, &empty, &mut variable_references)?;
+            }
+          }
+          Attribute::Cache {
+            extra,
+            inputs,
+            outputs,
+          } => {
+            if let Some(extra) = extra {
+              variable_resolver.resolve_expression(extra, &parameters, &mut variable_references)?;
+            }
+            if let Some(inputs) = inputs {
+              variable_resolver.resolve_expression(
+                inputs,
+                &parameters,
+                &mut variable_references,
+              )?;
+            }
+            if let Some(outputs) = outputs {
+              variable_resolver.resolve_expression(
+                outputs,
+                &parameters,
+                &mut variable_references,
+              )?;
+            }
+          }
+          Attribute::Confirm(Some(expression))
+          | Attribute::Timestamp(Some(expression))
+          | Attribute::WorkingDirectory(expression) => {
+            variable_resolver.resolve_expression(
+              expression,
+              &parameters,
+              &mut variable_references,
+            )?;
+          }
+          Attribute::Doc(Some(expression)) => {
+            variable_resolver.resolve_expression(expression, &empty, &mut variable_references)?;
+          }
+          Attribute::Env(key, value) => {
+            variable_resolver.resolve_expression(key, &empty, &mut variable_references)?;
+            variable_resolver.resolve_expression(value, &empty, &mut variable_references)?;
+          }
+          Attribute::Android
+          | Attribute::Confirm(None)
+          | Attribute::Continue(_)
+          | Attribute::Default
+          | Attribute::Doc(None)
+          | Attribute::Dragonfly
+          | Attribute::ExitMessage
+          | Attribute::Extension(_)
+          | Attribute::Freebsd
+          | Attribute::Group(_)
+          | Attribute::Linux
+          | Attribute::Macos
+          | Attribute::Metadata(_)
+          | Attribute::Netbsd
+          | Attribute::NoCd
+          | Attribute::NoExitMessage
+          | Attribute::NoQuiet
+          | Attribute::Openbsd
+          | Attribute::Parallel
+          | Attribute::PositionalArguments
+          | Attribute::Private
+          | Attribute::Script(_)
+          | Attribute::Shell
+          | Attribute::Timestamp(None)
+          | Attribute::Unix
+          | Attribute::Windows => {}
+        }
+
+        if let Attribute::Doc(Some(expression)) = &attribute {
+          let value = evaluator
+            .evaluate_value_const(expression)?
+            .join()
+            .trim()
+            .to_owned();
+          self.doc = if value.is_empty() { None } else { Some(value) };
+        }
+
+        if let Attribute::Arg {
+          help,
+          help_property: Some((_key, expression)),
+          name: arg,
+          ..
+        } = &mut attribute
+        {
+          let value = evaluator.evaluate_value_const(expression)?;
+          if !value.is_empty() {
+            let value = value.join();
+            self
+              .parameters
+              .iter_mut()
+              .find(|parameter| parameter.name.lexeme() == arg.cooked)
+              .unwrap()
+              .help = Some(value.clone());
+            *help = Some(value);
+          }
+        }
+
+        if let Attribute::Arg {
+          name: arg,
+          pattern,
+          pattern_property: Some((key, expression)),
+          ..
+        } = &mut attribute
+        {
+          let value = evaluator.evaluate_value_const(expression)?;
+          if !value.is_empty() {
+            let compiled = Pattern::new(&value, *key)?;
+            self
+              .parameters
+              .iter_mut()
+              .find(|parameter| parameter.name.lexeme() == arg.cooked)
+              .unwrap()
+              .pattern = Some(compiled.clone());
+            *pattern = Some(compiled);
+          }
+        }
+        Ok((attribute, name))
+      })
+      .collect::<CompileResult<AttributeSet>>()?;
+
+    let mut continued = false;
+
+    for line in &mut self.body {
+      if !script && !continued && line.is_comment() && settings.ignore_comments {
         continue;
       }
 
-      for fragment in &line.fragments {
+      for fragment in &mut line.fragments {
         if let Fragment::Interpolation { expression, .. } = fragment {
-          Self::resolve_expression(
-            assignments,
+          variable_resolver.resolve_expression(
             expression,
-            functions,
-            &self.parameters,
+            &parameters,
             &mut variable_references,
           )?;
         }
       }
+
+      continued = line.is_continuation();
     }
 
     for (unresolved, resolved) in self.dependencies.iter().zip(&resolved) {
@@ -123,6 +236,7 @@ impl<'src> UnresolvedRecipe<'src> {
       .zip(resolved)
       .map(|(unresolved, resolved)| Dependency {
         arguments: resolved.group_arguments(&unresolved.arguments, settings),
+        path: unresolved.recipe,
         recipe: resolved,
       })
       .collect();
@@ -132,7 +246,7 @@ impl<'src> UnresolvedRecipe<'src> {
     recipe_path.components.push(self.name.lexeme().into());
 
     Ok(Recipe {
-      attributes: self.attributes,
+      attributes,
       body: self.body,
       dependencies,
       doc: self.doc,
@@ -140,6 +254,7 @@ impl<'src> UnresolvedRecipe<'src> {
       import_offsets: self.import_offsets,
       module_path: Some(modulepath.clone()),
       name: self.name,
+      number: self.number,
       parameters: self.parameters,
       priors: self.priors,
       private: self.private,
@@ -148,45 +263,5 @@ impl<'src> UnresolvedRecipe<'src> {
       shebang: self.shebang,
       variable_references,
     })
-  }
-
-  fn resolve_expression(
-    assignments: &Table<'src, Assignment<'src>>,
-    expression: &Expression<'src>,
-    functions: &Table<'src, FunctionDefinition<'src>>,
-    parameters: &[Parameter],
-    variable_references: &mut HashSet<Number>,
-  ) -> CompileResult<'src> {
-    for reference in expression.references() {
-      match reference {
-        Reference::Variable(variable) => {
-          Self::resolve_variable(assignments, parameters, variable, variable_references)?;
-        }
-        Reference::Call { name, arguments } => {
-          Analyzer::resolve_call(functions, name, arguments)?;
-        }
-      }
-    }
-    Ok(())
-  }
-
-  fn resolve_variable(
-    assignments: &Table<'src, Assignment<'src>>,
-    parameters: &[Parameter],
-    variable: Name<'src>,
-    variable_references: &mut HashSet<Number>,
-  ) -> CompileResult<'src> {
-    let name = variable.lexeme();
-
-    if parameters.iter().any(|p| p.name.lexeme() == name) {
-      Ok(())
-    } else if let Some(assignment) = assignments.get(name) {
-      variable_references.insert(assignment.number);
-      Ok(())
-    } else if constants().contains_key(name) {
-      Ok(())
-    } else {
-      Err(variable.error(CompileErrorKind::UndefinedVariable { variable: name }))
-    }
   }
 }

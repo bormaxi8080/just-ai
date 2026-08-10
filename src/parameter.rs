@@ -8,10 +8,13 @@ pub(crate) struct Parameter<'src> {
   pub(crate) help: Option<String>,
   pub(crate) kind: ParameterKind,
   pub(crate) long: Option<String>,
+  pub(crate) max: Option<u64>,
+  pub(crate) min: Option<u64>,
+  pub(crate) multiple: bool,
   pub(crate) name: Name<'src>,
   #[serde(skip)]
   pub(crate) number: Number,
-  pub(crate) pattern: Option<Pattern<'src>>,
+  pub(crate) pattern: Option<Pattern>,
   pub(crate) short: Option<char>,
   pub(crate) value: Option<Expression<'src>>,
 }
@@ -22,7 +25,41 @@ impl<'src> Parameter<'src> {
   }
 
   pub(crate) fn is_required(&self) -> bool {
-    self.default.is_none() && self.kind != ParameterKind::Star && !self.flag
+    self.default.is_none()
+      && !self.flag
+      && (self.kind != ParameterKind::Star || self.min.is_some_and(|min| min > 0))
+  }
+
+  pub(crate) fn check_value_count(
+    &self,
+    recipe: &Recipe<'src>,
+    value: &Value,
+  ) -> Result<(), Error<'src>> {
+    let found = value.elements().len();
+
+    if let Some(min) = self.min
+      && u64::try_from(found).unwrap() < min
+    {
+      return Err(Error::ArgumentTooFewValues {
+        recipe: recipe.name(),
+        parameter: self.name.lexeme(),
+        found,
+        min,
+      });
+    }
+
+    if let Some(max) = self.max
+      && u64::try_from(found).unwrap() > max
+    {
+      return Err(Error::ArgumentTooManyValues {
+        recipe: recipe.name(),
+        parameter: self.name.lexeme(),
+        found,
+        max,
+      });
+    }
+
+    Ok(())
   }
 
   pub(crate) fn check_pattern_match(

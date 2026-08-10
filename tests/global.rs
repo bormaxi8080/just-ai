@@ -10,10 +10,12 @@ fn macos() {
   let path = tempdir.path().to_owned();
 
   Test::with_tempdir(tempdir)
-    .test_round_trip(false)
     .write(
       "Library/Application Support/just/justfile",
-      "@default:\n  echo foo",
+      "
+        @default:
+          echo foo
+      ",
     )
     .env("HOME", path.to_str().unwrap())
     .args(["--global-justfile"])
@@ -31,8 +33,13 @@ fn not_macos() {
   let path = tempdir.path().to_owned();
 
   Test::with_tempdir(tempdir)
-    .test_round_trip(false)
-    .write("just/justfile", "@default:\n  echo foo")
+    .write(
+      "just/justfile",
+      "
+        @default:
+          echo foo
+      ",
+    )
     .env("XDG_CONFIG_HOME", path.to_str().unwrap())
     .args(["--global-justfile"])
     .stdout("foo\n")
@@ -49,8 +56,13 @@ fn unix() {
   let path = tempdir.path().to_owned();
 
   let tempdir = Test::with_tempdir(tempdir)
-    .test_round_trip(false)
-    .write("justfile", "@default:\n  echo foo")
+    .write(
+      "justfile",
+      "
+        @default:
+          echo foo
+      ",
+    )
     .env("HOME", path.to_str().unwrap())
     .args(["--global-justfile"])
     .stdout("foo\n")
@@ -58,8 +70,13 @@ fn unix() {
     .tempdir;
 
   Test::with_tempdir(tempdir)
-    .test_round_trip(false)
-    .write(".config/just/justfile", "@default:\n  echo bar")
+    .write(
+      ".config/just/justfile",
+      "
+        @default:
+          echo bar
+      ",
+    )
     .env("HOME", path.to_str().unwrap())
     .args(["--global-justfile"])
     .stdout("bar\n")
@@ -76,10 +93,32 @@ fn case_insensitive() {
   let path = tempdir.path().to_owned();
 
   Test::with_tempdir(tempdir)
-    .test_round_trip(false)
-    .write("just/JUSTFILE", "@default:\n  echo foo")
+    .write(
+      "just/JUSTFILE",
+      "
+        @default:
+          echo foo
+      ",
+    )
     .env("XDG_CONFIG_HOME", path.to_str().unwrap())
     .args(["--global-justfile"])
     .stdout("foo\n")
     .success();
+}
+
+#[test]
+fn forbid_search_path_prefix() {
+  let tempdir = tempdir();
+
+  let path = tempdir.path().to_owned();
+
+  Test::with_tempdir(tempdir)
+    .write(".config/just/justfile", "foo:\n  @echo global\n")
+    .env("HOME", path.to_str().unwrap())
+    .args(["--global-justfile", "sub/foo"])
+    .stderr(
+      "error: path-prefixed recipes may not be used with `--global-justfile`, \
+      `--working-directory`, or `--justfile`\n",
+    )
+    .status(1);
 }

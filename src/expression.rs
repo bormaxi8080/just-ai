@@ -31,6 +31,7 @@ pub(crate) enum Expression<'src> {
     lhs: Box<Self>,
     operator: ConditionalOperator,
     rhs: Box<Self>,
+    token: Token<'src>,
   },
   /// `lhs + rhs`
   Concatenation {
@@ -75,12 +76,81 @@ pub(crate) enum Expression<'src> {
   /// `"string_literal"` or `'string_literal'`
   StringLiteral { string_literal: StringLiteral<'src> },
   /// `variable`
-  Variable { name: Name<'src> },
+  Variable {
+    name: Name<'src>,
+    number: Option<Number>,
+  },
 }
 
 impl<'src> Expression<'src> {
   pub(crate) fn references<'a>(&'a self) -> References<'a, 'src> {
     References::new(self)
+  }
+
+  pub(crate) fn resolve_variables(
+    &mut self,
+    context: Option<&ExpressionContext<'src>>,
+    bindings: &HashMap<&'src str, Number>,
+  ) {
+    match self {
+      Self::And { lhs, rhs }
+      | Self::Comparison { lhs, rhs, .. }
+      | Self::Concatenation { lhs, rhs, .. }
+      | Self::ListConcatenation { lhs, rhs, .. }
+      | Self::Or { lhs, rhs } => {
+        lhs.resolve_variables(context, bindings);
+        rhs.resolve_variables(context, bindings);
+      }
+      Self::Assert {
+        condition, message, ..
+      } => {
+        condition.resolve_variables(context, bindings);
+        if let Some(message) = message {
+          message.resolve_variables(context, bindings);
+        }
+      }
+      Self::Backtick { .. } | Self::StringLiteral { .. } => {}
+      Self::Call { arguments, .. } => {
+        for argument in arguments {
+          argument.resolve_variables(context, bindings);
+        }
+      }
+      Self::Conditional {
+        condition,
+        then,
+        otherwise,
+      } => {
+        condition.resolve_variables(context, bindings);
+        then.resolve_variables(context, bindings);
+        if let Some(otherwise) = otherwise {
+          otherwise.resolve_variables(context, bindings);
+        }
+      }
+      Self::FormatString { expressions, .. } => {
+        for (expression, _string) in expressions {
+          expression.resolve_variables(context, bindings);
+        }
+      }
+      Self::Group { contents } => contents.resolve_variables(context, bindings),
+      Self::Join { lhs, rhs, .. } => {
+        if let Some(lhs) = lhs {
+          lhs.resolve_variables(context, bindings);
+        }
+        rhs.resolve_variables(context, bindings);
+      }
+      Self::List { elements, .. } => {
+        for element in elements {
+          element.resolve_variables(context, bindings);
+        }
+      }
+      Self::Not { operand } => operand.resolve_variables(context, bindings),
+      Self::Variable { name, number } => {
+        let name = name.lexeme();
+        *number = context
+          .and_then(|context| context.lookup(name))
+          .or_else(|| bindings.get(name).copied());
+      }
+    }
   }
 }
 
@@ -108,7 +178,9 @@ impl Display for Expression<'_> {
         }
         write!(f, ")")
       }
-      Self::Comparison { lhs, operator, rhs } => write!(f, "{lhs} {operator} {rhs}"),
+      Self::Comparison {
+        lhs, operator, rhs, ..
+      } => write!(f, "{lhs} {operator} {rhs}"),
       Self::Concatenation { lhs, rhs, .. } => write!(f, "{lhs} + {rhs}"),
       Self::ListConcatenation { lhs, rhs, .. } => write!(f, "{lhs} ++ {rhs}"),
       Self::Conditional {
@@ -130,7 +202,7 @@ impl Display for Expression<'_> {
         write!(f, "{start}")?;
 
         for (expression, string) in expressions {
-          write!(f, "{expression}{string}")?;
+          write!(f, " {expression} {string}")?;
         }
 
         Ok(())
@@ -155,7 +227,7 @@ impl Display for Expression<'_> {
       Self::Not { operand } => write!(f, "!{operand}"),
       Self::Or { lhs, rhs } => write!(f, "{lhs} || {rhs}"),
       Self::StringLiteral { string_literal } => write!(f, "{string_literal}"),
-      Self::Variable { name } => write!(f, "{name}"),
+      Self::Variable { name, .. } => write!(f, "{name}"),
     }
   }
 }
@@ -197,7 +269,9 @@ impl Serialize for Expression<'_> {
         }
         seq.end()
       }
-      Self::Comparison { lhs, operator, rhs } => {
+      Self::Comparison {
+        lhs, operator, rhs, ..
+      } => {
         let mut seq = serializer.serialize_seq(None)?;
         seq.serialize_element(&operator.to_string())?;
         seq.serialize_element(lhs)?;
@@ -270,7 +344,7 @@ impl Serialize for Expression<'_> {
         seq.end()
       }
       Self::StringLiteral { string_literal } => string_literal.serialize(serializer),
-      Self::Variable { name } => {
+      Self::Variable { name, .. } => {
         let mut seq = serializer.serialize_seq(None)?;
         seq.serialize_element("variable")?;
         seq.serialize_element(name)?;

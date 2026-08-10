@@ -69,8 +69,8 @@ impl<'src> Node<'src> for Item<'src> {
         tree
       }
       Self::Recipe(recipe) => recipe.tree(),
-      Self::Set(set) => set.tree(),
-      Self::Unexport { name } => {
+      Self::Setting(set) => set.tree(),
+      Self::Unexport { name, .. } => {
         let mut unexport = Tree::atom(Keyword::Unexport.lexeme());
         unexport.push_mut(name.lexeme().replace('-', "_"));
         unexport
@@ -92,7 +92,7 @@ impl<'src> Node<'src> for Namepath<'src> {
   }
 }
 
-impl<'src> Node<'src> for Alias<'src, Namepath<'src>> {
+impl<'src> Node<'src> for Alias<'src> {
   fn tree(&self) -> Tree<'src> {
     let target = self.target.tree();
 
@@ -138,7 +138,9 @@ impl<'src> Node<'src> for Expression<'src> {
         }
         tree
       }
-      Self::Comparison { lhs, operator, rhs } => Tree::atom(operator.to_string())
+      Self::Comparison {
+        lhs, operator, rhs, ..
+      } => Tree::atom(operator.to_string())
         .push(lhs.tree())
         .push(rhs.tree()),
       Self::Concatenation { lhs, rhs, .. } => Tree::atom("+").push(lhs.tree()).push(rhs.tree()),
@@ -186,7 +188,7 @@ impl<'src> Node<'src> for Expression<'src> {
       Self::StringLiteral {
         string_literal: StringLiteral { cooked, .. },
       } => Tree::string(cooked),
-      Self::Variable { name } => Tree::atom(name.lexeme()),
+      Self::Variable { name, .. } => Tree::atom(name.lexeme()),
     }
   }
 }
@@ -319,6 +321,9 @@ impl<'src> Node<'src> for Set<'src> {
       | Setting::Tempdir(value)
       | Setting::WorkingDirectory(value) => {
         set.push_mut(value.tree());
+      }
+      Setting::Indentation(value, _) | Setting::MinimumVersion(value) => {
+        set.push_mut(Tree::string(&value.cooked));
       }
       Setting::ScriptInterpreter(Interpreter { command, arguments })
       | Setting::Shell(Interpreter { command, arguments })

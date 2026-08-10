@@ -3,6 +3,7 @@ use super::*;
 #[derive(Clone, PartialEq, Debug)]
 pub(crate) struct Dependency<'src> {
   pub(crate) arguments: Vec<Vec<DependencyArgument<'src>>>,
+  pub(crate) path: Namepath<'src>,
   pub(crate) recipe: Arc<Recipe<'src>>,
 }
 
@@ -35,7 +36,7 @@ impl Serialize for Dependency<'_> {
 
     let mut s = serializer.serialize_struct("Dependency", 3)?;
     s.serialize_field("arguments", &arguments)?;
-    s.serialize_field("recipe", self.recipe.key())?;
+    s.serialize_field("recipe", &self.path)?;
     s.serialize_field("star", &star)?;
     s.end()
   }
@@ -43,14 +44,14 @@ impl Serialize for Dependency<'_> {
 
 impl Display for Dependency<'_> {
   fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-    if self.arguments.is_empty() {
-      write!(f, "{}", self.recipe.name())
+    if self.arguments.iter().all(Vec::is_empty) {
+      write!(f, "{}", self.path)
     } else {
       if self.star().is_some() {
         write!(f, "*")?;
       }
 
-      write!(f, "({}", self.recipe.name())?;
+      write!(f, "({}", self.path)?;
 
       for argument in self.arguments.iter().flatten() {
         write!(f, " {argument}")?;

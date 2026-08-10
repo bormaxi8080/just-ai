@@ -418,27 +418,40 @@ impl<'run, 'src> Parser<'run, 'src> {
   }
 
   fn take_doc_comment(&mut self, attributes: &AttributeSet<'src>) -> Option<String> {
-    for attribute in attributes {
-      if let Attribute::Doc(doc) = attribute {
-        return doc.as_ref().map(|doc| doc.cooked.clone());
-      }
+    if attributes.contains(AttributeKind::Doc) {
+      return None;
     }
 
     let mut items = self.items.iter().rev();
-    if matches!(items.next(), Some(Item::Newline))
-      && matches!(items.next(), Some(Item::Comment(_)))
-      && matches!(items.next(), Some(Item::Newline) | None)
-    {
-      self.items.pop().unwrap();
 
-      if let Item::Comment(contents) = self.items.pop().unwrap() {
-        Some(contents[1..].trim_start().into())
-      } else {
-        unreachable!();
-      }
-    } else {
-      None
+    if !matches!(items.next()?, Item::Newline) {
+      return None;
     }
+
+    let Item::Comment(contents) = items.next()? else {
+      return None;
+    };
+
+    let first = match items.next() {
+      None => true,
+      Some(Item::Newline) => false,
+      Some(_) => return None,
+    };
+
+    if first && contents.starts_with("#!") {
+      return None;
+    }
+
+    let doc = contents[1..].trim().to_owned();
+
+    if doc.is_empty() {
+      return None;
+    }
+
+    self.items.pop().unwrap();
+    self.items.pop().unwrap();
+
+    Some(doc)
   }
 
   /// Parse a justfile, consumes self
@@ -531,7 +544,9 @@ impl<'run, 'src> Parser<'run, 'src> {
         Some(Keyword::Unexport) if self.line_is(&[Identifier, Identifier]) => {
           self.presume_keyword(Keyword::Unexport)?;
           let name = self.parse_name()?;
-          Item::Unexport { name }
+          let attributes = take_attributes();
+          attributes.ensure_valid_attributes(ItemKind::Unexport, *name)?;
+          Item::Unexport { attributes, name }
         }
         Some(Keyword::Import)
           if self.next_are(&[Identifier, Identifier, StringToken])
@@ -541,8 +556,11 @@ impl<'run, 'src> Parser<'run, 'src> {
           self.presume_keyword(Keyword::Import)?;
           let optional = self.accepted(QuestionMark)?;
           let relative = self.parse_string_literal()?;
+          let attributes = take_attributes();
+          attributes.ensure_valid_attributes(ItemKind::Import, relative.token)?;
           Item::Import {
             absolute: None,
+            attributes,
             optional,
             relative,
           }
@@ -567,34 +585,16 @@ impl<'run, 'src> Parser<'run, 'src> {
 
           let attributes = take_attributes();
 
-          attributes.ensure_valid_attributes(
-            "module",
-            *name,
-            &[
-              AttributeKind::Doc,
-              AttributeKind::Group,
-              AttributeKind::Private,
-            ],
-          )?;
+          attributes.ensure_valid_attributes(ItemKind::Module, *name)?;
 
           let doc = self.take_doc_comment(&attributes);
 
-          let private = attributes.contains(AttributeKind::Private);
-
-          let mut groups = Vec::new();
-          for attribute in attributes {
-            if let Attribute::Group(group) = attribute {
-              groups.push(group);
-            }
-          }
-
           Item::Module {
             absolute: None,
+            attributes,
             doc,
-            groups,
             name,
             optional,
-            private,
             relative,
           }
         }
@@ -602,11 +602,11 @@ impl<'run, 'src> Parser<'run, 'src> {
           if self.next_are(&[Identifier, Identifier, ColonEquals])
             || self.line_is(&[Identifier, Identifier]) =>
         {
-          Item::Set(self.parse_set()?)
+          Item::Setting(self.parse_set(take_attributes())?)
         }
         _ => {
           if self.next_are(&[Identifier, ParenL]) {
-            Item::Function(self.parse_function_definition()?)
+            Item::Function(self.parse_function_definition(take_attributes())?)
           } else if self.next_are(&[Identifier, ColonEquals]) {
             Item::Assignment(self.parse_assignment(take_attributes(), false, false)?)
           } else {
@@ -624,16 +624,13 @@ impl<'run, 'src> Parser<'run, 'src> {
   }
 
   /// Parse an alias, e.g `alias name := target`
-  fn parse_alias(
-    &mut self,
-    attributes: AttributeSet<'src>,
-  ) -> CompileResult<'src, Alias<'src, Namepath<'src>>> {
+  fn parse_alias(&mut self, attributes: AttributeSet<'src>) -> CompileResult<'src, Alias<'src>> {
     self.presume_keyword(Keyword::Alias)?;
     let name = self.parse_name()?;
     self.presume_any(&[Equals, ColonEquals])?;
     let target = self.parse_namepath()?;
 
-    attributes.ensure_valid_attributes("alias", *name, &[AttributeKind::Private])?;
+    attributes.ensure_valid_attributes(ItemKind::Alias, *name)?;
 
     Ok(Alias {
       attributes,
@@ -642,18 +639,23 @@ impl<'run, 'src> Parser<'run, 'src> {
     })
   }
 
-  fn parse_function_definition(&mut self) -> CompileResult<'src, FunctionDefinition<'src>> {
+  fn parse_function_definition(
+    &mut self,
+    attributes: AttributeSet<'src>,
+  ) -> CompileResult<'src, FunctionDefinition<'src>> {
     self
       .unstable_features
       .insert(UnstableFeature::UserDefinedFunctions);
 
     let name = self.parse_name()?;
 
+    attributes.ensure_valid_attributes(ItemKind::Function, *name)?;
+
     self.presume(ParenL)?;
 
     let mut parameters = Vec::new();
     while !self.next_is(ParenR) {
-      parameters.push((self.parse_name()?, self.numerator.next()));
+      parameters.push((self.parse_name()?, self.numerator.next_binding()));
       if !self.accepted(Comma)? {
         break;
       }
@@ -666,6 +668,7 @@ impl<'run, 'src> Parser<'run, 'src> {
     let body = self.parse_expression()?;
 
     Ok(FunctionDefinition {
+      attributes,
       body,
       name,
       parameters,
@@ -683,16 +686,17 @@ impl<'run, 'src> Parser<'run, 'src> {
     self.presume(ColonEquals)?;
     let value = self.parse_expression()?;
 
-    let private = attributes.contains(AttributeKind::Private);
+    attributes.ensure_valid_attributes(ItemKind::Assignment, *name)?;
 
-    attributes.ensure_valid_attributes("assignment", *name, &[AttributeKind::Private])?;
+    let private = attributes.private();
 
     Ok(Assignment {
+      attributes,
       eager,
       export,
       file_depth: self.file_depth,
       name,
-      number: self.numerator.next(),
+      number: self.numerator.next_binding(),
       prelude: false,
       private: private || name.lexeme().starts_with('_'),
       value,
@@ -774,6 +778,7 @@ impl<'run, 'src> Parser<'run, 'src> {
       lhs: lhs.into(),
       operator,
       rhs: rhs.into(),
+      token,
     })
   }
 
@@ -966,6 +971,9 @@ impl<'run, 'src> Parser<'run, 'src> {
             "join_list" => {
               self.list_feature(ListFeature::JoinListFunction, *name);
             }
+            "num_jobs" => {
+              self.list_feature(ListFeature::NumJobsFunction, *name);
+            }
             "show" => {
               self.list_feature(ListFeature::ShowFunction, *name);
             }
@@ -979,7 +987,7 @@ impl<'run, 'src> Parser<'run, 'src> {
           }
           Ok(Expression::Call { name, arguments })
         } else {
-          Ok(Expression::Variable { name })
+          Ok(Expression::Variable { name, number: None })
         }
       }
     } else if self.next_is(ParenL) {
@@ -1028,7 +1036,7 @@ impl<'run, 'src> Parser<'run, 'src> {
     &mut self,
     state: StringState,
   ) -> CompileResult<'src, StringLiteral<'src>> {
-    let expand = if self.next_is(Identifier) {
+    let expand = if matches!(state, StringState::Normal) && self.next_is(Identifier) {
       self.expect_keyword(Keyword::X)?;
       true
     } else {
@@ -1062,7 +1070,7 @@ impl<'run, 'src> Parser<'run, 'src> {
 
     let raw = &token.lexeme()[open..token.lexeme().len() - close];
 
-    let unindented = if kind.indented() && matches!(token.kind, StringToken) {
+    let unindented = if kind.indented() && matches!(state, StringState::Normal) {
       unindent(raw)
     } else {
       raw.to_owned()
@@ -1118,6 +1126,7 @@ impl<'run, 'src> Parser<'run, 'src> {
     #[derive(PartialEq, Eq)]
     enum State {
       Backslash,
+      BackslashCarriageReturn,
       Initial,
       Unicode,
       UnicodeValue { hex: String },
@@ -1140,19 +1149,26 @@ impl<'run, 'src> Parser<'run, 'src> {
           state = State::Unicode;
         }
         State::Backslash => {
+          state = State::Initial;
           match c {
             'n' => cooked.push('\n'),
             'r' => cooked.push('\r'),
             't' => cooked.push('\t'),
             '\\' => cooked.push('\\'),
             '\n' => {}
+            '\r' => state = State::BackslashCarriageReturn,
             '"' => cooked.push('"'),
             character => {
               return Err(token.error(CompileErrorKind::InvalidEscapeSequence { character }));
             }
           }
-          state = State::Initial;
         }
+        State::BackslashCarriageReturn => match c {
+          '\n' => state = State::Initial,
+          _ => {
+            return Err(token.error(CompileErrorKind::InvalidEscapeSequence { character: '\r' }));
+          }
+        },
         State::Unicode => match c {
           '{' => {
             state = State::UnicodeValue { hex: String::new() };
@@ -1188,11 +1204,13 @@ impl<'run, 'src> Parser<'run, 'src> {
       }
     }
 
-    if state != State::Initial {
-      return Err(token.error(CompileErrorKind::UnicodeEscapeUnterminated));
+    match state {
+      State::Initial => Ok(cooked),
+      State::BackslashCarriageReturn => {
+        Err(token.error(CompileErrorKind::InvalidEscapeSequence { character: '\r' }))
+      }
+      _ => Err(token.error(CompileErrorKind::UnicodeEscapeUnterminated)),
     }
-
-    Ok(cooked)
   }
 
   /// Parse a name from an identifier token
@@ -1240,6 +1258,8 @@ impl<'run, 'src> Parser<'run, 'src> {
   ) -> CompileResult<'src, UnresolvedRecipe<'src>> {
     let name = self.parse_name()?;
 
+    attributes.ensure_valid_attributes(ItemKind::Recipe, *name)?;
+
     let mut positional = Vec::new();
 
     let mut longs = HashSet::new();
@@ -1250,12 +1270,20 @@ impl<'run, 'src> Parser<'run, 'src> {
     for attribute in &attributes {
       let Attribute::Arg {
         flag,
-        help,
+        help: _,
+        help_property: _,
         long,
         long_key,
+        max,
+        max_key,
+        min,
+        min_key,
+        multiple,
         name: arg,
-        pattern,
+        pattern: _,
+        pattern_property: _,
         short,
+        short_key,
         value,
       } = attribute
       else {
@@ -1266,39 +1294,51 @@ impl<'run, 'src> Parser<'run, 'src> {
         self.list_feature(ListFeature::Flag, *token);
       }
 
+      if let Some(token) = multiple {
+        self.list_feature(ListFeature::Multiple, *token);
+      }
+
+      if let Some(token) = max_key {
+        self.list_feature(ListFeature::ArgMax, **token);
+      }
+
+      if let Some(token) = min_key {
+        self.list_feature(ListFeature::ArgMin, **token);
+      }
+
       if let Some(option) = long
         && !longs.insert(&option.cooked)
       {
-        return Err(
-          long_key
-            .unwrap_or(option.token)
-            .error(CompileErrorKind::DuplicateOption {
-              option: Switch::Long(option.cooked.clone()),
-              recipe: name.lexeme(),
-            }),
-        );
+        return Err(long_key.map_or(option.token, |name| *name).error(
+          CompileErrorKind::DuplicateOption {
+            option: Switch::Long(option.cooked.clone()),
+            recipe: name.lexeme(),
+          },
+        ));
       }
 
       if let Some(option) = short
-        && !shorts.insert(&option.cooked)
+        && let Some(short) = option.cooked.chars().next()
+        && !shorts.insert(short)
       {
-        return Err(option.token.error(CompileErrorKind::DuplicateOption {
-          option: Switch::Short(option.cooked.chars().next().unwrap()),
-          recipe: name.lexeme(),
-        }));
+        return Err(short_key.map_or(option.token, |name| *name).error(
+          CompileErrorKind::DuplicateOption {
+            option: Switch::Short(short),
+            recipe: name.lexeme(),
+          },
+        ));
       }
 
       arg_attributes.insert(
         arg.cooked.clone(),
         ArgAttribute {
           flag: flag.is_some(),
-          help: help.as_ref().map(|literal| literal.cooked.clone()),
           name: arg.token,
-          pattern: pattern.clone(),
           long: long.as_ref().map(|long| long.cooked.clone()),
-          short: short
-            .as_ref()
-            .map(|short| short.cooked.chars().next().unwrap()),
+          max: max_key.map(|key| (key, max.unwrap())),
+          min: min_key.map(|key| (key, min.unwrap())),
+          multiple: multiple.is_some(),
+          short: short.as_ref().and_then(|short| short.cooked.chars().next()),
           value: value.clone(),
         },
       );
@@ -1394,7 +1434,7 @@ impl<'run, 'src> Parser<'run, 'src> {
       }));
     }
 
-    let private = name.lexeme().starts_with('_') || attributes.contains(AttributeKind::Private);
+    let private = name.lexeme().starts_with('_') || attributes.private();
 
     let doc = self.take_doc_comment(&attributes);
 
@@ -1407,6 +1447,7 @@ impl<'run, 'src> Parser<'run, 'src> {
       import_offsets: self.import_offsets.clone(),
       module_path: None,
       name,
+      number: self.numerator.next_recipe(),
       parameters: positional.into_iter().chain(variadic).collect(),
       priors,
       private,
@@ -1434,29 +1475,36 @@ impl<'run, 'src> Parser<'run, 'src> {
     };
 
     let mut flag = false;
-    let mut help = None;
+    let help = None;
     let mut long = None;
-    let mut pattern = None;
+    let mut max = None;
+    let mut min = None;
+    let mut multiple = false;
+    let pattern = None;
     let mut short = None;
     let mut value = None;
 
     if let Some(arg) = arg_attributes.remove(name.lexeme()) {
       flag = arg.flag;
-      help = arg.help;
       long = arg.long;
-      pattern = arg.pattern;
+      max = arg.max;
+      min = arg.min;
+      multiple = arg.multiple;
       short = arg.short;
       value = arg.value;
-    }
-
-    if kind.is_variadic() && (long.is_some() || short.is_some()) {
-      return Err(name.error(CompileErrorKind::VariadicParameterWithOption));
     }
 
     if flag && default.is_some() {
       return Err(name.error(CompileErrorKind::FlagWithDefault {
         parameter: name.lexeme().into(),
       }));
+    }
+
+    if let Some((key, _)) = max.or(min)
+      && !multiple
+      && !kind.is_variadic()
+    {
+      return Err(key.error(CompileErrorKind::ArgAttributeRequiresMultipleOrVariadic { key }));
     }
 
     Ok(Parameter {
@@ -1466,8 +1514,11 @@ impl<'run, 'src> Parser<'run, 'src> {
       help,
       kind,
       long,
+      max: max.map(|(_key, max)| max),
+      min: min.map(|(_key, min)| min),
+      multiple,
       name,
-      number: self.numerator.next(),
+      number: self.numerator.next_binding(),
       pattern,
       short,
       value,
@@ -1536,7 +1587,7 @@ impl<'run, 'src> Parser<'run, 'src> {
   }
 
   /// Parse a setting
-  fn parse_set(&mut self) -> CompileResult<'src, Set<'src>> {
+  fn parse_set(&mut self, attributes: AttributeSet<'src>) -> CompileResult<'src, Set<'src>> {
     self.presume_keyword(Keyword::Set)?;
     let name = Name::from_identifier(self.presume(Identifier)?);
     let lexeme = name.lexeme();
@@ -1545,6 +1596,8 @@ impl<'run, 'src> Parser<'run, 'src> {
         setting: name.lexeme(),
       }));
     };
+
+    attributes.ensure_valid_attributes(ItemKind::Setting, *name)?;
 
     let set_bool = match keyword {
       Keyword::AllowDuplicateRecipes => {
@@ -1577,7 +1630,11 @@ impl<'run, 'src> Parser<'run, 'src> {
     };
 
     if let Some(value) = set_bool {
-      return Ok(Set { name, value });
+      return Ok(Set {
+        attributes,
+        name,
+        value,
+      });
     }
 
     self.expect(ColonEquals)?;
@@ -1586,6 +1643,59 @@ impl<'run, 'src> Parser<'run, 'src> {
       Keyword::DotenvCommand => Some(Setting::DotenvCommand(self.parse_expression()?)),
       Keyword::DotenvFilename => Some(Setting::DotenvFilename(self.parse_expression()?)),
       Keyword::DotenvPath => Some(Setting::DotenvPath(self.parse_expression()?)),
+      Keyword::Indentation => {
+        let expression = self.parse_expression()?;
+
+        let Expression::StringLiteral { string_literal } = expression else {
+          return Err(name.error(CompileErrorKind::SettingExpression { setting: keyword }));
+        };
+
+        if string_literal.expand || string_literal.kind.indented || string_literal.part.is_some() {
+          return Err(name.error(CompileErrorKind::SettingExpression { setting: keyword }));
+        }
+
+        let indentation = string_literal
+          .cooked
+          .parse::<Indentation>()
+          .map_err(|message| {
+            string_literal
+              .token
+              .error(CompileErrorKind::InvalidIndentation { message })
+          })?;
+
+        Some(Setting::Indentation(string_literal, indentation))
+      }
+      Keyword::MinimumVersion => {
+        let expression = self.parse_expression()?;
+
+        let Expression::StringLiteral { string_literal } = expression else {
+          return Err(name.error(CompileErrorKind::SettingExpression { setting: keyword }));
+        };
+
+        if string_literal.expand || string_literal.kind.indented || string_literal.part.is_some() {
+          return Err(name.error(CompileErrorKind::SettingExpression { setting: keyword }));
+        }
+
+        let minimum = string_literal.cooked.parse::<Version>().map_err(|source| {
+          string_literal
+            .token
+            .error(CompileErrorKind::InvalidMinimumVersion {
+              source,
+              version: string_literal.cooked.clone(),
+            })
+        })?;
+
+        let current = Version::current();
+        if current < minimum {
+          return Err(
+            string_literal
+              .token
+              .error(CompileErrorKind::MinimumVersion { current, minimum }),
+          );
+        }
+
+        Some(Setting::MinimumVersion(string_literal))
+      }
       Keyword::ScriptInterpreter => Some(Setting::ScriptInterpreter(self.parse_interpreter()?)),
       Keyword::Shell => Some(Setting::Shell(self.parse_interpreter()?)),
       Keyword::Tempdir => Some(Setting::Tempdir(self.parse_expression()?)),
@@ -1595,7 +1705,11 @@ impl<'run, 'src> Parser<'run, 'src> {
     };
 
     if let Some(value) = set_value {
-      return Ok(Set { name, value });
+      return Ok(Set {
+        attributes,
+        name,
+        value,
+      });
     }
 
     Err(name.error(CompileErrorKind::UnknownSetting {
@@ -1629,6 +1743,7 @@ impl<'run, 'src> Parser<'run, 'src> {
   /// Item attributes, i.e., `[macos]` or `[confirm: "warning!"]`
   fn parse_attributes(&mut self) -> CompileResult<'src, Option<(Token<'src>, AttributeSet<'src>)>> {
     let mut arg_attributes = BTreeMap::new();
+    let mut group_attributes = BTreeMap::new();
     let mut attributes = Vec::new();
     let mut kinds = BTreeMap::new();
 
@@ -1712,7 +1827,7 @@ impl<'run, 'src> Parser<'run, 'src> {
 
         if let Some(&first) = first {
           return Err(name.error(CompileErrorKind::DuplicateAttribute {
-            attribute: name.lexeme(),
+            attribute: name,
             first,
           }));
         }
@@ -1726,6 +1841,17 @@ impl<'run, 'src> Parser<'run, 'src> {
           }
 
           arg_attributes.insert(arg.cooked.clone(), name.line);
+        }
+
+        if let Attribute::Group(group) = &attribute {
+          if let Some(&first) = group_attributes.get(&group.cooked) {
+            return Err(name.error(CompileErrorKind::DuplicateGroupAttribute {
+              group: group.clone(),
+              first,
+            }));
+          }
+
+          group_attributes.insert(group.cooked.clone(), name.line);
         }
 
         kinds.insert(attribute.kind(), name.line);

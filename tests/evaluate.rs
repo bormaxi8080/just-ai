@@ -181,6 +181,48 @@ fn evaluate_single_private() {
 }
 
 #[test]
+fn evaluate_single_transitive_reference() {
+  Test::new()
+    .args(["--evaluate", "foo"])
+    .justfile(
+      "
+        bar := 'baz'
+        foo := bar
+      ",
+    )
+    .stdout("baz")
+    .success();
+}
+
+#[test]
+fn evaluate_private_transitive_reference() {
+  Test::new()
+    .arg("--evaluate")
+    .justfile(
+      "
+        _bar := 'baz'
+        foo := _bar
+      ",
+    )
+    .stdout("foo := \"baz\"\n")
+    .success();
+}
+
+#[test]
+fn evaluate_overridden_assignment_dependencies_not_evaluated() {
+  Test::new()
+    .args(["--evaluate", "foo=baz", "foo"])
+    .justfile(
+      "
+        bar := `exit 1`
+        foo := bar
+      ",
+    )
+    .stdout("baz")
+    .success();
+}
+
+#[test]
 fn evaluate_variable_chosen_over_submodule() {
   Test::new()
     .write("foo.just", "bar:\n")
@@ -215,7 +257,13 @@ fn evaluate_submodule_chosen_over_variable_in_path() {
 #[test]
 fn evaluate_submodule() {
   Test::new()
-    .write("foo.just", "a := 'x'\nb := 'y'\n")
+    .write(
+      "foo.just",
+      "
+        a := 'x'
+        b := 'y'
+      ",
+    )
     .justfile(
       "
         mod foo
@@ -229,7 +277,13 @@ fn evaluate_submodule() {
 #[test]
 fn evaluate_variable_in_submodule() {
   Test::new()
-    .write("foo.just", "a := 'x'\nb := 'y'\n")
+    .write(
+      "foo.just",
+      "
+        a := 'x'
+        b := 'y'
+      ",
+    )
     .justfile(
       "
         mod foo
@@ -362,5 +416,41 @@ fn format_shell_dashes_in_variables_are_replaced_with_underscores() {
         foo_bar="baz"
       "#,
     )
+    .success();
+}
+
+#[test]
+fn evaluate_width_ignores_private_variables() {
+  Test::new()
+    .arg("--evaluate")
+    .justfile(
+      "
+        foo := _some_long_private_name
+        _some_long_private_name := 'one'
+        bar := 'two'
+      ",
+    )
+    .stdout(
+      r#"
+        bar := "two"
+        foo := "one"
+      "#,
+    )
+    .success();
+}
+
+#[test]
+fn evaluate_resolves_module_alias() {
+  Test::new()
+    .write("foo.just", "x := 'bar'\n")
+    .justfile(
+      "
+        mod foo
+
+        alias f := foo
+      ",
+    )
+    .args(["--evaluate", "f::x"])
+    .stdout("bar")
     .success();
 }

@@ -397,7 +397,13 @@ fn aliases_in_modules() {
         mod bar
       ",
     )
-    .write("bar.just", "foo:\nalias b := foo")
+    .write(
+      "bar.just",
+      "
+        foo:
+        alias b := foo
+      ",
+    )
     .shell(false)
     .env("JUST_COMPLETE", "fish")
     .args(complete_args(&["--complete-aliases", ""]))
@@ -419,6 +425,16 @@ fn usage_recipes() {
     .args(complete_args(&["--usage", ""]))
     .stdout("bar\nfoo\n")
     .success();
+}
+
+#[test]
+fn rejects_unexpected_arguments() {
+  Test::new()
+    .justfile("")
+    .args(["--completions", "bash", "extra"])
+    .stdout_regex(".*")
+    .stderr("error: `--completions` used with unexpected argument: `extra`\n")
+    .failure();
 }
 
 #[test]

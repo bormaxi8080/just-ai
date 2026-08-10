@@ -861,14 +861,14 @@ fn extra_leading_whitespace() {
 #[test]
 fn inconsistent_leading_whitespace() {
   Test::new()
-    .justfile("bar:\n\t\techo hello\n\t echo goodbye")
+    .justfile("bar:\n\t\techo hello\n\techo goodbye")
     .stderr(
       "error: recipe line has inconsistent leading whitespace, \
-            started with `␉␉` but found line with `␉␠`
+            started with `␉␉` but found line with `␉`
  ——▶ justfile:3:1
   │
-3 │      echo goodbye
-  │ ^^^^^
+3 │     echo goodbye
+  │ ^^^^
 ",
     )
     .failure();
@@ -1566,6 +1566,28 @@ fn long_circular_recipe_dependency() {
 }
 
 #[test]
+fn circular_recipe_dependency_entered_from_outside() {
+  Test::new()
+    .justfile(
+      "
+        a: b
+        b: c
+        c: b
+      ",
+    )
+    .stderr(
+      "
+        error: recipe `c` has circular dependency `b -> c -> b`
+         ——▶ justfile:3:4
+          │
+        3 │ c: b
+          │    ^
+      ",
+    )
+    .failure();
+}
+
+#[test]
 fn variable_self_dependency() {
   Test::new()
     .arg("a")
@@ -1617,6 +1639,28 @@ fn variable_circular_dependency_with_additional_variable() {
 2 │ x := y
   │ ^
 ",
+    )
+    .failure();
+}
+
+#[test]
+fn exclude_non_cycle_prefix_from_circular_variable_dependency_error() {
+  Test::new()
+    .justfile(
+      "
+        a := b
+        b := c
+        c := b
+      ",
+    )
+    .stderr(
+      "
+        error: variable `b` depends on its own value: `b -> c -> b`
+         ——▶ justfile:2:1
+          │
+        2 │ b := c
+          │ ^
+      ",
     )
     .failure();
 }
@@ -1925,6 +1969,28 @@ fn no_highlight() {
     )
     .stdout("hi\n")
     .stderr("\u{1b}[1;36m===> running recipe `a`...\u{1b}[0m\necho hi\n")
+    .success();
+}
+
+#[test]
+fn no_highlight_is_respected_for_script_echoing() {
+  Test::new()
+    .justfile(
+      "
+        [script]
+        @foo:
+          echo foo
+      ",
+    )
+    .args([
+      "--color",
+      "always",
+      "--no-highlight",
+      "--command-color",
+      "red",
+    ])
+    .stdout("foo\n")
+    .stderr("echo foo\n")
     .success();
 }
 
@@ -2663,6 +2729,82 @@ fn windows_interpreter_path_no_base() {
           #!powershell
 
           exit 0
+      ",
+    )
+    .success();
+}
+
+#[test]
+fn mixed_whitespace_in_recipe_body() {
+  Test::new()
+    .justfile("bar:\n  echo a\n \techo b")
+    .stderr(
+      "error: found a mix of tabs and spaces in leading whitespace: `␠␉`
+leading whitespace may consist of tabs or spaces, but not both
+ ——▶ justfile:3:1
+  │
+3 │      echo b
+  │ ^^^^^
+",
+    )
+    .failure();
+}
+
+#[test]
+fn alias_listing_cross_module() {
+  Test::new()
+    .arg("--list")
+    .justfile(
+      "
+        mod foo
+
+        alias f := foo::bar
+      ",
+    )
+    .write(
+      "foo.just",
+      "
+        bar:
+          @echo bar
+      ",
+    )
+    .stdout(
+      "
+        Available recipes:
+            f       # alias for `foo::bar`
+            foo ...
+      ",
+    )
+    .success();
+}
+
+#[test]
+fn alias_listing_cross_module_does_not_annotate_same_named_recipe() {
+  Test::new()
+    .arg("--list")
+    .justfile(
+      "
+        mod foo
+
+        alias f := foo::bar
+
+        bar:
+          @echo root
+      ",
+    )
+    .write(
+      "foo.just",
+      "
+        bar:
+          @echo bar
+      ",
+    )
+    .stdout(
+      "
+        Available recipes:
+            bar
+            f       # alias for `foo::bar`
+            foo ...
       ",
     )
     .success();

@@ -34,6 +34,7 @@ pub(crate) struct Settings {
   pub(crate) fallback: bool,
   pub(crate) guards: bool,
   pub(crate) ignore_comments: bool,
+  pub(crate) indentation: Option<Indentation>,
   pub(crate) lazy: bool,
   pub(crate) lists: bool,
   pub(crate) no_cd: bool,
@@ -56,7 +57,9 @@ impl Settings {
 
     let mut cmd = Command::resolve(command);
 
-    cmd.args(args);
+    for arg in args {
+      cmd.shell_arg(arg);
+    }
 
     cmd
   }

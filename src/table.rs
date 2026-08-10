@@ -25,12 +25,24 @@ impl<'key, V: Keyed<'key>> Table<'key, V> {
     self.map.get(key)
   }
 
+  pub(crate) fn get_mut(&mut self, key: &str) -> Option<&mut V> {
+    self.map.get_mut(key)
+  }
+
+  pub(crate) fn into_values(self) -> btree_map::IntoValues<&'key str, V> {
+    self.map.into_values()
+  }
+
   pub(crate) fn is_empty(&self) -> bool {
     self.map.is_empty()
   }
 
   pub(crate) fn values(&self) -> btree_map::Values<&'key str, V> {
     self.map.values()
+  }
+
+  pub(crate) fn values_mut(&mut self) -> btree_map::ValuesMut<&'key str, V> {
+    self.map.values_mut()
   }
 
   pub(crate) fn contains_key(&self, key: &str) -> bool {

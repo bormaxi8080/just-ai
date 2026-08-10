@@ -13,7 +13,8 @@ type Scopes<'src, 'run> = BTreeMap<
 pub(crate) struct Justfile<'src> {
   #[serde(skip)]
   pub(crate) absent_modules: BTreeSet<String>,
-  pub(crate) aliases: Table<'src, Alias<'src>>,
+  #[serde(skip)]
+  pub(crate) assignment_references: HashMap<Number, HashSet<Number>>,
   pub(crate) assignments: Table<'src, Assignment<'src>>,
   #[serde(rename = "first", serialize_with = "keyed::serialize_option")]
   pub(crate) default: Option<Arc<Recipe<'src>>>,
@@ -23,20 +24,26 @@ pub(crate) struct Justfile<'src> {
   pub(crate) disabled_recipes: Table<'src, Disabled<'src>>,
   pub(crate) doc: Option<String>,
   #[serde(skip)]
+  pub(crate) evaluation_order: Vec<Name<'src>>,
+  #[serde(skip)]
   pub(crate) functions: Table<'src, FunctionDefinition<'src>>,
   pub(crate) groups: Vec<StringLiteral<'src>>,
   #[serde(skip)]
   pub(crate) loaded: Vec<PathBuf>,
+  #[serde(skip)]
+  pub(crate) module_aliases: Table<'src, ModuleAlias<'src>>,
   pub(crate) module_path: Modulepath,
   pub(crate) modules: Table<'src, Self>,
   #[serde(skip)]
   pub(crate) name: Option<Name<'src>>,
   #[serde(skip)]
   pub(crate) private: bool,
+  #[serde(rename = "aliases")]
+  pub(crate) recipe_aliases: Table<'src, RecipeAlias<'src>>,
   pub(crate) recipes: Table<'src, Arc<Recipe<'src>>>,
   pub(crate) settings: Settings,
   pub(crate) source: PathBuf,
-  pub(crate) unexports: HashSet<String>,
+  pub(crate) unexports: BTreeSet<String>,
   #[serde(skip)]
   pub(crate) unstable_features: BTreeSet<UnstableFeature>,
   pub(crate) warnings: Vec<Warning>,
@@ -69,7 +76,7 @@ impl<'src> Justfile<'src> {
         })
         .chain(
           self
-            .aliases
+            .recipe_aliases
             .values()
             .filter(|alias| alias.is_public())
             .map(|alias| Suggestion {
@@ -120,7 +127,7 @@ impl<'src> Justfile<'src> {
       } else {
         &search.working_directory
       };
-      load_dotenv(config, &self.settings, working_directory)?
+      load_dotenv(config, self, working_directory)?
     } else {
       BTreeMap::new()
     };
@@ -139,6 +146,20 @@ impl<'src> Justfile<'src> {
 
     let lazy = lazy || self.settings.lazy;
 
+    let assignment_variable_references = if lazy {
+      let mut references = variable_references.clone();
+
+      for assignment in self.assignments.values() {
+        if assignment.eager || assignment.export || self.settings.export {
+          references.extend(&self.assignment_references[&assignment.number]);
+        }
+      }
+
+      Some(references)
+    } else {
+      None
+    };
+
     let scope = Evaluator::evaluate_assignments(
       config,
       dotenv,
@@ -146,7 +167,7 @@ impl<'src> Justfile<'src> {
       overrides,
       root,
       search,
-      lazy.then_some(variable_references),
+      assignment_variable_references.as_ref(),
     )?;
 
     let scope = scope_arena.alloc(scope);
@@ -197,15 +218,20 @@ impl<'src> Justfile<'src> {
         let mut variable_references = HashSet::new();
 
         let mut stack = Vec::new();
+        let mut visited = HashSet::new();
 
         for invocation in &invocations {
-          stack.push(invocation.recipe);
+          if visited.insert(invocation.recipe.number) {
+            stack.push(invocation.recipe);
+          }
         }
 
         while let Some(recipe) = stack.pop() {
           variable_references.extend(&recipe.variable_references);
           for dependency in &recipe.dependencies {
-            stack.push(&dependency.recipe);
+            if visited.insert(dependency.recipe.number) {
+              stack.push(&dependency.recipe);
+            }
           }
         }
 
@@ -224,6 +250,7 @@ impl<'src> Justfile<'src> {
 
         let ran = Ran::new();
         let cache = Cache::new(search);
+        let jobs = Semaphore::new(config.jobs.unwrap_or(NonZeroU64::MAX));
         for invocation in invocations {
           Self::run_recipe(
             &invocation.arguments,
@@ -235,6 +262,7 @@ impl<'src> Justfile<'src> {
             &scopes,
             search,
             &cache,
+            &jobs,
           )?;
         }
 
@@ -245,7 +273,7 @@ impl<'src> Justfile<'src> {
       } => {
         let mut command = if config.shell_command {
           let mut command = self.settings.shell_command(config);
-          command.arg(binary);
+          command.shell_arg(binary);
           command
         } else {
           Command::resolve(binary)
@@ -315,35 +343,42 @@ impl<'src> Justfile<'src> {
 
         let scope = scopes.get(&module.module_path).unwrap().1;
 
-        if let Some(variable) = variable {
-          print!("{}", scope.value(variable).unwrap().join());
+        if let Some(assignment) = variable {
+          print!("{}", scope.value(assignment.number).unwrap().join());
         } else {
-          let width = scope.names().fold(0, |max, name| name.len().max(max));
+          let mut bindings = scope
+            .bindings()
+            .filter(|binding| !binding.private)
+            .collect::<Vec<&Binding>>();
 
-          for binding in scope.bindings() {
-            if !binding.private {
-              match format {
-                EvaluateFormat::Just => {
-                  println!(
-                    "{0:1$} := {2}",
-                    binding.name,
-                    width,
-                    binding.value.color_display(config.color.stdout()),
-                  );
+          bindings.sort_by_key(|binding| binding.name.lexeme());
+
+          let width = bindings
+            .iter()
+            .fold(0, |max, binding| binding.name.lexeme().len().max(max));
+
+          for binding in bindings {
+            match format {
+              EvaluateFormat::Just => {
+                println!(
+                  "{0:1$} := {2}",
+                  binding.name,
+                  width,
+                  binding.value.color_display(config.color.stdout()),
+                );
+              }
+              EvaluateFormat::Shell => {
+                if binding.export || module.settings.export {
+                  print!("export ");
                 }
-                EvaluateFormat::Shell => {
-                  if binding.export || module.settings.export {
-                    print!("export ");
+                print!("{}=\"", binding.name.lexeme().replace('-', "_"));
+                for c in binding.value.join().chars() {
+                  if matches!(c, '!' | '"' | '$' | '\\' | '`') {
+                    print!("\\");
                   }
-                  print!("{}=\"", binding.name.lexeme().replace('-', "_"));
-                  for c in binding.value.join().chars() {
-                    if matches!(c, '!' | '"' | '$' | '\\' | '`') {
-                      print!("\\");
-                    }
-                    print!("{c}");
-                  }
-                  println!("\"");
+                  print!("{c}");
                 }
+                println!("\"");
               }
             }
           }
@@ -358,7 +393,14 @@ impl<'src> Justfile<'src> {
   pub(crate) fn evaluation_target<'a>(
     &'a self,
     path: &'a Modulepath,
-  ) -> RunResult<'src, (&'a Justfile<'a>, Option<&'a str>, HashSet<Number>)> {
+  ) -> RunResult<
+    'src,
+    (
+      &'a Justfile<'a>,
+      Option<&'a Assignment<'a>>,
+      HashSet<Number>,
+    ),
+  > {
     let mut current = self;
 
     let mut variable = None;
@@ -366,13 +408,15 @@ impl<'src> Justfile<'src> {
     for (i, component) in path.components.iter().enumerate() {
       let last = i + 1 == path.components.len();
 
-      if last && current.assignments.contains_key(component) {
-        variable = Some(component.as_ref());
+      if last && let Some(assignment) = current.assignments.get(component) {
+        variable = Some(assignment);
         break;
       }
 
       if let Some(module) = current.modules.get(component) {
         current = module;
+      } else if let Some(alias) = current.module_aliases.get(component) {
+        current = self.submodule(&alias.target).unwrap();
       } else if current.absent_modules.contains(component) {
         return Err(Error::ModuleAbsent {
           module: current.module_path.join(component),
@@ -390,14 +434,15 @@ impl<'src> Justfile<'src> {
       }
     }
 
-    let variable_references = if let Some(variable) = variable {
-      HashSet::from([current.assignments.get(variable).unwrap().number])
+    let variable_references = if let Some(assignment) = variable {
+      current.assignment_references[&assignment.number].clone()
     } else {
       current
         .assignments
         .values()
         .filter(|assignment| !assignment.private)
-        .map(|assignment| assignment.number)
+        .flat_map(|assignment| &current.assignment_references[&assignment.number])
+        .copied()
         .collect()
     };
 
@@ -416,16 +461,17 @@ impl<'src> Justfile<'src> {
     Ok(())
   }
 
-  pub(crate) fn get_alias(&self, name: &str) -> Option<&Alias<'src>> {
-    self.aliases.get(name)
+  pub(crate) fn recipe_alias(&self, name: &str) -> Option<&RecipeAlias<'src>> {
+    self.recipe_aliases.get(name)
   }
 
-  pub(crate) fn get_recipe(&self, name: &str) -> Option<&Recipe<'src>> {
-    self
-      .recipes
-      .get(name)
-      .map(Arc::as_ref)
-      .or_else(|| self.aliases.get(name).map(|alias| alias.target.as_ref()))
+  pub(crate) fn recipe(&self, name: &str) -> Option<&Recipe<'src>> {
+    self.recipes.get(name).map(Arc::as_ref).or_else(|| {
+      self
+        .recipe_aliases
+        .get(name)
+        .map(|alias| alias.target.as_ref())
+    })
   }
 
   pub(crate) fn is_submodule(&self) -> bool {
@@ -436,7 +482,13 @@ impl<'src> Justfile<'src> {
     let mut module = self;
 
     for component in &path.components {
-      module = module.modules.get(component)?;
+      module = if let Some(submodule) = module.modules.get(component) {
+        submodule
+      } else {
+        self
+          .submodule(&module.module_aliases.get(component)?.target)
+          .unwrap()
+      };
     }
 
     Some(module)
@@ -456,6 +508,7 @@ impl<'src> Justfile<'src> {
     scopes: &Scopes<'src, '_>,
     search: &Search,
     cache: &Cache,
+    jobs: &Semaphore,
   ) -> RunResult<'src> {
     let mutex = ran.mutex(recipe, arguments);
 
@@ -474,6 +527,7 @@ impl<'src> Justfile<'src> {
       dotenv,
       module,
       overrides,
+      scope,
       search,
     };
 
@@ -488,7 +542,13 @@ impl<'src> Justfile<'src> {
 
     let scope = outer.child();
 
-    let mut evaluator = Evaluator::new(&context, BTreeMap::new(), true, Some(recipe.name), &scope);
+    let mut evaluator = Evaluator::new(
+      &context,
+      BTreeMap::new(),
+      is_dependency,
+      Some(recipe.name),
+      &scope,
+    );
 
     if !config.yes && !recipe.confirm(&mut evaluator)? {
       return Err(Error::NotConfirmed {
@@ -507,9 +567,18 @@ impl<'src> Justfile<'src> {
       scopes,
       search,
       cache,
+      jobs,
     )?;
 
-    recipe.run(&context, &env, is_dependency, &positional, &scope, cache)?;
+    recipe.run(
+      &context,
+      &env,
+      is_dependency,
+      &positional,
+      &scope,
+      cache,
+      jobs,
+    )?;
 
     Self::run_dependencies(
       config,
@@ -522,6 +591,7 @@ impl<'src> Justfile<'src> {
       scopes,
       search,
       cache,
+      jobs,
     )?;
 
     *guard = true;
@@ -540,6 +610,7 @@ impl<'src> Justfile<'src> {
     scopes: &Scopes<'src, 'run>,
     search: &Search,
     cache: &Cache,
+    jobs: &Semaphore,
   ) -> RunResult<'src> {
     if context.config.no_dependencies {
       return Ok(());
@@ -570,7 +641,7 @@ impl<'src> Justfile<'src> {
       }
 
       if let Some(star) = dependency.star() {
-        for element in grouped[star].elements().to_vec() {
+        for element in &grouped[star] {
           let mut arguments = grouped.clone();
           arguments[star] = element.into();
           evaluated.push((&dependency.recipe, arguments));
@@ -586,7 +657,7 @@ impl<'src> Justfile<'src> {
         for (recipe, arguments) in evaluated {
           handles.push(thread_scope.spawn(move || {
             Self::run_recipe(
-              &arguments, config, true, overrides, ran, recipe, scopes, search, cache,
+              &arguments, config, true, overrides, ran, recipe, scopes, search, cache, jobs,
             )
           }));
         }
@@ -600,7 +671,7 @@ impl<'src> Justfile<'src> {
     } else {
       for (recipe, arguments) in evaluated {
         Self::run_recipe(
-          &arguments, config, true, overrides, ran, recipe, scopes, search, cache,
+          &arguments, config, true, overrides, ran, recipe, scopes, search, cache, jobs,
         )?;
       }
     }
@@ -659,12 +730,15 @@ impl<'src> Justfile<'src> {
     recipes
   }
 
-  pub(crate) fn public_aliases_recursive(&self, config: &Config) -> Vec<(&Alias, &Modulepath)> {
+  pub(crate) fn public_aliases_recursive(
+    &self,
+    config: &Config,
+  ) -> Vec<(&RecipeAlias<'_>, &Modulepath)> {
     let mut aliases = Vec::new();
 
     let mut stack = vec![self];
     while let Some(current) = stack.pop() {
-      for alias in current.aliases.values() {
+      for alias in current.recipe_aliases.values() {
         if alias.is_public() {
           aliases.push((alias, &current.module_path));
         }
@@ -719,7 +793,7 @@ impl<'src> Justfile<'src> {
 
 impl ColorDisplay for Justfile<'_> {
   fn fmt(&self, f: &mut Formatter, color: Color) -> fmt::Result {
-    let mut items = self.recipes.len() + self.assignments.len() + self.aliases.len();
+    let mut items = self.recipes.len() + self.assignments.len() + self.recipe_aliases.len();
     for (name, assignment) in &self.assignments {
       if assignment.export {
         write!(f, "export ")?;
@@ -730,7 +804,7 @@ impl ColorDisplay for Justfile<'_> {
         write!(f, "\n\n")?;
       }
     }
-    for alias in self.aliases.values() {
+    for alias in self.recipe_aliases.values() {
       write!(f, "{alias}")?;
       items -= 1;
       if items != 0 {

@@ -59,8 +59,11 @@ struct Parameter<'a> {
   help: Option<&'a str>,
   kind: &'a str,
   long: Option<&'a str>,
+  max: Option<u64>,
+  min: Option<u64>,
+  multiple: bool,
   name: &'a str,
-  pattern: Option<&'a str>,
+  pattern: Option<Vec<&'a str>>,
   short: Option<char>,
   value: Option<&'a str>,
 }
@@ -105,6 +108,7 @@ struct Settings<'a> {
   fallback: bool,
   guards: bool,
   ignore_comments: bool,
+  indentation: Option<&'a str>,
   lazy: bool,
   lists: bool,
   no_cd: bool,
@@ -700,6 +704,7 @@ fn settings() {
       set export
       set fallback
       set ignore-comments
+      set indentation := \"  \"
       set positional-arguments
       set quiet
       set shell := ['a', 'b', 'c']
@@ -729,6 +734,7 @@ fn settings() {
         export: true,
         fallback: true,
         ignore_comments: true,
+        indentation: Some("  "),
         positional_arguments: true,
         quiet: true,
         shell: Some(Interpreter {
@@ -753,7 +759,7 @@ fn dotenv_filename_list() {
         foo:
       ",
     )
-    .env("JUST_UNSTABLE", "1")
+    .unstable()
     .args(["--dump", "--dump-format", "json"])
     .stdout_regex(".*");
 
@@ -833,7 +839,7 @@ fn list_concatenation() {
         foo := ['bar'] ++ ['baz']
       ",
     )
-    .env("JUST_UNSTABLE", "1")
+    .unstable()
     .args(["--dump", "--dump-format", "json"])
     .stdout_regex(".*");
 
@@ -1096,6 +1102,40 @@ fn module() {
 }
 
 #[test]
+fn module_doc_attribute_empty_string() {
+  case_with_submodule(
+    "
+      [doc('')]
+      mod foo
+    ",
+    Some(("foo.just", "bar:")),
+    Module {
+      modules: [(
+        "foo",
+        Module {
+          doc: Some(""),
+          first: Some("bar"),
+          module_path: "foo",
+          source: "foo.just".into(),
+          recipes: [(
+            "bar",
+            Recipe {
+              name: "bar",
+              namepath: "foo::bar",
+              ..default()
+            },
+          )]
+          .into(),
+          ..default()
+        },
+      )]
+      .into(),
+      ..default()
+    },
+  );
+}
+
+#[test]
 fn module_group() {
   case_with_submodule(
     "
@@ -1123,6 +1163,67 @@ fn module_group() {
           ..default()
         },
       )]
+      .into(),
+      ..default()
+    },
+  );
+}
+
+#[test]
+fn module_dependencies() {
+  case_with_submodule(
+    "
+      mod foo
+
+      bar:
+      baz: foo::bar
+    ",
+    Some(("foo.just", "bar:")),
+    Module {
+      first: Some("bar"),
+      modules: [(
+        "foo",
+        Module {
+          first: Some("bar"),
+          module_path: "foo",
+          source: "foo.just".into(),
+          recipes: [(
+            "bar",
+            Recipe {
+              name: "bar",
+              namepath: "foo::bar",
+              ..default()
+            },
+          )]
+          .into(),
+          ..default()
+        },
+      )]
+      .into(),
+      recipes: [
+        (
+          "bar",
+          Recipe {
+            name: "bar",
+            namepath: "bar",
+            ..default()
+          },
+        ),
+        (
+          "baz",
+          Recipe {
+            name: "baz",
+            namepath: "baz",
+            dependencies: [Dependency {
+              recipe: "foo::bar",
+              ..default()
+            }]
+            .into(),
+            priors: 1,
+            ..default()
+          },
+        ),
+      ]
       .into(),
       ..default()
     },
@@ -1257,8 +1358,10 @@ fn arg_pattern() {
             "arg": {
               "help": null,
               "long": null,
+              "max": null,
+              "min": null,
               "name": "bar",
-              "pattern": "BAR",
+              "pattern": ["BAR"],
               "short": null,
               "value": null,
             }
@@ -1267,7 +1370,7 @@ fn arg_pattern() {
           parameters: [Parameter {
             kind: "singular",
             name: "bar",
-            pattern: Some("BAR"),
+            pattern: Some(vec!["BAR"]),
             ..default()
           }]
           .into(),
@@ -1295,6 +1398,8 @@ fn arg_long() {
             "arg": {
               "help": null,
               "long": "BAR",
+              "max": null,
+              "min": null,
               "name": "bar",
               "pattern": null,
               "short": null,
@@ -1333,6 +1438,8 @@ fn arg_short() {
             "arg": {
               "help": null,
               "long": null,
+              "max": null,
+              "min": null,
               "name": "bar",
               "pattern": null,
               "short": "B",
@@ -1371,6 +1478,8 @@ fn arg_value() {
             "arg": {
               "help": null,
               "long": null,
+              "max": null,
+              "min": null,
               "name": "bar",
               "pattern": null,
               "short": "B",
@@ -1410,6 +1519,8 @@ fn arg_flag() {
             "arg": {
               "help": null,
               "long": "bar",
+              "max": null,
+              "min": null,
               "name": "bar",
               "pattern": null,
               "short": null,
@@ -1421,6 +1532,52 @@ fn arg_flag() {
             flag: true,
             kind: "singular",
             long: Some("bar"),
+            name: "bar",
+            ..default()
+          }]
+          .into(),
+          ..default()
+        },
+      )]
+      .into(),
+      settings: Settings {
+        lists: true,
+        unstable: true,
+        ..default()
+      },
+      ..default()
+    },
+  );
+}
+
+#[test]
+fn arg_multiple() {
+  case(
+    "set unstable\nset lists\n[arg('bar', long, multiple)]\nfoo bar:",
+    Module {
+      first: Some("foo"),
+      recipes: [(
+        "foo",
+        Recipe {
+          name: "foo",
+          namepath: "foo",
+          attributes: [json!({
+            "arg": {
+              "help": null,
+              "long": "bar",
+              "max": null,
+              "min": null,
+              "name": "bar",
+              "pattern": null,
+              "short": null,
+              "value": null,
+            }
+          })]
+          .into(),
+          parameters: [Parameter {
+            kind: "singular",
+            long: Some("bar"),
+            multiple: true,
             name: "bar",
             ..default()
           }]
@@ -1454,6 +1611,8 @@ fn arg_help() {
             "arg": {
               "help": "hello",
               "long": null,
+              "max": null,
+              "min": null,
               "name": "bar",
               "pattern": null,
               "short": null,
@@ -1475,4 +1634,26 @@ fn arg_help() {
       ..default()
     },
   );
+}
+
+#[test]
+fn json_dump_unexports_order_is_nondeterministic() {
+  Test::new()
+    .justfile(
+      "
+        unexport a
+        unexport b
+        unexport c
+        unexport d
+        unexport e
+        unexport f
+        unexport g
+        unexport h
+        unexport i
+        unexport j
+      ",
+    )
+    .args(["--dump", "--dump-format", "json"])
+    .stdout_regex(r#".*"unexports":\["a","b","c","d","e","f","g","h","i","j"\].*"#)
+    .success();
 }

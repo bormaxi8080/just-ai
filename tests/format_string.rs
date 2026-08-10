@@ -177,54 +177,22 @@ fn unmatched_close_is_ignored() {
 
 #[test]
 fn delimiter_may_be_escaped_in_double_quoted_strings() {
-  Test::new()
-    .justfile(
-      r#"
-        foo := f"{{{{"
-      "#,
-    )
-    .args(["--evaluate", "foo"])
-    .stdout("{{")
-    .success();
+  assert_eval(r#"f"{{{{""#, "{{");
 }
 
 #[test]
 fn delimiter_may_be_escaped_in_single_quoted_strings() {
-  Test::new()
-    .justfile(
-      "
-        foo := f'{{{{'
-      ",
-    )
-    .args(["--evaluate", "foo"])
-    .stdout("{{")
-    .success();
+  assert_eval("f'{{{{'", "{{");
 }
 
 #[test]
 fn escaped_delimiter_is_ignored_in_normal_strings() {
-  Test::new()
-    .justfile(
-      "
-        foo := '{{{{'
-      ",
-    )
-    .args(["--evaluate", "foo"])
-    .stdout("{{{{")
-    .success();
+  assert_eval("'{{{{'", "{{{{");
 }
 
 #[test]
 fn escaped_delimiter_in_single_quoted_format_string() {
-  Test::new()
-    .justfile(
-      r"
-        foo := f'\{{{{'
-      ",
-    )
-    .args(["--evaluate", "foo"])
-    .stdout("\\{{")
-    .success();
+  assert_eval(r"f'\{{{{'", "\\{{");
 }
 
 #[test]
@@ -250,63 +218,22 @@ fn escaped_delimiter_in_double_quoted_format_string() {
 
 #[test]
 fn double_quotes_process_escapes() {
-  Test::new()
-    .justfile(
-      r#"
-        foo := f"\u{61}{{"b"}}\u{63}{{"d"}}\u{65}"
-      "#,
-    )
-    .args(["--evaluate", "foo"])
-    .stdout("abcde")
-    .success();
+  assert_eval(r#"f"\u{61}{{"b"}}\u{63}{{"d"}}\u{65}""#, "abcde");
 }
 
 #[test]
 fn single_quotes_do_not_process_escapes() {
-  Test::new()
-    .justfile(
-      "
-        foo := f'\\n{{'a'}}\\n{{'b'}}\\n'
-      ",
-    )
-    .args(["--evaluate", "foo"])
-    .stdout(r"\na\nb\n")
-    .success();
+  assert_eval(r"f'\n{{'a'}}\n{{'b'}}\n'", r"\na\nb\n");
 }
 
 #[test]
 fn indented_format_strings() {
-  Test::new()
-    .justfile(
-      "
-        foo := f'''
-          a
-          {{'b'}}
-          c
-        '''
-      ",
-    )
-    .args(["--evaluate", "foo"])
-    .stdout("a\nb\nc\n")
-    .success();
+  assert_eval("f'''\n  a\n  {{'b'}}\n  c\n'''", "a\nb\nc\n");
 }
 
 #[test]
 fn un_indented_format_strings() {
-  Test::new()
-    .justfile(
-      "
-        foo := f'
-          a
-          {{'b'}}
-          c
-        '
-      ",
-    )
-    .args(["--evaluate", "foo"])
-    .stdout("\n  a\n  b\n  c\n")
-    .unindent_stdout(false)
-    .success();
+  assert_eval("f'\n  a\n  {{'b'}}\n  c\n'", "\n  a\n  b\n  c\n");
 }
 
 #[test]
@@ -327,9 +254,18 @@ fn dump() {
   case("f''''''");
   case(r#"f"""#);
   case(r#"f"""""""#);
-  case("f'{{'a'}}b{{'c'}}d'");
-  case("f'''{{'a'}}b{{'c'}}d'''");
-  case(r#"f"""{{'a'}}b{{'c'}}d""""#);
+  case("f'{{ 'a' }}b{{ 'c' }}d'");
+  case("f'''{{ 'a' }}b{{ 'c' }}d'''");
+  case(r#"f"""{{ 'a' }}b{{ 'c' }}d""""#);
+}
+
+#[test]
+fn interpolation_expressions_are_formatted_with_spaces() {
+  Test::new()
+    .justfile("foo := f'{{'a'}}'")
+    .arg("--dump")
+    .stdout("foo := f'{{ 'a' }}'\n")
+    .success();
 }
 
 #[test]
@@ -362,4 +298,87 @@ fn format_string_followed_by_recipe() {
       ",
     )
     .success();
+}
+
+#[test]
+fn unterminated_format_string_error() {
+  Test::new()
+    .justfile("x := f'{{}}")
+    .stderr(
+      "
+        error: unterminated string
+         ——▶ justfile:1:10
+          │
+        1 │ x := f'{{}}
+          │          ^^
+      ",
+    )
+    .failure();
+}
+
+#[test]
+fn mismatched_closing_delimiter_in_format_string() {
+  Test::new()
+    .justfile(
+      "
+        foo := f'{{ )
+        bar:
+      ",
+    )
+    .stderr(
+      "
+        error: mismatched closing delimiter `)`, did you mean to close the `{{` on line 1?
+         ——▶ justfile:1:13
+          │
+        1 │ foo := f'{{ )
+          │             ^
+      ",
+    )
+    .failure();
+}
+
+#[test]
+fn format_backticks_are_forbidden() {
+  Test::new()
+    .justfile("foo := f`echo {{ arch() }}`")
+    .stderr(
+      "
+        error: expected '&&', '!=', '!~', '||', comment, end of file, end of line, '==', '=~', '(', '+', '++', or '/', but found backtick
+         ——▶ justfile:1:9
+          │
+        1 │ foo := f`echo {{ arch() }}`
+          │         ^^^^^^^^^^^^^^^^^^^
+      ",
+    )
+    .failure();
+}
+
+#[test]
+fn stray_identifier_in_interpolation_is_an_error() {
+  Test::new()
+    .justfile(
+      "
+        a := 'A'
+        x := f'{{ a x }}plain'
+      ",
+    )
+    .args(["--evaluate", "x"])
+    .stderr(
+      "
+        error: expected '&&', '!=', '!~', '||', '==', '=~', format string continue, format string end, '(', '+', '++', or \
+       '/', but found identifier
+         ——▶ justfile:2:13
+          │
+        2 │ x := f'{{ a x }}plain'
+          │             ^
+      ",
+    )
+    .failure();
+}
+
+#[test]
+fn indented_format_strings_are_unindented_once() {
+  assert_eval("f'''\n\n  foo\n'''", "\nfoo\n");
+  assert_eval("'''\n\n  foo\n'''", "\nfoo\n");
+  assert_eval("f'''\n\n  foo {{ 'bar' }}\n'''", "\nfoo bar\n");
 }

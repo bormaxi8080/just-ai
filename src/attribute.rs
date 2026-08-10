@@ -14,13 +14,27 @@ pub(crate) enum Attribute<'src> {
   Arg {
     #[serde(skip)]
     flag: Option<Token<'src>>,
-    help: Option<StringLiteral<'src>>,
+    help: Option<String>,
+    #[serde(skip)]
+    help_property: Option<(Name<'src>, Expression<'src>)>,
     long: Option<StringLiteral<'src>>,
     #[serde(skip)]
-    long_key: Option<Token<'src>>,
+    long_key: Option<Name<'src>>,
+    max: Option<u64>,
+    #[serde(skip)]
+    max_key: Option<Name<'src>>,
+    min: Option<u64>,
+    #[serde(skip)]
+    min_key: Option<Name<'src>>,
+    #[serde(skip)]
+    multiple: Option<Token<'src>>,
     name: StringLiteral<'src>,
-    pattern: Option<Pattern<'src>>,
+    pattern: Option<Pattern>,
+    #[serde(skip)]
+    pattern_property: Option<(Name<'src>, Expression<'src>)>,
     short: Option<StringLiteral<'src>>,
+    #[serde(skip)]
+    short_key: Option<Name<'src>>,
     value: Option<Expression<'src>>,
   },
   Cache {
@@ -31,7 +45,7 @@ pub(crate) enum Attribute<'src> {
   Confirm(Option<Expression<'src>>),
   Continue(BTreeSet<Signal>),
   Default,
-  Doc(Option<StringLiteral<'src>>),
+  Doc(Option<Expression<'src>>),
   Dragonfly,
   Env(Expression<'src>, Expression<'src>),
   ExitMessage,
@@ -51,6 +65,7 @@ pub(crate) enum Attribute<'src> {
   Private,
   Script(Option<Interpreter<StringLiteral<'src>>>),
   Shell,
+  Timestamp(Option<Expression<'src>>),
   Unix,
   Windows,
   WorkingDirectory(Expression<'src>),
@@ -58,11 +73,29 @@ pub(crate) enum Attribute<'src> {
 
 impl AttributeKind {
   fn accepts_expressions(self) -> bool {
-    matches!(self, Self::Confirm | Self::Env | Self::WorkingDirectory)
+    matches!(
+      self,
+      Self::Confirm | Self::Doc | Self::Env | Self::Timestamp | Self::WorkingDirectory
+    )
   }
 
   pub(crate) fn accepts_keyword_arguments(self) -> bool {
     matches!(self, Self::Arg | Self::Cache)
+  }
+
+  pub(crate) fn is_enabler(self) -> bool {
+    matches!(
+      self,
+      Self::Android
+        | Self::Dragonfly
+        | Self::Freebsd
+        | Self::Linux
+        | Self::Macos
+        | Self::Netbsd
+        | Self::Openbsd
+        | Self::Unix
+        | Self::Windows
+    )
   }
 
   fn argument_range(self) -> RangeInclusive<usize> {
@@ -86,7 +119,7 @@ impl AttributeKind {
       | Self::Shell
       | Self::Unix
       | Self::Windows => 0..=0,
-      Self::Confirm | Self::Doc => 0..=1,
+      Self::Confirm | Self::Doc | Self::Timestamp => 0..=1,
       Self::Continue | Self::Script => 0..=usize::MAX,
       Self::Arg | Self::Extension | Self::Group | Self::WorkingDirectory => 1..=1,
       Self::Env => 2..=2,
@@ -105,6 +138,16 @@ impl<'src> Attribute<'src> {
         literal
           .token
           .error(CompileErrorKind::OptionNameContainsEqualSign {
+            parameter: parameter.cooked.clone(),
+          }),
+      );
+    }
+
+    if literal.cooked.starts_with('-') {
+      return Err(
+        literal
+          .token
+          .error(CompileErrorKind::OptionNameStartsWithDash {
             parameter: parameter.cooked.clone(),
           }),
       );
@@ -150,12 +193,18 @@ impl<'src> Attribute<'src> {
         AttributeKind::Confirm => Ok(Self::Confirm(
           arguments.into_iter().next().map(|(_, expr)| expr),
         )),
+        AttributeKind::Doc => Ok(Self::Doc(
+          arguments.into_iter().next().map(|(_, expr)| expr),
+        )),
         AttributeKind::Env => {
           let mut arguments = arguments.into_iter();
           let (_, key) = arguments.next().unwrap();
           let (_, value) = arguments.next().unwrap();
           Ok(Self::Env(key, value))
         }
+        AttributeKind::Timestamp => Ok(Self::Timestamp(
+          arguments.into_iter().next().map(|(_, expr)| expr),
+        )),
         AttributeKind::WorkingDirectory => Ok(Self::WorkingDirectory(
           arguments.into_iter().next().map(|(_, expr)| expr).unwrap(),
         )),
@@ -167,104 +216,16 @@ impl<'src> Attribute<'src> {
       .into_iter()
       .map(|(token, argument)| {
         let Expression::StringLiteral { string_literal } = argument else {
-          return Err(token.error(CompileErrorKind::AttributeArgumentExpression {
-            attribute: name.lexeme(),
-          }));
+          return Err(
+            token.error(CompileErrorKind::AttributeArgumentExpression { attribute: name }),
+          );
         };
         Ok(string_literal)
       })
       .collect::<CompileResult<Vec<StringLiteral>>>()?;
 
     let attribute = match kind {
-      AttributeKind::Arg => {
-        let arg = arguments.into_iter().next().unwrap();
-
-        let (long, long_key) = keyword_arguments
-          .remove("long")
-          .map(|(key, expression)| {
-            if let Some(expression) = expression {
-              let literal = Self::require_string_literal(name, key, expression)?;
-              Self::check_option_name(&arg, &literal)?;
-              Ok((Some(literal), None))
-            } else {
-              Ok((Some(arg.clone()), Some(*key)))
-            }
-          })
-          .transpose()?
-          .unwrap_or((None, None));
-
-        let short = Self::remove_required(&mut keyword_arguments, "short")?
-          .map(|(key, expression)| {
-            let literal = Self::require_string_literal(name, key, expression)?;
-
-            Self::check_option_name(&arg, &literal)?;
-
-            if literal.cooked.chars().count() != 1 {
-              return Err(literal.token.error(
-                CompileErrorKind::ShortOptionWithMultipleCharacters {
-                  parameter: arg.cooked.clone(),
-                },
-              ));
-            }
-
-            Ok(literal)
-          })
-          .transpose()?;
-
-        let pattern = Self::remove_required(&mut keyword_arguments, "pattern")?
-          .map(|(key, expression)| {
-            Pattern::new(&Self::require_string_literal(name, key, expression)?)
-          })
-          .transpose()?;
-
-        let value = Self::remove_required(&mut keyword_arguments, "value")?
-          .map(|(key, expression)| {
-            if long.is_none() && short.is_none() {
-              return Err(
-                key.error(CompileErrorKind::ArgAttributeRequiresOption { keyword: "value" }),
-              );
-            }
-            Ok(expression)
-          })
-          .transpose()?;
-
-        let flag = keyword_arguments
-          .remove("flag")
-          .map(|(key, expression)| {
-            if expression.is_some() {
-              return Err(key.error(CompileErrorKind::FlagAttributeTakesNoValue {
-                parameter: arg.cooked.clone(),
-              }));
-            }
-            if long.is_none() && short.is_none() {
-              return Err(
-                key.error(CompileErrorKind::ArgAttributeRequiresOption { keyword: "flag" }),
-              );
-            }
-            if value.is_some() {
-              return Err(key.error(CompileErrorKind::FlagAndValueArgAttribute {
-                parameter: arg.cooked.clone(),
-              }));
-            }
-            Ok(*key)
-          })
-          .transpose()?;
-
-        let help = Self::remove_required(&mut keyword_arguments, "help")?
-          .map(|(key, expression)| Self::require_string_literal(name, key, expression))
-          .transpose()?;
-
-        Self::Arg {
-          flag,
-          help,
-          long,
-          long_key,
-          name: arg,
-          pattern,
-          short,
-          value,
-        }
-      }
+      AttributeKind::Arg => Self::new_arg(name, arguments, &mut keyword_arguments)?,
       AttributeKind::Android => Self::Android,
       AttributeKind::Cache => Self::Cache {
         extra: Self::remove_required(&mut keyword_arguments, "extra")?
@@ -286,11 +247,14 @@ impl<'src> Attribute<'src> {
           })
           .collect::<CompileResult<BTreeSet<Signal>>>()?,
       ),
-      AttributeKind::Confirm | AttributeKind::Env | AttributeKind::WorkingDirectory => {
+      AttributeKind::Confirm
+      | AttributeKind::Doc
+      | AttributeKind::Env
+      | AttributeKind::Timestamp
+      | AttributeKind::WorkingDirectory => {
         unreachable!()
       }
       AttributeKind::Default => Self::Default,
-      AttributeKind::Doc => Self::Doc(arguments.into_iter().next()),
       AttributeKind::Dragonfly => Self::Dragonfly,
       AttributeKind::ExitMessage => Self::ExitMessage,
       AttributeKind::Extension => Self::Extension(arguments.into_iter().next().unwrap()),
@@ -329,6 +293,183 @@ impl<'src> Attribute<'src> {
     Ok(attribute)
   }
 
+  fn new_arg(
+    name: Name<'src>,
+    arguments: Vec<StringLiteral<'src>>,
+    keyword_arguments: &mut BTreeMap<&'src str, (Name<'src>, Option<Expression<'src>>)>,
+  ) -> CompileResult<'src, Self> {
+    static NUMBER: LazyLock<Regex> = LazyLock::new(|| Regex::new("^(0|[1-9][0-9]*)$").unwrap());
+
+    let arg = arguments.into_iter().next().unwrap();
+
+    let (long, long_key) = keyword_arguments
+      .remove("long")
+      .map(|(key, expression)| {
+        if let Some(expression) = expression {
+          let literal = Self::require_string_literal(name, key, expression)?;
+          Self::check_option_name(&arg, &literal)?;
+          Ok((Some(literal), None))
+        } else {
+          Ok((Some(arg.clone()), Some(key)))
+        }
+      })
+      .transpose()?
+      .unwrap_or_default();
+
+    let (short, short_key) =
+      keyword_arguments
+        .remove("short")
+        .map(|(key, expression)| {
+          if let Some(expression) = expression {
+            let literal = Self::require_string_literal(name, key, expression)?;
+
+            Self::check_option_name(&arg, &literal)?;
+
+            if literal.cooked.chars().count() != 1 {
+              return Err(literal.token.error(
+                CompileErrorKind::ShortOptionWithMultipleCharacters {
+                  parameter: arg.cooked.clone(),
+                },
+              ));
+            }
+
+            Ok((Some(literal), None))
+          } else {
+            Ok((Some(arg.clone()), Some(key)))
+          }
+        })
+        .transpose()?
+        .unwrap_or_default();
+
+    let pattern_property = Self::remove_required(keyword_arguments, "pattern")?;
+
+    let value = Self::remove_required(keyword_arguments, "value")?
+      .map(|(key, expression)| {
+        if long.is_none() && short.is_none() {
+          return Err(key.error(CompileErrorKind::ArgAttributeRequiresOption { key }));
+        }
+        Ok(expression)
+      })
+      .transpose()?;
+
+    let flag = keyword_arguments
+      .remove("flag")
+      .map(|(key, expression)| {
+        if expression.is_some() {
+          return Err(key.error(CompileErrorKind::FlagAttributeTakesNoValue {
+            parameter: arg.cooked.clone(),
+          }));
+        }
+        if long.is_none() && short.is_none() {
+          return Err(key.error(CompileErrorKind::ArgAttributeRequiresOption { key }));
+        }
+        if value.is_some() {
+          return Err(key.error(CompileErrorKind::FlagAndValueArgAttribute {
+            parameter: arg.cooked.clone(),
+          }));
+        }
+        if pattern_property.is_some() {
+          return Err(key.error(CompileErrorKind::FlagAndPatternArgAttribute {
+            parameter: arg.cooked.clone(),
+          }));
+        }
+        Ok(*key)
+      })
+      .transpose()?;
+
+    let multiple = keyword_arguments
+      .remove("multiple")
+      .map(|(key, expression)| {
+        if expression.is_some() {
+          return Err(key.error(CompileErrorKind::AttributeKeyTakesNoValue { key }));
+        }
+        if long.is_none() && short.is_none() {
+          return Err(key.error(CompileErrorKind::ArgAttributeRequiresOption { key }));
+        }
+        Ok(*key)
+      })
+      .transpose()?;
+
+    let (max, max_key) = Self::remove_required(keyword_arguments, "max")?
+      .map(|(key, expression)| {
+        let literal = Self::require_string_literal(name, key, expression)?;
+
+        if !NUMBER.is_match(&literal.cooked) {
+          return Err(literal.token.error(CompileErrorKind::ArgumentCountValue {
+            key,
+            value: literal.cooked.clone(),
+          }));
+        }
+
+        let max = literal.cooked.parse::<u64>().map_err(|source| {
+          literal.token.error(CompileErrorKind::ArgumentCountParse {
+            key,
+            value: literal.cooked.clone(),
+            source,
+          })
+        })?;
+
+        Ok((Some(max), Some(key)))
+      })
+      .transpose()?
+      .unwrap_or_default();
+
+    let (min, min_key) = Self::remove_required(keyword_arguments, "min")?
+      .map(|(key, expression)| {
+        let literal = Self::require_string_literal(name, key, expression)?;
+
+        if !NUMBER.is_match(&literal.cooked) {
+          return Err(literal.token.error(CompileErrorKind::ArgumentCountValue {
+            key,
+            value: literal.cooked.clone(),
+          }));
+        }
+
+        let min = literal.cooked.parse::<u64>().map_err(|source| {
+          literal.token.error(CompileErrorKind::ArgumentCountParse {
+            key,
+            value: literal.cooked.clone(),
+            source,
+          })
+        })?;
+
+        Ok((Some(min), Some(key)))
+      })
+      .transpose()?
+      .unwrap_or_default();
+
+    if let (Some(min), Some(max)) = (min, max)
+      && min > max
+    {
+      return Err(
+        min_key
+          .unwrap()
+          .error(CompileErrorKind::ArgAttributeMinExceedsMax { min, max }),
+      );
+    }
+
+    let help_property = Self::remove_required(keyword_arguments, "help")?;
+
+    Ok(Self::Arg {
+      flag,
+      help: None,
+      help_property,
+      long,
+      long_key,
+      max,
+      max_key,
+      min,
+      min_key,
+      multiple,
+      name: arg,
+      pattern: None,
+      pattern_property,
+      short,
+      short_key,
+      value,
+    })
+  }
+
   fn remove_required(
     keyword_arguments: &mut BTreeMap<&'src str, (Name<'src>, Option<Expression<'src>>)>,
     key: &'src str,
@@ -349,9 +490,7 @@ impl<'src> Attribute<'src> {
     expression: Expression<'src>,
   ) -> CompileResult<'src, StringLiteral<'src>> {
     let Expression::StringLiteral { string_literal } = expression else {
-      return Err(key.error(CompileErrorKind::AttributeArgumentExpression {
-        attribute: attribute.lexeme(),
-      }));
+      return Err(key.error(CompileErrorKind::AttributeArgumentExpression { attribute }));
     };
 
     Ok(string_literal)
@@ -380,12 +519,20 @@ impl Display for Attribute<'_> {
     match self {
       Self::Arg {
         flag,
-        help,
+        help: _,
+        help_property,
         long,
         long_key,
+        max,
+        max_key: _,
+        min,
+        min_key: _,
+        multiple,
         name,
-        pattern,
+        pattern: _,
+        pattern_property,
         short,
+        short_key,
         value,
       } => {
         write!(f, "({name}")?;
@@ -396,12 +543,14 @@ impl Display for Attribute<'_> {
           write!(f, ", long={long}")?;
         }
 
-        if let Some(short) = short {
+        if short_key.is_some() {
+          write!(f, ", short")?;
+        } else if let Some(short) = short {
           write!(f, ", short={short}")?;
         }
 
-        if let Some(pattern) = pattern {
-          write!(f, ", pattern={}", pattern.token.lexeme())?;
+        if let Some((_key, pattern)) = pattern_property {
+          write!(f, ", pattern={pattern}")?;
         }
 
         if let Some(value) = value {
@@ -412,7 +561,19 @@ impl Display for Attribute<'_> {
           write!(f, ", flag")?;
         }
 
-        if let Some(help) = help {
+        if multiple.is_some() {
+          write!(f, ", multiple")?;
+        }
+
+        if let Some(min) = min {
+          write!(f, ", min='{min}'")?;
+        }
+
+        if let Some(max) = max {
+          write!(f, ", max='{max}'")?;
+        }
+
+        if let Some((_key, help)) = help_property {
           write!(f, ", help={help}")?;
         }
 
@@ -437,6 +598,7 @@ impl Display for Attribute<'_> {
       | Self::Private
       | Self::Script(None)
       | Self::Shell
+      | Self::Timestamp(None)
       | Self::Unix
       | Self::Windows => {}
       Self::Cache {
@@ -458,10 +620,13 @@ impl Display for Attribute<'_> {
           write!(f, "({})", arguments.join(", "))?;
         }
       }
-      Self::Confirm(Some(argument)) | Self::WorkingDirectory(argument) => {
+      Self::Confirm(Some(argument))
+      | Self::Doc(Some(argument))
+      | Self::Timestamp(Some(argument))
+      | Self::WorkingDirectory(argument) => {
         write!(f, "({argument})")?;
       }
-      Self::Doc(Some(argument)) | Self::Extension(argument) | Self::Group(argument) => {
+      Self::Extension(argument) | Self::Group(argument) => {
         write!(f, "({argument})")?;
       }
       Self::Continue(signals) => {

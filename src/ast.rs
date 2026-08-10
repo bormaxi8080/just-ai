@@ -13,6 +13,21 @@ pub(crate) struct Ast<'src> {
   pub(crate) working_directory: PathBuf,
 }
 
+impl Ast<'_> {
+  pub(crate) fn indentation(&self) -> Option<Indentation> {
+    self.items.iter().find_map(|item| {
+      if let Item::Setting(set) = item
+        && let Setting::Indentation(_, indentation) = set.value
+        && item.is_enabled()
+      {
+        Some(indentation)
+      } else {
+        None
+      }
+    })
+  }
+}
+
 impl ColorDisplay for Ast<'_> {
   fn fmt(&self, f: &mut Formatter, color: Color) -> fmt::Result {
     let mut newlines = 0;
@@ -42,7 +57,9 @@ impl ColorDisplay for Ast<'_> {
       write!(f, "{}", item.color_display(color))?;
     }
 
-    writeln!(f)?;
+    if !self.items.is_empty() {
+      writeln!(f)?;
+    }
 
     Ok(())
   }

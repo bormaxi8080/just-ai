@@ -1,13 +1,4 @@
-/.justcache
-/README.html
-/book/en/build
-/book/en/src
-/book/zh/build
-/book/zh/src
-/fuzz/artifacts
-/fuzz/corpus
-/fuzz/target
-/man
+/.man
 /result
 /target
 /test-utilities/Cargo.lock
@@ -15,4 +6,5 @@
 /tmp
 
 .docker/
+.codegraph/
 .DS_Store

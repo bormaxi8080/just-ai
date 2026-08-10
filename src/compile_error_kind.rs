@@ -2,8 +2,24 @@ use super::*;
 
 #[derive(Debug, PartialEq)]
 pub(crate) enum CompileErrorKind<'src> {
+  ArgAttributeMinExceedsMax {
+    min: u64,
+    max: u64,
+  },
+  ArgAttributeRequiresMultipleOrVariadic {
+    key: Name<'src>,
+  },
   ArgAttributeRequiresOption {
-    keyword: &'static str,
+    key: Name<'src>,
+  },
+  ArgumentCountParse {
+    key: Name<'src>,
+    value: String,
+    source: ParseIntError,
+  },
+  ArgumentCountValue {
+    key: Name<'src>,
+    value: String,
   },
   ArgumentPatternRegex {
     source: regex::Error,
@@ -15,9 +31,12 @@ pub(crate) enum CompileErrorKind<'src> {
     max: usize,
   },
   AttributeArgumentExpression {
-    attribute: &'src str,
+    attribute: Name<'src>,
   },
   AttributeKeyMissingValue {
+    key: Name<'src>,
+  },
+  AttributeKeyTakesNoValue {
     key: Name<'src>,
   },
   AttributePositionalFollowsKeyword,
@@ -30,6 +49,7 @@ pub(crate) enum CompileErrorKind<'src> {
     variable: &'src str,
     circle: Vec<&'src str>,
   },
+  ConstEval(ConstEvalError<'src>),
   DependencyArgumentCountMismatch {
     dependency: Namepath<'src>,
     found: usize,
@@ -41,7 +61,7 @@ pub(crate) enum CompileErrorKind<'src> {
     first: usize,
   },
   DuplicateAttribute {
-    attribute: &'src str,
+    attribute: Name<'src>,
     first: usize,
   },
   DuplicateAttributeKey {
@@ -50,6 +70,14 @@ pub(crate) enum CompileErrorKind<'src> {
   },
   DuplicateDefault {
     recipe: &'src str,
+  },
+  DuplicateFunctionParameter {
+    function: &'src str,
+    parameter: &'src str,
+  },
+  DuplicateGroupAttribute {
+    first: usize,
+    group: StringLiteral<'src>,
   },
   DuplicateOption {
     recipe: &'src str,
@@ -69,6 +97,7 @@ pub(crate) enum CompileErrorKind<'src> {
   DuplicateVariable {
     variable: &'src str,
   },
+  EscapeEndOfFile,
   ExitMessageAndNoExitMessageAttribute {
     recipe: &'src str,
   },
@@ -82,6 +111,9 @@ pub(crate) enum CompileErrorKind<'src> {
   ExtraLeadingWhitespace,
   ExtraneousAttributes {
     count: usize,
+  },
+  FlagAndPatternArgAttribute {
+    parameter: String,
   },
   FlagAndValueArgAttribute {
     parameter: String,
@@ -98,7 +130,6 @@ pub(crate) enum CompileErrorKind<'src> {
     function: &'src str,
   },
   GuardAndInfallibleSigil,
-  Include,
   IncompatibleSettings {
     first: Keyword,
     first_line: usize,
@@ -112,12 +143,19 @@ pub(crate) enum CompileErrorKind<'src> {
     message: String,
   },
   InvalidAttribute {
-    item_kind: &'static str,
+    item_kind: ItemKind,
     item_name: &'src str,
     attribute: Box<Attribute<'src>>,
   },
   InvalidEscapeSequence {
     character: char,
+  },
+  InvalidIndentation {
+    message: &'static str,
+  },
+  InvalidMinimumVersion {
+    source: &'static str,
+    version: String,
   },
   InvalidShellRecipeAttribute {
     attribute: Box<Attribute<'src>>,
@@ -130,6 +168,10 @@ pub(crate) enum CompileErrorKind<'src> {
   MappedDependencyMultipleStarredArguments,
   MappedDependencyWithoutListsSetting,
   MappedDependencyWithoutStarredArgument,
+  MinimumVersion {
+    current: Version,
+    minimum: Version,
+  },
   MismatchedClosingDelimiter {
     close: Delimiter,
     open: Delimiter,
@@ -147,21 +189,27 @@ pub(crate) enum CompileErrorKind<'src> {
   OptionNameEmpty {
     parameter: String,
   },
+  OptionNameStartsWithDash {
+    parameter: String,
+  },
   ParameterFollowsVariadicParameter {
     parameter: &'src str,
   },
   ParsingRecursionDepthExceeded,
   Redefinition {
     first: usize,
-    first_type: &'static str,
+    first_type: ItemKind,
     name: &'src str,
-    second_type: &'static str,
+    second_type: ItemKind,
   },
   RequiredParameterFollowsDefaultParameter {
     parameter: &'src str,
   },
   ScriptAndShellAttribute {
     recipe: &'src str,
+  },
+  SettingExpression {
+    setting: Keyword,
   },
   ShellExpansion {
     err: shellexpand::LookupError<env::VarError>,
@@ -231,5 +279,4 @@ pub(crate) enum CompileErrorKind<'src> {
   UnterminatedBacktick,
   UnterminatedInterpolation,
   UnterminatedString,
-  VariadicParameterWithOption,
 }

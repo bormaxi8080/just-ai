@@ -36,7 +36,7 @@ fn duplicate_attributes_are_disallowed() {
     )
     .stderr(
       "
-        error: recipe attribute `no-exit-message` first used on line 1 is duplicated on line 2
+        error: attribute `no-exit-message` first used on line 1 is duplicated on line 2
          ——▶ justfile:2:2
           │
         2 │ [no-exit-message]
@@ -118,7 +118,7 @@ fn multiple_attributes_one_line_duplicate_check() {
     )
     .stderr(
       "
-        error: recipe attribute `linux` first used on line 1 is duplicated on line 2
+        error: attribute `linux` first used on line 1 is duplicated on line 2
          ——▶ justfile:2:2
           │
         2 │ [linux]
@@ -269,6 +269,132 @@ fn doc_multiline() {
 }
 
 #[test]
+fn doc_attribute_may_be_expression() {
+  Test::new()
+    .justfile(
+      "
+        prefix := 'hello '
+        [doc(prefix + 'world')]
+        foo:
+      ",
+    )
+    .args(["--list"])
+    .stdout(
+      "
+        Available recipes:
+            foo # hello world
+      ",
+    )
+    .success();
+}
+
+#[test]
+fn doc_attribute_may_reference_variable_transitively() {
+  Test::new()
+    .justfile(
+      "
+        a := b
+        b := 'bar'
+        [doc(a)]
+        foo:
+      ",
+    )
+    .args(["--list"])
+    .stdout(
+      "
+        Available recipes:
+            foo # bar
+      ",
+    )
+    .success();
+}
+
+#[test]
+fn doc_attribute_list_is_joined() {
+  Test::new()
+    .justfile(
+      "
+        set lists
+        [doc(['hello', 'world'])]
+        foo:
+      ",
+    )
+    .env("JUST_UNSTABLE", "1")
+    .args(["--list"])
+    .stdout(
+      "
+        Available recipes:
+            foo # hello world
+      ",
+    )
+    .success();
+}
+
+#[test]
+fn doc_attribute_empty_list_is_no_doc() {
+  Test::new()
+    .justfile(
+      "
+        set lists
+        [doc([])]
+        foo:
+      ",
+    )
+    .env("JUST_UNSTABLE", "1")
+    .args(["--list"])
+    .stdout(
+      "
+        Available recipes:
+            foo
+      ",
+    )
+    .success();
+}
+
+#[test]
+fn doc_attribute_cannot_reference_undefined_variable() {
+  Test::new()
+    .justfile(
+      "
+        [doc(undefined)]
+        foo:
+      ",
+    )
+    .stderr(
+      "
+        error: variable `undefined` not defined
+         ——▶ justfile:1:6
+          │
+        1 │ [doc(undefined)]
+          │      ^^^^^^^^^
+      ",
+    )
+    .failure();
+}
+
+#[test]
+fn doc_attribute_cannot_reference_non_const_variable() {
+  Test::new()
+    .justfile(
+      "
+        bar := `echo BAR`
+        [doc(bar)]
+        foo:
+      ",
+    )
+    .stderr(
+      "
+        error: cannot access non-const variable `bar` in const context
+         ——▶ justfile:2:6
+          │
+        2 │ [doc(bar)]
+          │      ^^^
+      ",
+    )
+    .failure();
+}
+
+#[test]
 fn extension() {
   Test::new()
     .justfile(
@@ -316,7 +442,7 @@ fn duplicate_non_repeatable_attributes_are_forbidden() {
     )
     .stderr(
       "
-        error: recipe attribute `confirm` first used on line 1 is duplicated on line 2
+        error: attribute `confirm` first used on line 1 is duplicated on line 2
          ——▶ justfile:2:2
           │
         2 │ [confirm: 'no']
@@ -364,6 +490,21 @@ fn env_attribute_multiple() {
       ",
     )
     .stdout("value1 value 2\n")
+    .success();
+}
+
+#[test]
+fn env_attribute_is_visible_to_shell_function() {
+  Test::new()
+    .justfile(
+      "
+        [env('FOO', 'bar')]
+        foo:
+          @echo {{ `echo backtick-$FOO` }} {{ shell('echo shell-$FOO') }}
+      ",
+    )
+    .arg("foo")
+    .stdout("backtick-bar shell-bar\n")
     .success();
 }
 
@@ -611,7 +752,7 @@ fn cache_extra_dump() {
           echo baz
       ",
     )
-    .env("JUST_UNSTABLE", "1")
+    .unstable()
     .arg("--dump")
     .stdout(
       "
@@ -639,7 +780,7 @@ fn cache_inputs_dump() {
           echo baz
       ",
     )
-    .env("JUST_UNSTABLE", "1")
+    .unstable()
     .arg("--dump")
     .stdout(
       "
@@ -667,7 +808,7 @@ fn cache_outputs_dump() {
           echo baz
       ",
     )
-    .env("JUST_UNSTABLE", "1")
+    .unstable()
     .arg("--dump")
     .stdout(
       "
@@ -693,7 +834,7 @@ fn unknown_keyword() {
           echo baz
       ",
     )
-    .env("JUST_UNSTABLE", "1")
+    .unstable()
     .stderr(
       "
         error: unknown key `input` for `cache` attribute
@@ -815,4 +956,18 @@ fn positional_arguments_cannot_follow_keyword_arguments() {
       ",
     )
     .failure();
+}
+
+#[test]
+fn env_attribute_visible_to_backticks_in_body() {
+  Test::new()
+    .justfile(
+      "
+        [env('MY_VAR', 'my_value')]
+        foo:
+          @echo {{ `echo $MY_VAR` }}
+      ",
+    )
+    .stdout("my_value\n")
+    .success();
 }

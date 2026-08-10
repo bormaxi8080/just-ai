@@ -1,8 +1,11 @@
-//! `just` is primarily used as a command-line binary, but does provide a
-//! limited public library interface.
+//! `just` is a handy way to save and run project-specific commands, and is
+//! primarily used as a command-line binary.
 //!
-//! Please keep in mind that there are no semantic version guarantees for the
-//! library interface. It may break or change at any time.
+//! See [GitHub](https://github.com/casey/just/) for more information.
+//!
+//! A limited public library interface is available. Please keep in mind that
+//! there are no semantic version guarantees for the library interface. It may
+//! break or change at any time.
 
 pub(crate) use {
   crate::{
@@ -11,7 +14,6 @@ pub(crate) use {
     analyzer::Analyzer,
     arg_attribute::ArgAttribute,
     assignment::Assignment,
-    assignment_resolver::AssignmentResolver,
     ast::Ast,
     attribute::{Attribute, AttributeKind},
     attribute_set::AttributeSet,
@@ -21,6 +23,7 @@ pub(crate) use {
     cache_key::CacheKey,
     cache_lock::CacheLock,
     cache_status::CacheStatus,
+    clean::Clean,
     color::Color,
     color_display::ColorDisplay,
     command_color::CommandColor,
@@ -34,8 +37,11 @@ pub(crate) use {
     config::Config,
     config_error::ConfigError,
     const_error::ConstError,
+    const_eval_error::ConstEvalError,
     constants::constants,
     count::Count,
+    datetime_format::datetime_format,
+    datetime_format_error::DatetimeFormatError,
     delimiter::Delimiter,
     dependency::Dependency,
     dependency_argument::DependencyArgument,
@@ -50,6 +56,7 @@ pub(crate) use {
     execution_context::ExecutionContext,
     executor::Executor,
     expression::Expression,
+    expression_context::ExpressionContext,
     format_string_part::FormatStringPart,
     fragment::Fragment,
     function::Function,
@@ -58,13 +65,15 @@ pub(crate) use {
     interpreter::Interpreter,
     invocation::Invocation,
     invocation_parser::InvocationParser,
-    item::Item,
+    item::{Item, ItemKind},
     justfile::Justfile,
     keyed::Keyed,
     keyword::Keyword,
+    layer::Layer,
     lexer::Lexer,
     line::Line,
     list::List,
+    list_entry::ListEntry,
     list_feature::ListFeature,
     list_operator::ListOperator,
     load_dotenv::load_dotenv,
@@ -97,6 +106,7 @@ pub(crate) use {
     search::Search,
     search_config::SearchConfig,
     search_error::SearchError,
+    semaphore::Semaphore,
     set::Set,
     setting::Setting,
     settings::Settings,
@@ -113,6 +123,7 @@ pub(crate) use {
     string_kind::StringKind,
     string_literal::StringLiteral,
     string_state::StringState,
+    style::Style,
     subcommand::Subcommand,
     suggestion::Suggestion,
     switch::Switch,
@@ -126,14 +137,17 @@ pub(crate) use {
     usage::Usage,
     use_color::UseColor,
     value::Value,
+    variable_resolver::VariableResolver,
     verbosity::Verbosity,
+    version::Version,
     warning::Warning,
     which::which,
   },
   camino::Utf8Path,
+  chrono::{DateTime, Local, TimeZone, Utc, format::StrftimeItems},
   clap::{CommandFactory, FromArgMatches, Parser as _, ValueEnum},
   clap_complete::{ArgValueCompleter, CompletionCandidate, PathCompleter, engine::ValueCompleter},
-  lexiclean::Lexiclean,
+  digest_io::HashWriter,
   libc::EXIT_FAILURE,
   rand::seq::IndexedRandom,
   regex::Regex,
@@ -141,25 +155,27 @@ pub(crate) use {
     Deserialize, Deserializer, Serialize, Serializer,
     ser::{SerializeMap, SerializeSeq, SerializeStruct},
   },
+  sha2::{Digest, Sha256},
   snafu::{ResultExt, Snafu},
   std::{
-    borrow::{Borrow, Cow},
+    borrow::Borrow,
     cmp::Ordering,
-    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet, btree_map},
     env::{self, VarError},
     ffi::{OsStr, OsString},
     fmt::{self, Debug, Display, Formatter},
     fs::{self, File},
-    io::{self, Write},
+    io::{self, Seek, Sink, Write},
     iter::{self, FromIterator},
     mem,
+    num::{NonZeroU64, ParseIntError},
     ops::Deref,
     ops::{Index, RangeInclusive},
     path::{self, Component, Path, PathBuf},
     process::{self, Command, ExitStatus, Stdio},
     slice,
     str::{self, Chars, FromStr},
-    sync::{Arc, LazyLock, Mutex, MutexGuard},
+    sync::{Arc, Condvar, LazyLock, Mutex, MutexGuard},
     thread,
     time::Instant,
     vec,
@@ -171,7 +187,10 @@ pub(crate) use {
 };
 
 #[cfg(test)]
-pub(crate) use crate::{node::Node, tree::Tree};
+pub(crate) use {
+  crate::{node::Node, tree::Tree},
+  std::borrow::Cow,
+};
 
 pub use crate::run::run;
 
@@ -185,9 +204,17 @@ type SearchResult<T> = Result<T, SearchError>;
 type StringResult = Result<String, String>;
 type ValueResult = Result<Value, String>;
 
+type ModuleAlias<'src> = Alias<'src, Modulepath>;
+type RecipeAlias<'src> = Alias<'src, Arc<Recipe<'src>>>;
+
 const JUST_DIRECTORY: &str = "just";
 const RECURSION_LIMIT: usize = if cfg!(windows) { 48 } else { 256 };
 const TEMPDIR_PREFIX: &str = "just-";
+const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+fn signal_exit_code(number: i32) -> Option<i32> {
+  number.checked_add(128)
+}
 
 #[cfg(test)]
 #[macro_use]
@@ -200,9 +227,6 @@ pub mod tree;
 #[cfg(test)]
 pub mod node;
 
-#[cfg(fuzzing)]
-pub mod fuzzing;
-
 // Used for testing with the `--request` subcommand.
 #[doc(hidden)]
 pub mod request;
@@ -213,7 +237,6 @@ mod analyzer;
 mod arg_attribute;
 mod arguments;
 mod assignment;
-mod assignment_resolver;
 mod ast;
 mod attribute;
 mod attribute_set;
@@ -223,6 +246,7 @@ mod cache_entry;
 mod cache_key;
 mod cache_lock;
 mod cache_status;
+mod clean;
 mod color;
 mod color_display;
 mod command_color;
@@ -236,8 +260,11 @@ mod conditional_operator;
 mod config;
 mod config_error;
 mod const_error;
+mod const_eval_error;
 mod constants;
 mod count;
+mod datetime_format;
+mod datetime_format_error;
 mod delimiter;
 mod dependency;
 mod dependency_argument;
@@ -252,6 +279,7 @@ mod evaluator;
 mod execution_context;
 mod executor;
 mod expression;
+mod expression_context;
 mod filesystem;
 mod format_string_part;
 mod fragment;
@@ -265,9 +293,11 @@ mod item;
 mod justfile;
 mod keyed;
 mod keyword;
+mod layer;
 mod lexer;
 mod line;
 mod list;
+mod list_entry;
 mod list_feature;
 mod list_operator;
 mod load_dotenv;
@@ -300,6 +330,7 @@ mod scope;
 mod search;
 mod search_config;
 mod search_error;
+mod semaphore;
 mod set;
 mod setting;
 mod settings;
@@ -318,6 +349,7 @@ mod string_delimiter;
 mod string_kind;
 mod string_literal;
 mod string_state;
+mod style;
 mod subcommand;
 mod suggestion;
 mod switch;
@@ -332,6 +364,8 @@ mod unstable_feature;
 mod usage;
 mod use_color;
 mod value;
+mod variable_resolver;
 mod verbosity;
+mod version;
 mod warning;
 mod which;

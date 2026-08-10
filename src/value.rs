@@ -15,6 +15,10 @@ impl Value {
     &self.elements
   }
 
+  pub(crate) fn len(&self) -> usize {
+    self.elements.len()
+  }
+
   pub(crate) fn push(&mut self, element: &str) {
     self.elements.push(element.into());
   }
@@ -68,6 +72,10 @@ impl Value {
   pub(crate) fn is_truthy(&self) -> bool {
     !self.elements.is_empty()
   }
+
+  pub(crate) fn iter(&self) -> slice::Iter<String> {
+    self.elements.iter()
+  }
 }
 
 impl ColorDisplay for Value {
@@ -77,7 +85,7 @@ impl ColorDisplay for Value {
     } else {
       write!(f, "[")?;
 
-      for (i, element) in self.elements.iter().enumerate() {
+      for (i, element) in self.iter().enumerate() {
         if i > 0 {
           write!(f, ", ")?;
         }
@@ -133,6 +141,24 @@ impl FromIterator<String> for Value {
     Self {
       elements: elements.into_iter().collect(),
     }
+  }
+}
+
+impl<'a> IntoIterator for &'a Value {
+  type Item = &'a String;
+  type IntoIter = slice::Iter<'a, String>;
+
+  fn into_iter(self) -> Self::IntoIter {
+    self.elements.iter()
+  }
+}
+
+impl IntoIterator for Value {
+  type Item = String;
+  type IntoIter = vec::IntoIter<String>;
+
+  fn into_iter(self) -> Self::IntoIter {
+    self.elements.into_iter()
   }
 }
 

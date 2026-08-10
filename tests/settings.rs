@@ -1,6 +1,27 @@
 use super::*;
 
 #[test]
+fn invalid_attribute() {
+  Test::new()
+    .justfile(
+      "
+        [doc('bar')]
+        set quiet
+      ",
+    )
+    .stderr(
+      "
+        error: setting `quiet` has invalid attribute `doc`
+         ——▶ justfile:2:5
+          │
+        2 │ set quiet
+          │     ^^^^^
+      ",
+    )
+    .failure();
+}
+
+#[test]
 fn all_settings_allow_expressions() {
   Test::new()
     .justfile(
@@ -481,6 +502,10 @@ fn bad_regex() {
             (
             ^
         error: unclosed group
+         ——▶ justfile:1:32
+          │
+        1 │ set working-directory := if '' =~ '(' {
+          │                                ^^
       ",
     )
     .failure();
@@ -499,7 +524,6 @@ fn backtick_override() {
           cat file.txt
       ",
     )
-    .test_round_trip(false)
     .arg("bar=foo")
     .write("foo/file.txt", "baz")
     .arg("foo")

@@ -10,12 +10,12 @@ fn lists_setting_is_unstable() {
 
 #[test]
 fn quote_quotes_each_element_of_a_list() {
-  assert_list_eq("quote(['bar', 'baz bob'])", r#"["'bar'", "'baz bob'"]"#);
+  assert_list("quote(['bar', 'baz bob'])", r#"["'bar'", "'baz bob'"]"#);
 }
 
 #[test]
 fn quote_of_empty_list_is_empty() {
-  assert_list_eq("quote([])", "[]");
+  assert_list("quote([])", "[]");
 }
 
 #[test]
@@ -34,14 +34,14 @@ fn quote_of_empty_variadic_is_empty_string_without_lists_setting() {
 
 #[test]
 fn quote_quotes_single_element_values_whole() {
-  assert_list_eq("quote('baz bob')", r#""'baz bob'""#);
+  assert_list("quote('baz bob')", r#""'baz bob'""#);
 }
 
 #[test]
 fn absolute_path_resolves_each_element_of_a_list() {
   let test = Test::new()
     .justfile("set lists\n\nx := show(absolute_path(['bar', 'baz bob']))")
-    .env("JUST_UNSTABLE", "1")
+    .unstable()
     .args(["--evaluate", "x"]);
 
   let mut tempdir = test.tempdir.path().to_owned();
@@ -66,12 +66,12 @@ fn absolute_path_resolves_each_element_of_a_list() {
 
 #[test]
 fn absolute_path_of_empty_list_is_empty() {
-  assert_list_eq("absolute_path([])", "[]");
+  assert_list("absolute_path([])", "[]");
 }
 
 #[test]
 fn append_appends_to_each_element_of_a_list() {
-  assert_list_eq(
+  assert_list(
     "append('.c', ['bar', 'baz bob'])",
     r#"["bar.c", "baz bob.c"]"#,
   );
@@ -79,7 +79,7 @@ fn append_appends_to_each_element_of_a_list() {
 
 #[test]
 fn prepend_prepends_to_each_element_of_a_list() {
-  assert_list_eq(
+  assert_list(
     "prepend('src/', ['bar', 'baz bob'])",
     r#"["src/bar", "src/baz bob"]"#,
   );
@@ -87,7 +87,7 @@ fn prepend_prepends_to_each_element_of_a_list() {
 
 #[test]
 fn append_does_not_split_single_strings_with_lists_setting() {
-  assert_list_eq("append('.c', 'foo bar')", r#""foo bar.c""#);
+  assert_list("append('.c', 'foo bar')", r#""foo bar.c""#);
 }
 
 #[test]
@@ -101,7 +101,7 @@ fn recipe_interpolations_space_join_lists() {
           @echo {{ args }}
       ",
     )
-    .env("JUST_UNSTABLE", "1")
+    .unstable()
     .args(["foo", "bar", "baz"])
     .stdout("bar baz\n")
     .success();
@@ -109,17 +109,17 @@ fn recipe_interpolations_space_join_lists() {
 
 #[test]
 fn fstring_interpolations_space_join_lists() {
-  assert_list_eq(r#"f"{{['bar', 'baz']}}""#, r#""bar baz""#);
+  assert_list(r#"f"{{['bar', 'baz']}}""#, r#""bar baz""#);
 }
 
 #[test]
 fn join_list_joins_lists_with_spaces() {
-  assert_list_eq("join_list(['bar', 'baz'])", r#""bar baz""#);
+  assert_list("join_list(['bar', 'baz'])", r#""bar baz""#);
 }
 
 #[test]
 fn join_list_joins_with_separator() {
-  assert_list_eq("join_list(['bar', 'baz'], ', ')", r#""bar, baz""#);
+  assert_list("join_list(['bar', 'baz'], ', ')", r#""bar, baz""#);
 }
 
 #[test]
@@ -150,7 +150,7 @@ fn join_list_separator_must_not_be_a_list() {
           @echo {{ join_list(['bar', 'baz'], [',', ';']) }}
       ",
     )
-    .env("JUST_UNSTABLE", "1")
+    .unstable()
     .stderr(
       r#"
         error: list value [",", ";"] passed to `join_list()`
@@ -167,27 +167,32 @@ fn join_list_separator_must_not_be_a_list() {
 
 #[test]
 fn split_splits_string_on_separator() {
-  assert_list_eq("split('foo,bar,baz', ',')", r#"["foo", "bar", "baz"]"#);
+  assert_list("split('foo,bar,baz', ',')", r#"["foo", "bar", "baz"]"#);
 }
 
 #[test]
 fn split_of_string_not_containing_separator_is_single_element() {
-  assert_list_eq("split('foo', ',')", r#""foo""#);
+  assert_list("split('foo', ',')", r#""foo""#);
 }
 
 #[test]
 fn split_keeps_empty_elements_with_explicit_separator() {
-  assert_list_eq("split('foo,,bar,', ',')", r#"["foo", "", "bar", ""]"#);
+  assert_list("split('foo,,bar,', ',')", r#"["foo", "", "bar", ""]"#);
+}
+
+#[test]
+fn split_on_empty_separator_splits_into_characters() {
+  assert_list("split('abc', '')", r#"["a", "b", "c"]"#);
 }
 
 #[test]
 fn split_without_separator_splits_on_whitespace() {
-  assert_list_eq("split('  foo \t bar  baz ')", r#"["foo", "bar", "baz"]"#);
+  assert_list("split('  foo \t bar  baz ')", r#"["foo", "bar", "baz"]"#);
 }
 
 #[test]
 fn split_without_separator_of_whitespace_is_empty() {
-  assert_list_eq("split('  \t ')", "[]");
+  assert_list("split('  \t ')", "[]");
 }
 
 #[test]
@@ -218,7 +223,7 @@ fn split_argument_must_not_be_a_list() {
           @echo {{ split(['bar', 'baz'], ',') }}
       ",
     )
-    .env("JUST_UNSTABLE", "1")
+    .unstable()
     .stderr(
       r#"
         error: list value ["bar", "baz"] passed to `split()`
@@ -262,7 +267,7 @@ fn dependency_arguments_forward_lists() {
           @echo '{{ show(rest) }}'
       ",
     )
-    .env("JUST_UNSTABLE", "1")
+    .unstable()
     .args(["foo", "bar", "baz bob"])
     .stdout(
       r#"
@@ -286,7 +291,7 @@ fn dependency_arguments_forward_lists_to_positional_arguments() {
           @echo "$1-$2"
       "#,
     )
-    .env("JUST_UNSTABLE", "1")
+    .unstable()
     .args(["foo", "bar", "baz"])
     .stdout("bar-baz\n")
     .success();
@@ -306,7 +311,7 @@ fn singular_parameters_contribute_one_positional_argument() {
           @echo "$1-$2"
       "#,
     )
-    .env("JUST_UNSTABLE", "1")
+    .unstable()
     .args(["foo", "bar", "baz"])
     .stdout("bar baz-bob\n")
     .success();
@@ -325,7 +330,7 @@ fn lists_bind_to_singular_parameters() {
           @echo '{{ show(first) }}'
       ",
     )
-    .env("JUST_UNSTABLE", "1")
+    .unstable()
     .args(["foo", "bar", "baz"])
     .stdout(
       r#"
@@ -348,7 +353,7 @@ fn dependency_arguments_bind_to_one_parameter_each() {
           @echo '{{ show(first) }} {{ show(rest) }}'
       ",
     )
-    .env("JUST_UNSTABLE", "1")
+    .unstable()
     .args(["foo", "bar", "bob"])
     .stdout(
       r#"
@@ -370,7 +375,7 @@ fn variadic_parameters_accept_at_most_one_dependency_argument() {
         bar: (foo 'baz' 'bob')
       ",
     )
-    .env("JUST_UNSTABLE", "1")
+    .unstable()
     .arg("bar")
     .stderr(
       "
@@ -397,7 +402,7 @@ fn empty_list_for_plus_variadic_is_an_error() {
           @echo {{ rest }}
       ",
     )
-    .env("JUST_UNSTABLE", "1")
+    .unstable()
     .arg("foo")
     .stderr("error: recipe `bar` parameter `rest` requires at least one element but received empty list\n")
     .failure();
@@ -416,7 +421,7 @@ fn empty_list_for_required_parameter_is_an_error() {
           @echo {{ first }}
       ",
     )
-    .env("JUST_UNSTABLE", "1")
+    .unstable()
     .arg("foo")
     .stderr("error: recipe `bar` parameter `first` requires at least one element but received empty list\n")
     .failure();
@@ -435,7 +440,7 @@ fn empty_list_for_defaulted_parameter_uses_default() {
           @echo {{ first }}
       ",
     )
-    .env("JUST_UNSTABLE", "1")
+    .unstable()
     .arg("foo")
     .stdout("baz\n")
     .success();
@@ -454,7 +459,7 @@ fn omitted_star_variadic_dependency_argument_is_empty_list() {
           @echo '{{ show(rest) }}'
       ",
     )
-    .env("JUST_UNSTABLE", "1")
+    .unstable()
     .arg("foo")
     .stdout("[]\n")
     .success();
@@ -476,7 +481,7 @@ fn lists_forwarded_to_module_without_lists_setting_are_joined() {
         bar *args: (foo::baz args)
       ",
     )
-    .env("JUST_UNSTABLE", "1")
+    .unstable()
     .args(["bar", "baz", "bob"])
     .stdout("first=baz bob rest=\n")
     .success();
@@ -496,7 +501,7 @@ fn joined_arguments_forwarded_to_module_with_lists_setting_are_single_elements()
         bar *args: (foo::baz args)
       ",
     )
-    .env("JUST_UNSTABLE", "1")
+    .unstable()
     .args(["bar", "baz", "bob"])
     .stdout(
       r#"
@@ -519,7 +524,7 @@ fn evaluate_prints_lists() {
         d := []
       ",
     )
-    .env("JUST_UNSTABLE", "1")
+    .unstable()
     .arg("--evaluate")
     .stdout(
       r#"
@@ -534,28 +539,28 @@ fn evaluate_prints_lists() {
 
 #[test]
 fn concatenation_broadcasts_string_over_list() {
-  assert_list_eq("'foo' + ['bar', 'baz']", r#"["foobar", "foobaz"]"#);
-  assert_list_eq("['bar', 'baz'] + 'foo'", r#"["barfoo", "bazfoo"]"#);
+  assert_list("'foo' + ['bar', 'baz']", r#"["foobar", "foobaz"]"#);
+  assert_list("['bar', 'baz'] + 'foo'", r#"["barfoo", "bazfoo"]"#);
 }
 
 #[test]
 fn concatenation_combines_equal_length_lists_pairwise() {
-  assert_list_eq("['a', 'b'] + ['c', 'd']", r#"["ac", "bd"]"#);
+  assert_list("['a', 'b'] + ['c', 'd']", r#"["ac", "bd"]"#);
 }
 
 #[test]
 fn concatenation_of_strings_is_a_string() {
-  assert_list_eq("'foo' + 'bar'", r#""foobar""#);
+  assert_list("'foo' + 'bar'", r#""foobar""#);
 }
 
 #[test]
 fn concatenation_of_empty_lists_is_empty() {
-  assert_list_eq("[] + []", "[]");
+  assert_list("[] + []", "[]");
 }
 
 #[test]
 fn list_concatenation_appends_lists() {
-  assert_list_eq("['foo', 'bar'] ++ ['baz']", r#"["foo", "bar", "baz"]"#);
+  assert_list("['foo', 'bar'] ++ ['baz']", r#"["foo", "bar", "baz"]"#);
 }
 
 #[test]
@@ -577,25 +582,25 @@ fn list_concatenation_requires_lists_setting() {
 
 #[test]
 fn join_broadcasts_string_over_list() {
-  assert_list_eq("'foo' / ['bar', 'baz']", r#"["foo/bar", "foo/baz"]"#);
-  assert_list_eq("['bar', 'baz'] / 'foo'", r#"["bar/foo", "baz/foo"]"#);
+  assert_list("'foo' / ['bar', 'baz']", r#"["foo/bar", "foo/baz"]"#);
+  assert_list("['bar', 'baz'] / 'foo'", r#"["bar/foo", "baz/foo"]"#);
 }
 
 #[test]
 fn join_combines_equal_length_lists_pairwise() {
-  assert_list_eq("['a', 'b'] / ['c', 'd']", r#"["a/c", "b/d"]"#);
+  assert_list("['a', 'b'] / ['c', 'd']", r#"["a/c", "b/d"]"#);
 }
 
 #[test]
 fn unary_join_broadcasts_over_list() {
-  assert_list_eq("/ ['bar', 'baz']", r#"["/bar", "/baz"]"#);
+  assert_list("/ ['bar', 'baz']", r#"["/bar", "/baz"]"#);
 }
 
 #[test]
 fn concatenation_with_empty_list_is_an_error() {
   Test::new()
     .justfile("set lists\n\nx := 'foo' + []")
-    .env("JUST_UNSTABLE", "1")
+    .unstable()
     .args(["--evaluate", "x"])
     .stderr(
       r"
@@ -613,7 +618,7 @@ fn concatenation_with_empty_list_is_an_error() {
 fn concatenation_of_different_length_lists_is_an_error() {
   Test::new()
     .justfile("set lists\n\nx := ['a', 'b'] + ['c', 'd', 'e']")
-    .env("JUST_UNSTABLE", "1")
+    .unstable()
     .args(["--evaluate", "x"])
     .stderr(
       r#"
@@ -631,7 +636,7 @@ fn concatenation_of_different_length_lists_is_an_error() {
 fn unary_join_with_empty_list_is_an_error() {
   Test::new()
     .justfile("set lists\n\nx := / []")
-    .env("JUST_UNSTABLE", "1")
+    .unstable()
     .args(["--evaluate", "x"])
     .stderr(
       r"
@@ -656,7 +661,7 @@ fn assert_message_space_joins_lists() {
           {{ assert('a' != 'a', ['foo', 'bar']) }}
       ",
     )
-    .env("JUST_UNSTABLE", "1")
+    .unstable()
     .stderr(
       "
         error: assert failed: foo bar
@@ -681,7 +686,7 @@ fn confirm_prompt_space_joins_lists() {
           echo FOO
       ",
     )
-    .env("JUST_UNSTABLE", "1")
+    .unstable()
     .stderr("foo bar ")
     .stdout("FOO\n")
     .stdin("y")
@@ -700,7 +705,7 @@ fn env_attribute_value_space_joins_lists() {
           @echo $FOO
       ",
     )
-    .env("JUST_UNSTABLE", "1")
+    .unstable()
     .stdout("bar baz\n")
     .success();
 }
@@ -717,7 +722,7 @@ fn env_attribute_empty_list_leaves_variable_unset() {
           @echo "${FOO-unset}"
       "#,
     )
-    .env("JUST_UNSTABLE", "1")
+    .unstable()
     .stdout("unset\n")
     .success();
 }
@@ -734,7 +739,7 @@ fn env_attribute_empty_string_sets_variable() {
           @echo "[${FOO-unset}]"
       "#,
     )
-    .env("JUST_UNSTABLE", "1")
+    .unstable()
     .stdout("[]\n")
     .success();
 }
@@ -752,7 +757,7 @@ fn empty_list_export_leaves_variable_unset() {
           @echo "${FOO-unset}"
       "#,
     )
-    .env("JUST_UNSTABLE", "1")
+    .unstable()
     .stdout("unset\n")
     .success();
 }
@@ -770,7 +775,7 @@ fn non_empty_list_export_sets_variable() {
           @echo "$FOO"
       "#,
     )
-    .env("JUST_UNSTABLE", "1")
+    .unstable()
     .stdout("bar baz\n")
     .success();
 }
@@ -786,7 +791,7 @@ fn empty_list_exported_parameter_leaves_variable_unset() {
           @echo "${bar-unset}"
       "#,
     )
-    .env("JUST_UNSTABLE", "1")
+    .unstable()
     .stdout("unset\n")
     .success();
 }
@@ -805,7 +810,7 @@ fn empty_list_set_export_leaves_variable_unset() {
           @echo "${FOO-unset}"
       "#,
     )
-    .env("JUST_UNSTABLE", "1")
+    .unstable()
     .stdout("unset\n")
     .success();
 }
@@ -822,7 +827,7 @@ fn list_in_env_attribute_name_points_at_attribute_name() {
           @echo hi
       ",
     )
-    .env("JUST_UNSTABLE", "1")
+    .unstable()
     .stderr(
       r#"
         error: list value ["FOO", "BAR"] used as `env` attribute name
@@ -839,7 +844,7 @@ fn list_in_env_attribute_name_points_at_attribute_name() {
 fn env_returns_first_present_variable() {
   Test::new()
     .justfile("set lists\n\nx := env(['ZADDY', 'BAR'])")
-    .env("JUST_UNSTABLE", "1")
+    .unstable()
     .env("BAR", "bar")
     .args(["--evaluate", "x"])
     .stdout("bar")
@@ -851,7 +856,7 @@ fn env_returns_first_present_variable() {
 fn env_stops_at_first_present_variable_including_empty() {
   Test::new()
     .justfile("set lists\n\nx := show(env(['ZADDY', 'BAR']))")
-    .env("JUST_UNSTABLE", "1")
+    .unstable()
     .env("ZADDY", "")
     .env("BAR", "bar")
     .args(["--evaluate", "x"])
@@ -862,17 +867,17 @@ fn env_stops_at_first_present_variable_including_empty() {
 
 #[test]
 fn env_returns_default_when_no_variable_present() {
-  assert_list_eq("env(['ZADDY', 'XYZ'], 'baz')", r#""baz""#);
+  assert_list("env(['ZADDY', 'XYZ'], 'baz')", r#""baz""#);
 }
 
 #[test]
 fn env_returns_list_default() {
-  assert_list_eq("env(['ZADDY'], ['a', 'b'])", r#"["a", "b"]"#);
+  assert_list("env(['ZADDY'], ['a', 'b'])", r#"["a", "b"]"#);
 }
 
 #[test]
 fn env_with_empty_key_list_uses_default() {
-  assert_list_eq("env([], 'baz')", r#""baz""#);
+  assert_list("env([], 'baz')", r#""baz""#);
 }
 
 #[test]
@@ -887,7 +892,7 @@ fn env_with_empty_key_list_and_no_default_is_an_error() {
           echo {{env([])}}
       ",
     )
-    .env("JUST_UNSTABLE", "1")
+    .unstable()
     .stderr(
       "
         error: call to function `env` failed: empty environment variable list with no default
@@ -912,7 +917,7 @@ fn env_missing_keys_error_names_all_keys() {
           echo {{env(['ZADDY', 'XYZ'])}}
       ",
     )
-    .env("JUST_UNSTABLE", "1")
+    .unstable()
     .stderr(
       "
         error: call to function `env` failed: environment variables `ZADDY` and `XYZ` not present
@@ -937,7 +942,7 @@ fn env_single_missing_key_keeps_singular_message() {
           echo {{env('ZADDY')}}
       ",
     )
-    .env("JUST_UNSTABLE", "1")
+    .unstable()
     .stderr(
       "
         error: call to function `env` failed: environment variable `ZADDY` not present
@@ -954,7 +959,7 @@ fn env_single_missing_key_keeps_singular_message() {
 fn env_var_accepts_list_of_keys() {
   Test::new()
     .justfile("set lists\n\nx := env_var(['ZADDY', 'BAR'])")
-    .env("JUST_UNSTABLE", "1")
+    .unstable()
     .env("BAR", "bar")
     .args(["--evaluate", "x"])
     .stdout("bar")
@@ -964,7 +969,7 @@ fn env_var_accepts_list_of_keys() {
 
 #[test]
 fn env_var_or_default_accepts_list_of_keys() {
-  assert_list_eq("env_var_or_default(['ZADDY', 'XYZ'], [])", "[]");
+  assert_list("env_var_or_default(['ZADDY', 'XYZ'], [])", "[]");
 }
 
 #[test]
@@ -979,7 +984,7 @@ fn list_in_working_directory_attribute_points_at_attribute_name() {
           @echo hi
       ",
     )
-    .env("JUST_UNSTABLE", "1")
+    .unstable()
     .stderr(
       r#"
         error: list value ["foo", "bar"] used as a `[working-directory]` attribute
@@ -1004,7 +1009,7 @@ fn interpreter_settings_flatten_lists() {
           hello
       ",
     )
-    .env("JUST_UNSTABLE", "1")
+    .unstable()
     .stdout("foo bar hello\n")
     .stderr("hello\n")
     .shell(false)
@@ -1023,7 +1028,7 @@ fn empty_interpreter_setting_is_an_error() {
           @echo bar
       ",
     )
-    .env("JUST_UNSTABLE", "1")
+    .unstable()
     .stderr(
       "
         error: `shell` setting requires at least one element but evaluated to empty list
@@ -1047,7 +1052,7 @@ fn list_in_function_argument_points_at_function_name() {
           @echo {{ uppercase(['bar', 'baz']) }}
       ",
     )
-    .env("JUST_UNSTABLE", "1")
+    .unstable()
     .stderr(
       r#"
         error: list value ["bar", "baz"] passed to `uppercase()`
@@ -1074,7 +1079,7 @@ fn list_in_setting_value_points_at_setting_name() {
           @echo bar
       ",
     )
-    .env("JUST_UNSTABLE", "1")
+    .unstable()
     .stderr(
       r#"
         error: list value ["foo", "bar"] assigned to `tempdir` setting
@@ -1085,4 +1090,23 @@ fn list_in_setting_value_points_at_setting_name() {
       "#,
     )
     .failure();
+}
+
+#[test]
+fn len() {
+  #[track_caller]
+  fn case(expression: &str, expected: &str) {
+    Test::new()
+      .justfile(format!("set lists\nx := len({expression})"))
+      .unstable()
+      .args(["--evaluate", "x"])
+      .stdout(expected)
+      .success();
+  }
+
+  case("[]", "0");
+  case("''", "1");
+  case("'foo'", "1");
+  case("['foo']", "1");
+  case("['foo', 'bar']", "2");
 }

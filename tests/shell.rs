@@ -13,10 +13,9 @@ recipe default=`DEFAULT`:
 #[test]
 #[cfg_attr(windows, ignore)]
 fn flag() {
-  let tmp = temptree! {
-    justfile: JUSTFILE,
-    shell: "#!/usr/bin/env bash\necho \"$@\"",
-  };
+  let tmp = tempdir();
+  fs::write(tmp.path().join("justfile"), JUSTFILE).unwrap();
+  fs::write(tmp.path().join("shell"), "#!/usr/bin/env bash\necho \"$@\"").unwrap();
 
   let shell = tmp.path().join("shell");
 
@@ -33,8 +32,7 @@ fn flag() {
     .output()
     .unwrap();
 
-  let stdout = "-cu -cu EXPRESSION\n-cu -cu DEFAULT\n-cu RECIPE\n";
-  assert_stdout(&output, stdout);
+  assert_stdout(&output, "-cu -cu EXPRESSION\n-cu -cu DEFAULT\n-cu RECIPE\n");
 }
 
 /// Test that we can use `set shell` to use cmd.exe on windows
@@ -43,8 +41,10 @@ fn cmd() {
   if cfg!(not(windows)) {
     return;
   }
-  let tmp = temptree! {
-    justfile: r#"
+  let tmp = tempdir();
+  fs::write(
+    tmp.path().join("justfile"),
+    r#"
 
 set shell := ["cmd.exe", "/C"]
 
@@ -54,13 +54,12 @@ recipe:
   REM foo
   Echo "{{x}}"
 "#,
-  };
+  )
+  .unwrap();
 
   let output = Command::new(JUST).current_dir(tmp.path()).output().unwrap();
 
-  let stdout = "\\\"ECHO is on.\\\"\r\n";
-
-  assert_stdout(&output, stdout);
+  assert_stdout(&output, "\"ECHO is on.\"\r\n");
 }
 
 /// Test that we can use `set shell` to use cmd.exe on windows
@@ -69,8 +68,10 @@ fn powershell() {
   if cfg!(not(windows)) {
     return;
   }
-  let tmp = temptree! {
-      justfile: r#"
+  let tmp = tempdir();
+  fs::write(
+    tmp.path().join("justfile"),
+    r#"
 
 set shell := ["powershell.exe", "-c"]
 
@@ -79,15 +80,13 @@ x := `Write-Host "Hello, world!"`
 recipe:
   For ($i=0; $i -le 10; $i++) { Write-Host $i }
   Write-Host "{{x}}"
-"#
-  ,
-    };
+"#,
+  )
+  .unwrap();
 
   let output = Command::new(JUST).current_dir(tmp.path()).output().unwrap();
 
-  let stdout = "0\n1\n2\n3\n4\n5\n6\n7\n8\n9\n10\nHello, world!\n";
-
-  assert_stdout(&output, stdout);
+  assert_stdout(&output, "0\n1\n2\n3\n4\n5\n6\n7\n8\n9\n10\nHello, world!\n");
 }
 
 #[test]

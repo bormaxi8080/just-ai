@@ -24,7 +24,7 @@ use {
     .usage(AnsiColor::Yellow.on_default() | Effects::BOLD)
     .valid(AnsiColor::Green.on_default()),
   trailing_var_arg = true,
-  version = env!("CARGO_PKG_VERSION"),
+  version = VERSION,
 )]
 pub struct Arguments {
   #[arg(
@@ -119,7 +119,8 @@ pub struct Arguments {
   #[arg(
     conflicts_with = "dotenv_path",
     help = "Search for an environment file named <DOTENV-FILENAME> instead of `.env`",
-    long
+    long,
+    short = 'F'
   )]
   pub(crate) dotenv_filename: Vec<String>,
   #[arg(
@@ -185,12 +186,18 @@ pub struct Arguments {
   )]
   pub(crate) highlight: bool,
   #[arg(
-    default_value = "    ",
     env = "JUST_INDENTATION",
     help = "Indent recipes bodies with <INDENTATION>",
     long
   )]
-  pub(crate) indentation: Indentation,
+  pub(crate) indentation: Option<Indentation>,
+  #[arg(
+    env = "JUST_JOBS",
+    help = "Run at most <N> recipes simultaneously with the [parallel] attribute",
+    long,
+    value_name = "N"
+  )]
+  pub(crate) jobs: Option<NonZeroU64>,
   #[arg(
     add = ArgValueCompleter::new(PathCompleter::file()),
     env = "JUST_JUSTFILE",
@@ -201,8 +208,10 @@ pub struct Arguments {
   pub(crate) justfile: Option<PathBuf>,
   #[arg(
     env = "JUST_JUSTFILE_NAME",
-    help = "Search for justfile named <NAME>",
+    help = "Search for justfile named <NAME>, accepts multiple `,`-separated values and may be \
+            repeated",
     long = "justfile-name",
+    value_delimiter = ',',
     value_name = "NAME"
   )]
   pub(crate) justfile_names: Option<Vec<String>>,
@@ -359,11 +368,11 @@ pub(crate) struct Subcommand {
   pub(crate) choose: bool,
   #[arg(
     conflicts_with = "arguments",
-    help = "Clear recipe cache, optionally restricted to recipes whose path begins with <PATH>",
+    help = "Clear recipe cache, optionally restricted to recipes whose path begins with <RECIPE_PATH>",
     help_heading = Self::HEADING,
     long,
     num_args = 0..,
-    value_name = "PATH",
+    value_name = "RECIPE_PATH",
   )]
   pub(crate) clean: Option<Vec<String>>,
   #[arg(
@@ -461,12 +470,12 @@ pub(crate) struct Subcommand {
   #[arg(
     add = ArgValueCompleter::new(Completer::complete_recipe),
     conflicts_with = "arguments",
-    help = "Show recipe at <PATH>",
+    help = "Show recipe at <RECIPE_PATH>",
     help_heading = Self::HEADING,
     long,
     num_args = 1..,
     short = 's',
-    value_name = "PATH",
+    value_name = "RECIPE_PATH",
   )]
   pub(crate) show: Option<Vec<String>>,
   #[arg(
@@ -478,11 +487,11 @@ pub(crate) struct Subcommand {
   #[arg(
     add = ArgValueCompleter::new(Completer::complete_recipe),
     conflicts_with = "arguments",
-    help = "Print recipe usage information",
+    help = "Print usage information for recipe at <RECIPE_PATH>",
     help_heading = Self::HEADING,
     long,
     num_args = 1..,
-    value_name = "PATH",
+    value_name = "RECIPE_PATH",
   )]
   pub(crate) usage: Option<Vec<String>>,
   #[arg(

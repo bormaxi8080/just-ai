@@ -1,4 +1,4 @@
-use {super::*, std::collections};
+use super::*;
 
 #[derive(Default, Debug, Clone)]
 pub(crate) struct AttributeSet<'src>(BTreeMap<Attribute<'src>, Name<'src>>);
@@ -12,26 +12,95 @@ impl<'src> AttributeSet<'src> {
     self.0.keys().any(|attribute| attribute.kind() == kind)
   }
 
+  pub(crate) fn is_enabled(&self) -> bool {
+    let android = self.contains(AttributeKind::Android);
+    let dragonfly = self.contains(AttributeKind::Dragonfly);
+    let freebsd = self.contains(AttributeKind::Freebsd);
+    let linux = self.contains(AttributeKind::Linux);
+    let macos = self.contains(AttributeKind::Macos);
+    let netbsd = self.contains(AttributeKind::Netbsd);
+    let openbsd = self.contains(AttributeKind::Openbsd);
+    let unix = self.contains(AttributeKind::Unix);
+    let windows = self.contains(AttributeKind::Windows);
+
+    (!windows
+      && !linux
+      && !macos
+      && !openbsd
+      && !freebsd
+      && !dragonfly
+      && !netbsd
+      && !unix
+      && !android)
+      || (cfg!(target_os = "android") && android)
+      || (cfg!(target_os = "dragonfly") && dragonfly)
+      || (cfg!(target_os = "freebsd") && freebsd)
+      || (cfg!(target_os = "linux") && linux)
+      || (cfg!(target_os = "macos") && macos)
+      || (cfg!(target_os = "netbsd") && netbsd)
+      || (cfg!(target_os = "openbsd") && openbsd)
+      || (cfg!(unix) && unix)
+      || (cfg!(windows) && windows)
+  }
+
   pub(crate) fn get(&self, kind: AttributeKind) -> Option<&Attribute<'src>> {
     self.0.keys().find(|attribute| attribute.kind() == kind)
+  }
+
+  pub(crate) fn groups(&self) -> Vec<StringLiteral<'src>> {
+    self
+      .0
+      .keys()
+      .filter_map(|attribute| {
+        if let Attribute::Group(group) = attribute {
+          Some(group.clone())
+        } else {
+          None
+        }
+      })
+      .collect()
   }
 
   pub(crate) fn name(&self, attribute: &Attribute<'src>) -> Name<'src> {
     self.0[attribute]
   }
 
-  pub(crate) fn iter(&self) -> collections::btree_map::Keys<'_, Attribute<'src>, Name<'src>> {
+  pub(crate) fn new() -> Self {
+    Self::default()
+  }
+
+  pub(crate) fn private(&self) -> bool {
+    self.contains(AttributeKind::Private)
+  }
+
+  pub(crate) fn iter(&self) -> btree_map::Keys<'_, Attribute<'src>, Name<'src>> {
     self.0.keys()
+  }
+
+  pub(crate) fn into_items(self) -> btree_map::IntoIter<Attribute<'src>, Name<'src>> {
+    self.0.into_iter()
   }
 
   pub(crate) fn ensure_valid_attributes(
     &self,
-    item_kind: &'static str,
+    item_kind: ItemKind,
     item_token: Token<'src>,
-    valid: &[AttributeKind],
   ) -> Result<(), CompileError<'src>> {
+    let valid = match item_kind {
+      ItemKind::Alias | ItemKind::Assignment => [AttributeKind::Private].as_slice(),
+      ItemKind::Comment | ItemKind::Newline => unreachable!(),
+      ItemKind::Function | ItemKind::Import | ItemKind::Setting | ItemKind::Unexport => &[],
+      ItemKind::Module => &[
+        AttributeKind::Doc,
+        AttributeKind::Group,
+        AttributeKind::Private,
+      ],
+      ItemKind::Recipe => return Ok(()),
+    };
+
     for attribute in self.0.keys() {
-      if !valid.contains(&attribute.kind()) {
+      let kind = attribute.kind();
+      if !kind.is_enabler() && !valid.contains(&kind) {
         return Err(item_token.error(CompileErrorKind::InvalidAttribute {
           item_kind,
           item_name: item_token.lexeme(),
@@ -67,7 +136,7 @@ impl<'src> FromIterator<(Attribute<'src>, Name<'src>)> for AttributeSet<'src> {
 impl<'src, 'a> IntoIterator for &'a AttributeSet<'src> {
   type Item = &'a Attribute<'src>;
 
-  type IntoIter = collections::btree_map::Keys<'a, Attribute<'src>, Name<'src>>;
+  type IntoIter = btree_map::Keys<'a, Attribute<'src>, Name<'src>>;
 
   fn into_iter(self) -> Self::IntoIter {
     self.0.keys()
@@ -77,7 +146,7 @@ impl<'src, 'a> IntoIterator for &'a AttributeSet<'src> {
 impl<'src> IntoIterator for AttributeSet<'src> {
   type Item = Attribute<'src>;
 
-  type IntoIter = collections::btree_map::IntoKeys<Attribute<'src>, Name<'src>>;
+  type IntoIter = btree_map::IntoKeys<Attribute<'src>, Name<'src>>;
 
   fn into_iter(self) -> Self::IntoIter {
     self.0.into_keys()

@@ -6,7 +6,7 @@ pub(crate) struct Evaluator<'src: 'run, 'run> {
   env: BTreeMap<String, String>,
   is_dependency: bool,
   lists: bool,
-  non_const_assignments: Table<'src, Name<'src>>,
+  non_const_assignments: HashSet<Number>,
   overrides: &'run HashMap<Number, String>,
   recipe: Option<Name<'src>>,
   recursion_depth: usize,
@@ -21,56 +21,50 @@ impl<'src, 'run> Evaluator<'src, 'run> {
     self.context.as_ref().ok_or(const_error)
   }
 
-  pub(crate) fn evaluate_settings(
+  pub(crate) fn evaluate_const_assignments(
     assignments: &'run Table<'src, Assignment<'src>>,
+    evaluation_order: &[Name<'src>],
     overrides: &'run HashMap<Number, String>,
     scope: &'run Scope<'src, 'run>,
-    sets: Table<'src, Set<'src>>,
-  ) -> RunResult<'src, Settings> {
-    let lists = sets
-      .values()
-      .any(|set| matches!(set.value, Setting::Lists(true)));
-
+    variable_references: &HashSet<Number>,
+    lists: bool,
+  ) -> CompileResult<'src, Self> {
     let mut evaluator = Self {
       assignments: Some(assignments),
-      recursion_depth: 0,
       context: None,
       env: BTreeMap::new(),
       is_dependency: false,
       lists,
-      non_const_assignments: Table::new(),
+      non_const_assignments: HashSet::new(),
       overrides,
       recipe: None,
+      recursion_depth: 0,
       scope: scope.child(),
     };
 
-    let variable_references = sets
-      .values()
-      .flat_map(|set| set.value.expressions())
-      .flat_map(|expression| expression.references())
-      .filter_map(|reference| {
-        if let Reference::Variable(variable) = reference {
-          Some(variable.lexeme())
-        } else {
-          None
-        }
-      })
-      .collect::<BTreeSet<&str>>();
-
-    for assignment in assignments.values() {
-      if variable_references.contains(assignment.name.lexeme()) {
-        match evaluator.evaluate_assignment(assignment) {
-          Err(Error::Const { .. }) => evaluator.non_const_assignments.insert(assignment.name),
-          Err(err) => return Err(err),
+    for assignment in evaluation_order {
+      let assignment = &assignments[assignment.lexeme()];
+      if variable_references.contains(&assignment.number) {
+        match evaluator
+          .evaluate_assignment(assignment)
+          .map_err(Error::unwrap_const)
+        {
+          Err(ConstEvalError::Const(_)) => {
+            evaluator.non_const_assignments.insert(assignment.number);
+          }
+          Err(error) => return Err(error.into_compile_error()),
           Ok(_) => {}
         }
       }
     }
 
-    evaluator.evaluate_sets(sets)
+    Ok(evaluator)
   }
 
-  fn evaluate_sets(&mut self, sets: Table<'src, Set<'src>>) -> RunResult<'src, Settings> {
+  pub(crate) fn evaluate_sets(
+    &self,
+    sets: Table<'src, Set<'src>>,
+  ) -> CompileResult<'src, Settings> {
     let mut settings = Settings::default();
 
     for (_name, set) in sets {
@@ -88,16 +82,16 @@ impl<'src, 'run> Evaluator<'src, 'run> {
           settings.default_script = value;
         }
         Setting::DotenvCommand(value) => {
-          settings.dotenv_command = self.evaluate_value(&value)?;
+          settings.dotenv_command = self.evaluate_value_const(&value)?;
         }
         Setting::DotenvFilename(value) => {
-          settings.dotenv_filename = self.evaluate_value(&value)?;
+          settings.dotenv_filename = self.evaluate_value_const(&value)?;
         }
         Setting::DotenvLoad(value) => {
           settings.dotenv_load = value;
         }
         Setting::DotenvPath(value) => {
-          settings.dotenv_path = self.evaluate_value(&value)?;
+          settings.dotenv_path = self.evaluate_value_const(&value)?;
         }
         Setting::DotenvOverride(value) => {
           settings.dotenv_override = value;
@@ -117,12 +111,16 @@ impl<'src, 'run> Evaluator<'src, 'run> {
         Setting::IgnoreComments(value) => {
           settings.ignore_comments = value;
         }
+        Setting::Indentation(_, indentation) => {
+          settings.indentation = Some(indentation);
+        }
         Setting::Lazy(value) => {
           settings.lazy = value;
         }
         Setting::Lists(value) => {
           settings.lists = value;
         }
+        Setting::MinimumVersion(_) => {}
         Setting::NoCd(value) => {
           settings.no_cd = value;
         }
@@ -151,12 +149,13 @@ impl<'src, 'run> Evaluator<'src, 'run> {
           settings.windows_shell = Some(self.evaluate_interpreter(&value, set.name)?);
         }
         Setting::Tempdir(value) => {
-          settings.tempdir = Some(self.evaluate_string(&value, StringContext::Setting(set.name))?);
+          settings.tempdir =
+            Some(self.evaluate_string_const(&value, StringContext::Setting(set.name))?);
         }
         Setting::WorkingDirectory(value) => {
           settings.working_directory = Some(
             self
-              .evaluate_string(&value, StringContext::Setting(set.name))?
+              .evaluate_string_const(&value, StringContext::Setting(set.name))?
               .into(),
           );
         }
@@ -167,19 +166,21 @@ impl<'src, 'run> Evaluator<'src, 'run> {
   }
 
   pub(crate) fn evaluate_interpreter(
-    &mut self,
+    &self,
     interpreter: &Interpreter<Expression<'src>>,
     setting: Name<'src>,
-  ) -> RunResult<'src, Interpreter<String>> {
-    let mut elements = self.evaluate_value(&interpreter.command)?.into_elements();
+  ) -> CompileResult<'src, Interpreter<String>> {
+    let mut elements = self
+      .evaluate_value_const(&interpreter.command)?
+      .into_elements();
     for argument in &interpreter.arguments {
-      elements.extend(self.evaluate_value(argument)?.into_elements());
+      elements.extend(self.evaluate_value_const(argument)?.into_elements());
     }
 
     let mut elements = elements.into_iter();
 
     let Some(command) = elements.next() else {
-      return Err(Error::EmptyInterpreter { setting });
+      return Err(ConstEvalError::EmptyInterpreter { setting }.into_compile_error());
     };
 
     Ok(Interpreter {
@@ -205,6 +206,7 @@ impl<'src, 'run> Evaluator<'src, 'run> {
       dotenv,
       module,
       overrides,
+      scope: parent,
       search,
     };
 
@@ -215,18 +217,16 @@ impl<'src, 'run> Evaluator<'src, 'run> {
       env: BTreeMap::new(),
       is_dependency: false,
       lists: module.settings.lists,
-      non_const_assignments: Table::new(),
+      non_const_assignments: HashSet::new(),
       overrides,
       recipe: None,
       scope: parent.child(),
     };
 
-    for assignment in module.assignments.values() {
-      if assignment.eager
-        || assignment.export
-        || module.settings.export
-        || variable_references
-          .is_none_or(|variable_references| variable_references.contains(&assignment.number))
+    for assignment in &module.evaluation_order {
+      let assignment = &module.assignments[assignment.lexeme()];
+      if variable_references
+        .is_none_or(|variable_references| variable_references.contains(&assignment.number))
       {
         evaluator.evaluate_assignment(assignment)?;
       }
@@ -236,9 +236,7 @@ impl<'src, 'run> Evaluator<'src, 'run> {
   }
 
   fn evaluate_assignment(&mut self, assignment: &Assignment<'src>) -> RunResult<'src, &Value> {
-    let name = assignment.name.lexeme();
-
-    if !self.scope.bound(name) {
+    if self.scope.binding(assignment.number).is_none() {
       let value = if let Some(value) = self.overrides.get(&assignment.number) {
         value.into()
       } else {
@@ -246,6 +244,7 @@ impl<'src, 'run> Evaluator<'src, 'run> {
       };
 
       self.scope.bind(Binding {
+        attributes: AttributeSet::new(),
         eager: assignment.eager,
         export: assignment.export
           || self
@@ -260,11 +259,12 @@ impl<'src, 'run> Evaluator<'src, 'run> {
       });
     }
 
-    Ok(self.scope.value(name).unwrap())
+    Ok(self.scope.value(assignment.number).unwrap())
   }
 
   fn function_context(&self, name: Name<'src>) -> RunResult<'src, function::Context> {
     Ok(function::Context {
+      env: &self.env,
       execution_context: self.context(ConstError::FunctionCall(name))?,
       is_dependency: self.is_dependency,
       name,
@@ -274,7 +274,7 @@ impl<'src, 'run> Evaluator<'src, 'run> {
   }
 
   fn evaluate_defined_function(
-    &mut self,
+    &self,
     function: &FunctionDefinition<'src>,
     arguments: &[Expression<'src>],
   ) -> RunResult<'src, Value> {
@@ -288,10 +288,21 @@ impl<'src, 'run> Evaluator<'src, 'run> {
 
     let context = *self.context.as_ref().unwrap();
 
-    let mut scope = Scope::root();
-    for ((name, number), argument) in function.parameters.iter().copied().zip(arguments) {
-      let value = self.evaluate_value(argument)?;
+    let values = arguments
+      .iter()
+      .map(|argument| self.evaluate_value(argument))
+      .collect::<RunResult<Vec<Value>>>()?;
+
+    let parent = if self.assignments.is_some() {
+      &self.scope
+    } else {
+      context.scope
+    };
+
+    let mut scope = parent.child();
+    for ((name, number), value) in function.parameters.iter().copied().zip(values) {
       scope.bind(Binding {
+        attributes: AttributeSet::new(),
         eager: false,
         export: false,
         file_depth: 0,
@@ -299,17 +310,17 @@ impl<'src, 'run> Evaluator<'src, 'run> {
         number,
         prelude: false,
         private: false,
-        value: value.clone(),
+        value,
       });
     }
 
-    let mut evaluator = Evaluator {
+    let evaluator = Evaluator {
       assignments: Some(&context.module.assignments),
       context: Some(context),
       env: BTreeMap::new(),
       is_dependency: self.is_dependency,
       lists: self.lists,
-      non_const_assignments: Table::new(),
+      non_const_assignments: HashSet::new(),
       overrides: self.overrides,
       recipe: self.recipe,
       recursion_depth,
@@ -320,31 +331,27 @@ impl<'src, 'run> Evaluator<'src, 'run> {
   }
 
   fn evaluate_builtin_function(
-    &mut self,
+    &self,
     name: Name<'src>,
     function: Function,
     arguments: &[Expression<'src>],
   ) -> RunResult<'src, Value> {
-    macro_rules! context {
-      () => {
-        self.function_context(name).unwrap()
-      };
-    }
+    let context = self.function_context(name).unwrap();
     match function {
-      Function::Nullary(f) => f(context!()).map(Value::from),
+      Function::Nullary(f) => f(context).map(Value::from),
       Function::Unary(f) => {
         let a = self.evaluate_string(&arguments[0], StringContext::Function(name))?;
-        f(context!(), &a).map(Value::from)
+        f(context, &a).map(Value::from)
       }
       Function::UnaryToValue(f) => {
         let a = self.evaluate_string(&arguments[0], StringContext::Function(name))?;
-        f(context!(), &a)
+        f(context, &a)
       }
       Function::UnaryMap(f) => {
         let a = self.evaluate_value(&arguments[0])?;
         a.elements()
           .iter()
-          .map(|element| f(context!(), element))
+          .map(|element| f(context, element))
           .collect()
       }
       Function::UnaryPlus(f) => {
@@ -353,22 +360,22 @@ impl<'src, 'run> Evaluator<'src, 'run> {
         for arg in &arguments[1..] {
           rest.push(self.evaluate_string(arg, StringContext::Function(name))?);
         }
-        f(context!(), &a, &rest).map(Value::from)
+        f(context, &a, &rest).map(Value::from)
       }
       Function::BinaryStrValue(f) => {
         let a = self.evaluate_string(&arguments[0], StringContext::Function(name))?;
         let b = self.evaluate_value(&arguments[1])?;
-        f(context!(), &a, &b)
+        f(context, &a, &b)
       }
       Function::Binary(f) => {
         let a = self.evaluate_string(&arguments[0], StringContext::Function(name))?;
         let b = self.evaluate_string(&arguments[1], StringContext::Function(name))?;
-        f(context!(), &a, &b).map(Value::from)
+        f(context, &a, &b).map(Value::from)
       }
       Function::BinaryToValue(f) => {
         let a = self.evaluate_string(&arguments[0], StringContext::Function(name))?;
         let b = self.evaluate_string(&arguments[1], StringContext::Function(name))?;
-        f(context!(), &a, &b)
+        f(context, &a, &b)
       }
       Function::BinaryPlus(f) => {
         let a = self.evaluate_string(&arguments[0], StringContext::Function(name))?;
@@ -377,23 +384,23 @@ impl<'src, 'run> Evaluator<'src, 'run> {
         for arg in &arguments[2..] {
           rest.push(self.evaluate_string(arg, StringContext::Function(name))?);
         }
-        f(context!(), &a, &b, &rest).map(Value::from)
+        f(context, &a, &b, &rest).map(Value::from)
       }
       Function::Ternary(f) => {
         let a = self.evaluate_string(&arguments[0], StringContext::Function(name))?;
         let b = self.evaluate_string(&arguments[1], StringContext::Function(name))?;
         let c = self.evaluate_string(&arguments[2], StringContext::Function(name))?;
-        f(context!(), &a, &b, &c).map(Value::from)
+        f(context, &a, &b, &c).map(Value::from)
       }
-      Function::ValueNullary(f) => f(context!()),
+      Function::ValueNullary(f) => f(context),
       Function::ValueUnary(f) => {
         let a = self.evaluate_value(&arguments[0])?;
-        f(context!(), &a)
+        f(context, &a)
       }
       Function::ValueBinary(f) => {
         let a = self.evaluate_value(&arguments[0])?;
         let b = self.evaluate_value(&arguments[1])?;
-        f(context!(), &a, &b)
+        f(context, &a, &b)
       }
       Function::ValueBinaryOpt(f) => {
         let a = self.evaluate_value(&arguments[0])?;
@@ -402,7 +409,7 @@ impl<'src, 'run> Evaluator<'src, 'run> {
         } else {
           None
         };
-        f(context!(), &a, b.as_ref())
+        f(context, &a, b.as_ref())
       }
       Function::BinaryOptToValue(f) => {
         let a = self.evaluate_string(&arguments[0], StringContext::Function(name))?;
@@ -411,7 +418,16 @@ impl<'src, 'run> Evaluator<'src, 'run> {
         } else {
           None
         };
-        f(context!(), &a, b.as_deref())
+        f(context, &a, b.as_deref())
+      }
+      Function::BinaryOptValueStr(f) => {
+        let a = self.evaluate_value(&arguments[0])?;
+        let b = if arguments.len() > 1 {
+          Some(self.evaluate_string(&arguments[1], StringContext::Function(name))?)
+        } else {
+          None
+        };
+        f(context, &a, b.as_deref()).map(Value::from)
       }
       Function::BinaryOptValueStrToValue(f) => {
         let a = self.evaluate_value(&arguments[0])?;
@@ -420,7 +436,7 @@ impl<'src, 'run> Evaluator<'src, 'run> {
         } else {
           None
         };
-        f(context!(), &a, b.as_deref())
+        f(context, &a, b.as_deref())
       }
     }
     .map_err(|message| Error::FunctionCall {
@@ -430,7 +446,7 @@ impl<'src, 'run> Evaluator<'src, 'run> {
   }
 
   pub(crate) fn evaluate_string(
-    &mut self,
+    &self,
     expression: &Expression<'src>,
     context: StringContext<'src>,
   ) -> RunResult<'src, String> {
@@ -443,7 +459,28 @@ impl<'src, 'run> Evaluator<'src, 'run> {
     Ok(value.join())
   }
 
-  pub(crate) fn evaluate_value(&mut self, expression: &Expression<'src>) -> RunResult<'src, Value> {
+  pub(crate) fn evaluate_value_const(
+    &self,
+    expression: &Expression<'src>,
+  ) -> CompileResult<'src, Value> {
+    assert!(self.context.is_none());
+    self
+      .evaluate_value(expression)
+      .map_err(|error| error.unwrap_const().into_compile_error())
+  }
+
+  pub(crate) fn evaluate_string_const(
+    &self,
+    expression: &Expression<'src>,
+    context: StringContext<'src>,
+  ) -> CompileResult<'src, String> {
+    assert!(self.context.is_none());
+    self
+      .evaluate_string(expression, context)
+      .map_err(|error| error.unwrap_const().into_compile_error())
+  }
+
+  pub(crate) fn evaluate_value(&self, expression: &Expression<'src>) -> RunResult<'src, Value> {
     match expression {
       Expression::And { lhs, rhs } => {
         let lhs = self.evaluate_value(lhs)?;
@@ -575,28 +612,34 @@ impl<'src, 'run> Evaluator<'src, 'run> {
         }
       }
       Expression::StringLiteral { string_literal } => Ok(string_literal.cooked.deref().into()),
-      Expression::Variable { name, .. } => {
-        let variable = name.lexeme();
-        if let Some(value) = self.scope.value(variable) {
-          Ok(value.clone())
-        } else if self.non_const_assignments.contains_key(name.lexeme()) {
+      Expression::Variable { name, number } => {
+        let Some(number) = number else {
+          return Err(Error::internal(format!(
+            "attempted to evaluate unresolved variable `{name}`"
+          )));
+        };
+
+        if self.non_const_assignments.contains(number) {
           Err(ConstError::Variable(*name).into())
-        } else if let Some(assignment) = self
-          .assignments
-          .and_then(|assignments| assignments.get(variable))
-        {
-          Ok(self.evaluate_assignment(assignment)?.clone())
+        } else if let Some(binding) = self.scope.binding(*number) {
+          Ok(binding.value.clone())
         } else {
           Err(Error::internal(format!(
-            "attempted to evaluate undefined variable `{variable}`"
+            "attempted to evaluate unevaluated variable `{name}`"
           )))
         }
       }
     }
   }
 
-  fn evaluate_boolean(&mut self, condition: &Expression<'src>) -> RunResult<'src, bool> {
-    let Expression::Comparison { lhs, operator, rhs } = condition else {
+  fn evaluate_boolean(&self, condition: &Expression<'src>) -> RunResult<'src, bool> {
+    let Expression::Comparison {
+      lhs,
+      operator,
+      rhs,
+      token,
+    } = condition
+    else {
       return Ok(self.evaluate_value(condition)?.is_truthy());
     };
     let condition = match operator {
@@ -611,7 +654,10 @@ impl<'src, 'run> Evaluator<'src, 'run> {
           .iter()
           .map(|regex| Regex::new(regex))
           .collect::<Result<Vec<Regex>, regex::Error>>()
-          .map_err(|source| Error::RegexCompile { source })?;
+          .map_err(|source| Error::RegexCompile {
+            source,
+            token: *token,
+          })?;
 
         let matched = lhs
           .elements()
@@ -635,9 +681,11 @@ impl<'src, 'run> Evaluator<'src, 'run> {
     command: &str,
     args: Option<&[String]>,
   ) -> Result<String, OutputError> {
+    assert!(!context.config.dry_run);
+
     let mut cmd = context.module.settings.shell_command(context.config);
 
-    cmd.arg(command);
+    cmd.shell_arg(command);
 
     if let Some(args) = args {
       if ShellKind::from(&cmd).takes_shell_name() {
@@ -674,7 +722,7 @@ impl<'src, 'run> Evaluator<'src, 'run> {
   }
 
   pub(crate) fn evaluate_line(
-    &mut self,
+    &self,
     line: &Line<'src>,
     continued: bool,
   ) -> RunResult<'src, String> {
@@ -745,17 +793,27 @@ impl<'src, 'run> Evaluator<'src, 'run> {
             recipe: recipe.name(),
           });
         }
-      } else if let Some(value) = &parameter.value {
-        evaluator.evaluate_value(value)?
+      } else if let Some(value) = &parameter.value
+        && !evaluator.is_dependency
+      {
+        iter::repeat_n(
+          evaluator.evaluate_value(value)?.elements(),
+          argument.elements().len(),
+        )
+        .flatten()
+        .cloned()
+        .collect()
       } else {
         argument.clone()
       };
 
-      for element in value.elements() {
+      parameter.check_value_count(recipe, &value)?;
+
+      for element in &value {
         parameter.check_pattern_match(recipe, element)?;
       }
 
-      if parameter.kind.is_variadic() {
+      if parameter.kind.is_variadic() || parameter.multiple {
         positional.extend(value.elements().iter().cloned());
       } else {
         positional.push(value.join());
@@ -768,6 +826,7 @@ impl<'src, 'run> Evaluator<'src, 'run> {
       };
 
       evaluator.scope.bind(Binding {
+        attributes: AttributeSet::new(),
         eager: false,
         export: parameter.export,
         file_depth: 0,
@@ -795,7 +854,7 @@ impl<'src, 'run> Evaluator<'src, 'run> {
       env,
       is_dependency,
       lists: context.module.settings.lists,
-      non_const_assignments: Table::new(),
+      non_const_assignments: HashSet::new(),
       overrides: context.overrides,
       recipe,
       recursion_depth: 0,

@@ -2,36 +2,36 @@ use {super::*, CompileErrorKind::*};
 
 pub(crate) struct RecipeResolver<'src: 'run, 'run> {
   absent_modules: &'run BTreeSet<String>,
-  assignments: &'run Table<'src, Assignment<'src>>,
   disabled_recipes: Table<'src, Disabled<'src>>,
-  functions: &'run Table<'src, FunctionDefinition<'src>>,
+  evaluator: &'run mut Evaluator<'src, 'run>,
   modulepath: &'run Modulepath,
   modules: &'run Table<'src, Justfile<'src>>,
   resolved_recipes: Table<'src, Arc<Recipe<'src>>>,
   settings: &'run Settings,
   unresolved_recipes: Table<'src, UnresolvedRecipe<'src>>,
+  variable_resolver: &'run VariableResolver<'src, 'run>,
 }
 
 impl<'src: 'run, 'run> RecipeResolver<'src, 'run> {
   pub(crate) fn resolve_recipes(
     absent_modules: &'run BTreeSet<String>,
-    assignments: &'run Table<'src, Assignment<'src>>,
-    functions: &'run Table<'src, FunctionDefinition<'src>>,
+    evaluator: &'run mut Evaluator<'src, 'run>,
     modulepath: &'run Modulepath,
     modules: &'run Table<'src, Justfile<'src>>,
     settings: &'run Settings,
     unresolved_recipes: Table<'src, UnresolvedRecipe<'src>>,
+    variable_resolver: &'run VariableResolver<'src, 'run>,
   ) -> CompileResult<'src, (Table<'src, Arc<Recipe<'src>>>, Table<'src, Disabled<'src>>)> {
     let mut resolver = Self {
       absent_modules,
-      assignments,
       disabled_recipes: Table::new(),
-      functions,
+      evaluator,
       modulepath,
       modules,
       resolved_recipes: Table::new(),
       settings,
       unresolved_recipes,
+      variable_resolver,
     };
 
     while let Some(unresolved) = resolver.unresolved_recipes.pop() {
@@ -45,7 +45,7 @@ impl<'src: 'run, 'run> RecipeResolver<'src, 'run> {
     &mut self,
     stack: &mut Vec<&'src str>,
     recipe: UnresolvedRecipe<'src>,
-  ) -> CompileResult<'src, Resolution<'src>> {
+  ) -> CompileResult<'src, Resolution<Arc<Recipe<'src>>>> {
     if let Some(resolved) = self.resolved_recipes.get(recipe.name()) {
       return Ok(Resolution::Resolved(Arc::clone(resolved)));
     }
@@ -77,11 +77,11 @@ impl<'src: 'run, 'run> RecipeResolver<'src, 'run> {
 
     if disabled_by.is_empty() {
       let resolved = Arc::new(recipe.resolve(
-        self.assignments,
-        self.functions,
+        self.evaluator,
         self.modulepath,
         dependencies,
         self.settings,
+        self.variable_resolver,
       )?);
       self.resolved_recipes.insert(Arc::clone(&resolved));
       Ok(Resolution::Resolved(resolved))
@@ -99,17 +99,17 @@ impl<'src: 'run, 'run> RecipeResolver<'src, 'run> {
     dependency: &UnresolvedDependency<'src>,
     recipe: &UnresolvedRecipe<'src>,
     stack: &mut Vec<&'src str>,
-  ) -> CompileResult<'src, Option<Resolution<'src>>> {
+  ) -> CompileResult<'src, Option<Resolution<Arc<Recipe<'src>>>>> {
     let name = dependency.recipe.last().lexeme();
 
     if dependency.recipe.components() > 1 {
       // recipe is in a submodule and is thus already resolved
-      Ok(Resolution::resolve(
+      Ok(Resolution::resolve_recipe(
         &dependency.recipe,
-        self.modules,
         self.absent_modules,
-        &self.resolved_recipes,
         &self.disabled_recipes,
+        self.modules,
+        &self.resolved_recipes,
       ))
     } else if let Some(resolved) = self.resolved_recipes.get(name) {
       // recipe is the current module and has already been resolved
@@ -119,8 +119,7 @@ impl<'src: 'run, 'run> RecipeResolver<'src, 'run> {
       Ok(Some(Resolution::Disabled(disabled.modules.clone())))
     } else if stack.contains(&name) {
       // recipe depends on itself
-      let first = stack[0];
-      stack.push(first);
+      stack.push(name);
       Err(
         dependency.recipe.last().error(CircularRecipeDependency {
           recipe: recipe.name(),

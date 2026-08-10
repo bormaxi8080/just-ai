@@ -110,7 +110,11 @@ Yay, all your tests passed!
 - Errors are specific and informative, and syntax errors are reported along
   with their source context.
 
-- Recipes can accept [command line arguments](#recipe-parameters).
+- Recipes can accept [command line arguments](#recipe-parameters), including
+  [flags and options](#recipe-flags-and-options).
+
+- `just` has a rich [expression language](#expressions) and many
+  built-in-functions.
 
 - Wherever possible, errors are resolved statically. Unknown recipes and
   circular dependencies are reported before anything runs.
@@ -128,6 +132,9 @@ Yay, all your tests passed!
 
 - `just` can be invoked from any subdirectory, not just the directory that
   contains the `justfile`.
+
+- `justfiles` can be organized into multiple files using [modules](#modules)
+  and [imports](#imports).
 
 - And [much more](https://just.systems/man/en/)!
 
@@ -250,6 +257,11 @@ most Windows users.)
       <td><a href=https://snapcraft.io>Snap</a></td>
       <td><a href=https://snapcraft.io/just>just</a></td>
       <td><code>snap install --edge --classic just</code></td>
+    </tr>
+    <tr>
+      <td><a href=https://spack.io/>Spack</a></td>
+      <td><a href=https://packages.spack.io/package.html?name=just>just</a></td>
+      <td><code>spack install just</code></td>
     </tr>
     <tr>
       <td><a href=https://docs.astral.sh/uv/>uv</a></td>
@@ -561,6 +573,27 @@ default, which can be suppressed by passing the `--unstable` flag,
 `set unstable`, or setting the environment variable `JUST_UNSTABLE` to any
 value other than `false`, `0`, or the empty string.
 
+### Requiring a Minimum Just Version
+
+If you use features of `just` which require a particular version, you may use
+the `minimum-version`<sup>1.55.0</sup> setting to make it an error to use older
+versions of `just`:
+
+```justfile
+set minimum-version := '1.55.0'
+```
+
+If `just` encounters a minimum version greater than its own version, it will
+print an error message with the required version, which is hopefully better
+than the confused error message it would have otherwise produced.
+
+The `minimum-version` setting should be placed at the top of the `justfile`,
+before any usage of the new feature that it guards.
+
+Any features which change the lexer in forward-incompatible ways will still
+produce an unhelpful error message, as the minimum version check is implemented
+in the parser, which runs after the lexer.
+
 Editor Support
 --------------
 
@@ -793,8 +826,8 @@ A variety of `justfile`s can be found in the
 [examples directory](https://github.com/casey/just/tree/master/examples) and on
 [GitHub](https://github.com/search?q=path%3A**%2Fjustfile&type=code).
 
-Features
---------
+Recipes
+-------
 
 ### The Default Recipe
 
@@ -832,685 +865,444 @@ If no recipe makes sense as the default recipe, you can use
 set default-list := true
 ```
 
-### Listing Available Recipes
+### Recipe Parameters
 
-Recipes can be listed in alphabetical order with `just --list`:
-
-```console
-$ just --list
-Available recipes:
-    build
-    test
-    deploy
-    lint
-```
-
-Recipes in [submodules](#modules) can be listed with `just --list PATH`, where
-`PATH` is a space- or `::`-separated module path:
-
-```
-$ cat justfile
-mod foo
-$ cat foo.just
-mod bar
-$ cat bar.just
-baz:
-$ just --list foo bar
-Available recipes:
-    baz
-$ just --list foo::bar
-Available recipes:
-    baz
-```
-
-`just --summary` is more concise:
-
-```console
-$ just --summary
-build test deploy lint
-```
-
-Pass `--unsorted` to print recipes in the order they appear in the `justfile`:
+Recipes may have parameters. Here recipe `build` has a parameter called
+`target`:
 
 ```just
-test:
-  echo 'Testing!'
-
-build:
-  echo 'Building!'
+build target:
+  @echo 'Building {{target}}…'
+  cd {{target}} && make
 ```
+
+To pass arguments on the command line, put them after the recipe name:
 
 ```console
-$ just --list --unsorted
-Available recipes:
-    test
-    build
+$ just build my-awesome-project
+Building my-awesome-project…
+cd my-awesome-project && make
 ```
 
-```console
-$ just --summary --unsorted
-test build
-```
-
-If you'd like `just` to default to listing the recipes in the `justfile`, set
-`default-list`<sup>1.52.0</sup>:
+To pass arguments to a dependency, put the dependency in parentheses along with
+the arguments:
 
 ```just
-set default-list := true
+default: (build "main")
+
+build target:
+  @echo 'Building {{target}}…'
+  cd {{target}} && make
 ```
 
-The setting is per-module, so invoking a module path with `default-list`
-enabled lists that module's recipes.
-
-You can also default to listing recipes this behavior by settting the
-environment variable `JUST_DEFAULT_LIST=true` or passing
-`--default-list`<sup>1.52.0</sup>.
-
-
-The heading text can be customized with `--list-heading`:
-
-```console
-$ just --list --list-heading $'Cool stuff…\n'
-Cool stuff…
-    test
-    build
-```
-
-And the indentation can be customized with `--list-prefix`:
-
-```console
-$ just --list --list-prefix ····
-Available recipes:
-····test
-····build
-```
-
-The argument to `--list-heading` replaces both the heading and the newline
-following it, so it should contain a newline if non-empty. It works this way so
-you can suppress the heading line entirely by passing the empty string:
-
-```console
-$ just --list --list-heading ''
-    test
-    build
-```
-
-### Invoking Multiple Recipes
-
-Multiple recipes may be invoked on the command line at once:
+Variables can also be passed as arguments to dependencies:
 
 ```just
-build:
-  make web
+target := "main"
 
-serve:
-  python3 -m http.server -d out 8000
+_build version:
+  @echo 'Building {{version}}…'
+  cd {{version}} && make
+
+build: (_build target)
 ```
 
-```console
-$ just build serve
-make web
-python3 -m http.server -d out 8000
-```
-
-Keep in mind that recipes with parameters will swallow arguments, even if they
-match the names of other recipes:
+A command's arguments can be passed to a dependency by putting the dependency in
+parentheses along with the arguments:
 
 ```just
-build project:
-  make {{project}}
+build target:
+  @echo "Building {{target}}…"
 
-serve:
-  python3 -m http.server -d out 8000
+push target: (build target)
+  @echo 'Pushing {{target}}…'
 ```
 
-```console
-$ just build serve
-make: *** No rule to make target `serve'.  Stop.
-```
-
-The `--one` flag can be used to restrict command-line invocations to a single
-recipe:
-
-```console
-$ just --one build serve
-error: Expected 1 command-line recipe invocation but found 2.
-```
-
-### Working Directory
-
-By default, recipes run with the working directory set to the directory that
-contains the `justfile`.
-
-The `[no-cd]` attribute can be used to make recipes run with the working
-directory set to the directory in which `just` was invoked.
+Parameters may have default values:
 
 ```just
-@foo:
-  pwd
+default := 'all'
 
-[no-cd]
-@bar:
-  pwd
+test target tests=default:
+  @echo 'Testing {{target}}:{{tests}}…'
+  ./test --tests {{tests}} {{target}}
+```
+
+Parameters with default values may be omitted:
+
+```console
+$ just test server
+Testing server:all…
+./test --tests all server
+```
+
+Or supplied:
+
+```console
+$ just test server unit
+Testing server:unit…
+./test --tests unit server
+```
+
+Default values may be arbitrary expressions, but expressions containing the
+`+`, `&&`, `||`, or `/` operators must be parenthesized:
+
+```just
+arch := "wasm"
+
+test triple=(arch + "-unknown-unknown") input=(arch / "input.dat"):
+  ./test {{triple}}
+```
+
+The last parameter of a recipe may be variadic, indicated with either a `+` or
+a `*` before the argument name:
+
+```just
+backup +FILES:
+  scp {{FILES}} me@server.com:
+```
+
+Variadic parameters prefixed with `+` accept _one or more_ arguments and expand
+to a string containing those arguments separated by spaces:
+
+```console
+$ just backup FAQ.md GRAMMAR.md
+scp FAQ.md GRAMMAR.md me@server.com:
+FAQ.md                  100% 1831     1.8KB/s   00:00
+GRAMMAR.md              100% 1666     1.6KB/s   00:00
+```
+
+Variadic parameters prefixed with `*` accept _zero or more_ arguments and
+expand to a string containing those arguments separated by spaces, or an empty
+string if no arguments are present:
+
+```just
+commit MESSAGE *FLAGS:
+  git commit {{FLAGS}} -m "{{MESSAGE}}"
+```
+
+Variadic parameters can be assigned default values. These are overridden by
+arguments passed on the command line:
+
+```just
+test +FLAGS='-q':
+  cargo test {{FLAGS}}
+```
+
+The number of arguments a variadic parameter accepts may be limited with the
+`[arg(ARG, min=MIN)]` and `[arg(ARG, max=MAX)]` attributes<sup>1.56.0</sup>,
+which require lists to be enabled:
+
+```just
+set unstable
+set lists
+
+[arg('FILES', min='2', max='4')]
+backup +FILES:
+  scp {{FILES}} me@server.com:
+```
+
+`min` and `max` also apply to default values.
+
+`{{…}}` substitutions may need to be quoted if they contain spaces. For
+example, if you have the following recipe:
+
+```just
+search QUERY:
+  lynx https://www.google.com/?q={{QUERY}}
+```
+
+And you type:
+
+```console
+$ just search "cat toupee"
+```
+
+`just` will run the command `lynx https://www.google.com/?q=cat toupee`, which
+will get parsed by `sh` as `lynx`, `https://www.google.com/?q=cat`, and
+`toupee`, and not the intended `lynx` and `https://www.google.com/?q=cat toupee`.
+
+You can fix this by adding quotes:
+
+```just
+search QUERY:
+  lynx 'https://www.google.com/?q={{QUERY}}'
+```
+
+Parameters prefixed with a `$` will be exported as environment variables:
+
+```just
+foo $bar:
+  echo $bar
+```
+
+Parameters may be constrained to match regular expression patterns using the
+`[arg("name", pattern=PATTERN)]` attribute<sup>1.45.0</sup>:
+
+```just
+[arg('n', pattern='\d+')]
+double n:
+  echo $(({{n}} * 2))
+```
+
+The value of `pattern` may be a const expression<sup>1.55.0</sup>.
+
+A leading `^` and trailing `$` are added to the pattern, so it must match the
+entire argument value.
+
+You may constrain the pattern to a number of alternatives using the `|`
+operator:
+
+```just
+[arg('flag', pattern='--help|--version')]
+info flag:
+  just {{flag}}
+```
+
+Regular expressions are provided by the
+[Rust `regex` crate](https://docs.rs/regex/latest/regex/). See the
+[syntax documentation](https://docs.rs/regex/latest/regex/#syntax) for usage
+examples.
+
+Usage information for a recipe may be printed with the `--usage`
+subcommand<sup>1.46.0</sup>:
+
+```console
+$ just --usage foo
+Usage: just foo [OPTIONS] bar
+
+Arguments:
+  bar
+```
+
+Help strings may be added to arguments using the `[arg(ARG, help=HELP)]` attribute:
+
+```just
+[arg("bar", help="hello")]
+foo bar:
+```
+
+The value `help` may be a const expression<sup>1.55.0</sup>.
+
+```console
+$ just --usage foo
+Usage: just foo bar
+
+Arguments:
+  bar hello
+```
+
+#### Recipe Flags and Options
+
+Recipe parameters are positional by default.
+
+In this `justfile`:
+
+```just
+@foo bar:
+  echo bar={{bar}}
+```
+
+The parameter `bar` is positional:
+
+```console
+$ just foo hello
+bar=hello
+```
+
+The `[arg(ARG, long=OPTION)]`<sup>1.46.0</sup> attribute can be used to make a
+parameter a long option.
+
+In this `justfile`:
+
+```just
+[arg("bar", long="bar")]
+foo bar:
+```
+
+The parameter `bar` is given with the `--bar` option:
+
+```console
+$ just foo --bar hello
+bar=hello
+```
+
+Options may also be passed with `--name=value` syntax:
+
+```console
+$ just foo --bar=hello
+bar=hello
+```
+
+The value of `long` may be omitted, in which case the option defaults to the
+name of the parameter. With the following justfile, `bar` may be passed with
+`--bar`:
+
+```just
+[arg("bar", long)]
+foo bar:
+```
+
+The `[arg(ARG, short=OPTION)]`<sup>1.46.0</sup> attribute can be used to make a
+parameter a short option.
+
+In this `justfile`:
+
+```just
+[arg("bar", short="b")]
+foo bar:
+```
+
+The parameter `bar` is given with the `-b` option:
+
+```console
+$ just foo -b hello
+bar=hello
+```
+
+The value of `short` may be omitted, in which case the option defaults to the
+first character of the name of the parameter. With the following justfile,
+`bar` may be passed with `-b`:
+
+```just
+[arg("bar", short)]
+foo bar:
+```
+
+If a parameter has both a long and short option, it may be passed using either.
+
+Multiple short options may be combined<sup>1.55.0</sup>, for example `-abc` is
+equivalent to `-a -b -c`. A short option which takes a value may appear last,
+for example `-abcd VALUE`.
+
+Variadic `*` and `+` parameters may be options, in which case the option is
+repeatable, with each occurrence contributing one value:
+
+```just
+[arg('file', long)]
+backup +file:
+  scp {{file}} me@server.com:
 ```
 
 ```console
-$ cd subdir
+$ just backup --file FAQ.md --file GRAMMAR.md
+scp FAQ.md GRAMMAR.md me@server.com:
+```
+
+As with positional variadic parameters, `+` options must be passed at least
+once, whereas `*` options may be omitted.
+
+The `[arg(ARG, value=VALUE, …)]`<sup>1.46.0</sup> attribute can be used with
+`long` or `short` to make a parameter a flag which does not take a value.
+`VALUE` may be an expression<sup>1.54.0</sup>.
+
+In this `justfile`:
+
+```just
+[arg("bar", long="bar", value="hello")]
+foo bar:
+```
+
+The parameter `bar` is given with the `--bar` option, but does not take a
+value, and instead takes the value given in the `[arg]` attribute:
+
+```console
+$ just foo --bar
+bar=hello
+```
+
+This is useful for unconditionally requiring a flag like `--force` on dangerous
+commands.
+
+A flag is optional if its parameter has a default:
+
+```just
+[arg("bar", long="bar", value="hello")]
+foo bar="goodbye":
+```
+
+Causing it to receive the default when not passed in the invocation:
+
+```console
 $ just foo
-/
-$ just bar
-/subdir
+bar=goodbye
 ```
 
-Use `set no-cd`<sup>1.51.0</sup> to make all recipes in the current module
-default to the same behavior.
+### Avoiding Argument Splitting
 
-`set no-cd` and `set working-directory` can be overridden on a per-recipe basis
-with the `[no-cd]` and `[working-directory]` attributes.
-
-You can override the working directory for all recipes with
-`set working-directory := '…'`:
+Given this `justfile`:
 
 ```just
-set working-directory := 'bar'
-
-@foo:
-  pwd
+foo argument:
+  touch {{argument}}
 ```
+
+The following command will create two files, `some` and `argument.txt`:
 
 ```console
-$ pwd
-/home/bob
-$ just foo
-/home/bob/bar
+$ just foo "some argument.txt"
 ```
 
-You can override the working directory for a specific recipe with the
-`working-directory` attribute<sup>1.38.0</sup>:
+The user's shell will parse `"some argument.txt"` as a single argument, but
+when `just` replaces `touch {{argument}}` with `touch some argument.txt`, the
+quotes are not preserved, and `touch` will receive two arguments.
+
+There are a few ways to avoid this: quoting, positional arguments, and exported
+arguments.
+
+#### Quoting
+
+Quotes can be added around the `{{argument}}` interpolation:
 
 ```just
-[working-directory: 'bar']
-@foo:
-  pwd
+foo argument:
+  touch '{{argument}}'
 ```
 
-```console
-$ pwd
-/home/bob
-$ just foo
-/home/bob/bar
-```
+This preserves `just`'s ability to catch variable name typos before running,
+for example if you were to write `{{argument}}`, but will not do what you want
+if the value of `argument` contains single quotes.
 
-The argument to the `working-directory` setting or `working-directory`
-attribute may be an expression<sup>1.51.0</sup> whose value is absolute or
-relative. If it is relative it is interpreted relative to the default working
-directory.
+#### Positional Arguments
 
-### Aliases
-
-Aliases allow recipes to be invoked on the command line with alternative names:
+The `positional-arguments` setting causes all arguments to be passed as
+positional arguments, allowing them to be accessed with `$1`, `$2`, …, and
+`$@`, which can then be double-quoted to avoid further splitting by the shell:
 
 ```just
-alias b := build
+set positional-arguments
 
-build:
-  echo 'Building!'
+foo argument:
+  touch "$1"
 ```
 
-```console
-$ just b
-echo 'Building!'
-Building!
-```
+This defeats `just`'s ability to catch typos, for example if you type `$2`
+instead of `$1`, but works for all possible values of `argument`, including
+those with double quotes.
 
-The target of an alias may be a recipe in a submodule:
+#### Exported Arguments
 
-```justfile
-mod foo
-
-alias baz := foo::bar
-```
-
-### Settings
-
-Settings control interpretation and execution. Each setting may be specified at
-most once, anywhere in the `justfile`.
-
-For example:
-
-```just
-set shell := ["zsh", "-cu"]
-
-foo:
-  # this line will be run as `zsh -cu 'ls **/*.txt'`
-  ls **/*.txt
-```
-
-#### Table of Settings
-
-| Name | Value | Default | Description |
-|------|-------|---------|-------------|
-| `allow-duplicate-recipes` | boolean | `false` | Allow recipes appearing later in a `justfile` to override earlier recipes with the same name. |
-| `allow-duplicate-variables` | boolean | `false` | Allow variables appearing later in a `justfile` to override earlier variables with the same name. |
-| `default-list` | boolean | `false` | List recipes instead of running the default recipe. |
-| `default-script`<sup>1.52.0</sup> | boolean | `false` | Default recipes to script instead of shell. |
-| `dotenv-command`<sup>1.54.0</sup> | string | - | Run a command and load its output as an environment file. |
-| `dotenv-filename` | string | - | Load a `.env` file with a custom name, if present. |
-| `dotenv-load` | boolean | `false` | Load a `.env` file, if present. |
-| `dotenv-override` | boolean | `false` | Override existing environment variables with values from the `.env` file. |
-| `dotenv-path` | string | - | Load a `.env` file from a custom path and error if not present. Overrides `dotenv-filename`. |
-| `dotenv-required` | boolean | `false` | Error if a `.env` file isn't found. |
-| `export` | boolean | `false` | Export all variables as environment variables. |
-| `fallback` | boolean | `false` | Search `justfile` in parent directory if the first recipe on the command line is not found. |
-| `ignore-comments` | boolean | `false` | Ignore recipe lines beginning with `#`. |
-| `lazy`<sup>1.47.0</sup> | boolean | `false` | Don't evaluate unused variables. |
-| `lists`<sup>1.53.0</sup> | boolean | `false` | Values may be lists of strings instead of strings. Currently unstable. |
-| `no-cd`<sup>1.51.0</sup> | boolean | `false` | Don't change directory when executing recipes by recipe attribute. |
-| `no-exit-message`<sup>1.39.0</sup> | boolean | `false` | Don't print exit messages if recipes fail. |
-| `positional-arguments` | boolean | `false` | Pass positional arguments. |
-| `quiet` | boolean | `false` | Disable echoing recipe lines before executing. |
-| `script-interpreter`<sup>1.33.0</sup> | `[COMMAND, ARGS…]` | `['sh', '-eu']` | Set command used to invoke recipes with empty `[script]` attribute. |
-| `shell` | `[COMMAND, ARGS…]` | - | Set command used to invoke recipes and evaluate backticks. |
-| `tempdir` | string | - | Create temporary directories in `tempdir` instead of the system default temporary directory. |
-| `unstable`<sup>1.31.0</sup> | boolean | `false` | Enable unstable features. |
-| `windows-powershell` | boolean | `false` | Use PowerShell on Windows as default shell. (Deprecated. Use `windows-shell` instead.) |
-| `windows-shell` | `[COMMAND, ARGS…]` | - | Set the command used to invoke recipes and evaluate backticks. |
-| `working-directory`<sup>1.33.0</sup> | string | - | Set the working directory for recipes and backticks, relative to the default working directory. |
-
-Boolean settings can be written as:
-
-```justfile
-set NAME
-```
-
-Which is equivalent to:
-
-```justfile
-set NAME := true
-```
-
-Non-boolean settings can be set to both strings and
-expressions<sup>1.46.0</sup>.
-
-However, because settings affect the behavior of backticks and many functions,
-those expressions may not contain backticks or function calls, directly or
-transitively via reference.
-
-#### Allow Duplicate Recipes
-
-If `allow-duplicate-recipes` is set to `true`, defining multiple recipes with
-the same name is not an error and the last definition is used. Defaults to
-`false`.
-
-```just
-set allow-duplicate-recipes
-
-@foo:
-  echo foo
-
-@foo:
-  echo bar
-```
-
-```console
-$ just foo
-bar
-```
-
-#### Allow Duplicate Variables
-
-If `allow-duplicate-variables` is set to `true`, defining multiple variables
-with the same name is not an error and the last definition is used. Defaults to
-`false`.
-
-```just
-set allow-duplicate-variables
-
-a := "foo"
-a := "bar"
-
-@foo:
-  echo {{a}}
-```
-
-```console
-$ just foo
-bar
-```
-
-#### Dotenv Settings
-
-If any of `dotenv-load`, `dotenv-filename`, `dotenv-override`, `dotenv-path`,
-or `dotenv-required` are set, `just` will try to load environment variables
-from a file.
-
-If `dotenv-path` is set, `just` will look for a file at the given path, which
-may be absolute, or relative to the working directory.
-
-The command-line option `--dotenv-path`, short form `-E`, can be used to set or
-override `dotenv-path` at runtime.
-
-If `dotenv-filename` is set, `just` will look for a file at the given path,
-relative to the working directory and each of its ancestors.
-
-If `dotenv-filename` is not set, but `dotenv-load` or `dotenv-required` are
-set, `just` will look for a file named `.env`, relative to the working directory
-and each of its ancestors.
-
-`dotenv-filename` and `dotenv-path` are similar, but `dotenv-path` is only
-checked relative to the working directory, whereas `dotenv-filename` is checked
-relative to the working directory and each of its ancestors.
-
-It is not an error if an environment file is not found, unless
-`dotenv-required` is set.
-
-The loaded variables are environment variables, not `just` variables, and so
-must be accessed using `$VARIABLE_NAME` in recipes and backticks.
-
-If `dotenv-override` is set, variables from the environment file will override
-existing environment variables.
-
-If `dotenv-command` is set, `just` runs it with the configured `shell` and loads
-its standard output as an environment file.
-
-This is useful for sourcing secrets from a secret manager or vault:
-
-```just
-set dotenv-command := 'sops -d .enc.env'
-```
-
-The command-line option `--dotenv-command` can be used to set or override
-`dotenv-command` at runtime, and may be passed multiple times. Each value is
-run as a command, with variables from later commands taking precedence over
-variables from earlier commands.
-
-For example, if your `.env` file contains:
-
-```console
-# a comment, will be ignored
-DATABASE_ADDRESS=localhost:6379
-SERVER_PORT=1337
-```
-
-And your `justfile` contains:
-
-```just
-set dotenv-load
-
-serve:
-  @echo "Starting server with database $DATABASE_ADDRESS on port $SERVER_PORT…"
-  ./server --database $DATABASE_ADDRESS --port $SERVER_PORT
-```
-
-`just serve` will output:
-
-```console
-$ just serve
-Starting server with database localhost:6379 on port 1337…
-./server --database $DATABASE_ADDRESS --port $SERVER_PORT
-```
-
-Variables in environment files loaded in parent modules are inherited by
-submodules.
-
-Environment files are loaded in submodules<sup>1.49.0</sup> and may override
-variables defined in parent module environment files.
-
-#### Export
-
-The `export` setting causes all `just` variables to be exported as environment
-variables. Defaults to `false`.
+All arguments are exported when the `export` setting is set:
 
 ```just
 set export
 
-a := "hello"
-
-@foo b:
-  echo $a
-  echo $b
+foo argument:
+  touch "$argument"
 ```
 
-```console
-$ just foo goodbye
-hello
-goodbye
-```
-
-#### Lazy
-
-The `lazy` setting<sup>1.47.0</sup> causes the evaluator to skip evaluating
-unused variables. This can be beneficial when a `justfile` contains variables
-that are expensive to evaluate but only sometimes used.
-
-In the following `justfile`, `token` will be skipped when only invoking `bar`:
+Or individual arguments may be exported by prefixing them with `$`:
 
 ```just
-set lazy
-
-token := `expensive-script-to-get-credentials`
-
-foo:
-  curl -H "Authorization: Bearer {{ token }}" https://example.com/foo
-
-bar:
-  cargo test
+foo $argument:
+  touch "$argument"
 ```
 
-Because `just` cannot determine when exported variables are used, assignments
-with `export` and assignments in a module with `set export` will always be
-evaluated.
+This defeats `just`'s ability to catch typos, for example if you type
+`$argument`, but works for all possible values of `argument`, including those
+with double quotes.
 
-#### Lists
-
-The `lists` setting<sup>1.53.0</sup> allows values that are lists of strings.
-It is currently unstable and will change in backwards incompatible ways. This
-section documents changes in behavior when `set lists` is enabled.
-
-It has not yet been decided how lists should behave with many of the built-in
-functions. Functions that have been updated to accept lists are mentioned in
-this section. Using lists with any other function is an error. The
-`join_list()` function can be used to convert lists into space-separated
-strings for use with un-upgraded functions. Feedback on how built-in functions
-should behave with lists, and on lists in general, is most welcome! Feel free
-to open an issue or leave a comment in the
-[`set lists` tracking issue](https://github.com/casey/just/issues/3377).
-
-Variadic recipe parameters are lists of strings instead of single
-space-separated strings.
-
-List literals are written `[a, b, c]`. List literals flatten their arguments,
-since lists may only contain strings and not other lists. For example,
-`[["a", "b"], [], "c"]` evaluates to `["a", "b", "c"]`.
-
-Lists in recipe and `f`-string interpolations are joined with spaces into a
-single string.
-
-Each argument to a dependency binds to exactly one parameter, and supplying
-extra arguments to a variadic dependency is an error.
-
-Dependencies may be invoked once per element of a list with
-`*(recipe *argument)`.
-
-A parameter evaluates to the default when the argument is the empty list.
-
-Passing an empty list to a non-`*` parameter without a default is an error.
-
-The `else` of an `if` may be omitted, in which case the `if` evaluates to `[]`
-when its condition is false.
-
-Message values in `assert(condition, message)` and `[confirm(message)]` are
-space-joined for display.
-
-The `+` and `/` operators combine strings and lists. A string and a non-empty
-list are combined by concatenating the string with each element of the list.
-Two lists of the same length are combined into a list containing the pairwise
-concatenated elements of both operands. Combining two lists of different
-lengths is an error.
-
-The `++` operator performs list concatenation.
-
-##### Booleans
-
-The canonical boolean true value is the string `"true"`, and the canonical
-boolean false value is the empty list `[]`. All values other than the empty
-list are truthy, including `''`.
-
-The condition of an `if` or `assert()` may be any expression, which is
-evaluated for truthiness.
-
-The comparison operators `==`, `!=`, `=~`, and `!~` may be used anywhere, not
-just in `if` and `assert()`, and evaluate to `"true"` or `[]`.
-
-`value =~ regexes` is true if any element in `value` matches any regex in
-`regexes`. It is false if either `value` or `regexes` is empty.
-
-`value !~ regexes` is true if no element in `value` matches any regex in
-`regexes`. It is true if either `value` or `regexes` is empty.
-
-Values may be negated with `!`. `!expression` evaluates to `"true"` if
-`expression` is `[]`, otherwise it evaluates to `[]`.
-
-##### Settings
-
-The `script-interpreter`, `shell`, and `windows-shell` settings flatten their
-elements like list literals.
-
-When `positional-arguments` is set, list arguments are space-joined unless they
-are variadic, in which case they are passed as one positional argument per
-element.
-
-The `--dotenv-filename` and `--dotenv-path` options may be passed multiple
-times, and the `dotenv-filename` and `dotenv-path` settings accept lists, in
-which case multiple environment files may be loaded. The values of
-`dotenv-path` are tried first. If none are found the current directory is
-searched for the names in `dotenv-filename`, followed by its ancestors,
-stopping in the first directory that contains any of them and loading all
-matching files in that directory. If multiple environment files are loaded,
-variables in files later in list take precedence over earlier ones.
-
-Each element of the value of `set dotenv-command` is run as a command, with
-variables from commands later in the list taking precedence over variables from
-commands earlier in the list.
-
-##### Attributes
-
-The `[arg]` `flag` attribute makes the parameter a flag which does not take a
-value on the command line. For example, with `[arg('foo', long, flag)]`, `foo`
-will be `"true"` when `--foo` is passed, and `[]` otherwise. Flag parameters may
-not have a default.
-
-In `[env(variable, value)]` if `value` is `[]`, `variable` is not set.
-Otherwise it is set to `value` joined with spaces.
-
-##### Functions
-
-- `absolute_path()` - Applies to each list element individually.
-- `append()` - Applies to each list element individually and does not split
-  elements on whitespace.
-- `assert(condition, message)` - Evaluates to `condition`.
-- `bool(value)` Converts `value` to the canonical boolean values. Returns `[]`
-  when `value` is `""` `"0"` `"false"`, or `[]`, and `"true"` when `value` is
-  `"1"` or `"true"`. All other values are an error. Can be used to parse
-  booleans passed as arguments or environment variables.
-- `env(keys, default)` Checks for the environment variables named in `keys` in
-  order and returns the value of the first that is set. Returns `default` if
-  none are set or an error if `default` is omitted.
-- `is_dependency()` - Returns the canonical booleans.
-- `join_list(value, separator)` - Joins `value` into a single string. Elements
-  are joined with `separator`, or with a single space if `separator` is
-  omitted.
-- `path_exists()` - Returns the canonical booleans.
-- `prepend()` - Applies to each list element individually and does not split
-  elements on whitespace.
-- `quote()` - Applies to each list element individually.
-- `semver_matches()` - Returns the canonical booleans.
-- `show(value)` - Converts `value` into a string containing its literal
-  representation. Brackets are used for empty and multi-element lists, e.g.,
-  `"[]"` and `"["foo", "bar"]"`, but not single-element lists, e.g., `"foo"`.
-- `split(string, separator)` - Splits `string` into a list on each occurrence
-  of `separator`. If `separator` is omitted, `string` is split on whitespace,
-  with leading and trailing whitespace trimmed.
-- `which()` - Returns the empty list when no executable is found.
-
-##### Examples
-
-Each list element is `quote()`'ed separately:
-
-```just
-set unstable
-set lists
-
-@foo *args:
-  printf '%s\n' {{ quote(args) }}
-```
-
-```console
-$ just foo bar 'baz bob'
-bar
-baz bob
-```
-
-The return value of `quote(args)` is `'bar' 'baz bob'`, instead of
-`'bar baz bob'`, as would be the case without `set lists`.
-
-Variadic positional arguments:
-
-```just
-set unstable
-set lists
-set positional-arguments
-
-foo *args: (bar args 'bob') (baz args)
-
-@bar first second:
-  echo first=$1
-  echo second=$2
-
-@baz *args:
-  echo '$1='$1
-  echo '$2='$2
-```
-
-```console
-$ just foo one two
-first=one two
-second=bob
-$1=one
-$2=two
-```
-
-A mapped dependency is invoked once per element of its starred argument, with
-`[parallel]` to run them in parallel:
-
-```just
-set unstable
-set lists
-
-[parallel]
-build target *platform: *(compile target *platform)
-
-@compile target platform:
-  echo compiling {{ target }} for {{ platform }}…
-```
-
-```console
-$ just build x86 foo bar
-compiling foo for x86…
-compiling bar for x86…
-```
-
-The canonical false value `[]` is recommended as a default for options:
-
-```just
-set unstable
-set lists
-
-[arg('bar', long)]
-foo bar=[]:
-```
-
-#### Positional Arguments
+### Positional Arguments
 
 If `positional-arguments` is `true`, recipe arguments will be passed as
 positional arguments to commands. For shell recipes, argument `$0` will be the
@@ -1583,96 +1375,195 @@ print-args a b c:
   Write-Output @($args[1..($args.Count - 1)])
 ```
 
-#### Shell
+### Dependencies
 
-The `shell` setting controls the command used to invoke recipe lines and
-backticks. Shebang recipes are unaffected. The default shell is `sh -cu`.
+Dependencies run before recipes that depend on them:
 
 ```just
-# use python3 to execute recipe lines and backticks
-set shell := ["python3", "-c"]
+a: b
+  @echo A
 
-# use print to capture result of evaluation
-foos := `print("foo" * 4)`
+b:
+  @echo B
+```
+
+```
+$ just a
+B
+A
+```
+
+In a given invocation of `just`, a recipe with the same arguments will only run
+once, regardless of how many times it appears in the command-line invocation,
+or how many times it appears as a dependency:
+
+```just
+a:
+  @echo A
+
+b: a
+  @echo B
+
+c: a
+  @echo C
+```
+
+```
+$ just a a a a a
+A
+$ just b c
+A
+B
+C
+```
+
+Multiple recipes may depend on a recipe that performs some kind of setup, and
+when those recipes run, that setup will only be performed once:
+
+```just
+build:
+  cc main.c
+
+test-foo: build
+  ./a.out --test foo
+
+test-bar: build
+  ./a.out --test bar
+```
+
+```
+$ just test-foo test-bar
+cc main.c
+./a.out --test foo
+./a.out --test bar
+```
+
+Recipes in a given run are only skipped when they receive the same arguments:
+
+```just
+build:
+  cc main.c
+
+test TEST: build
+  ./a.out --test {{TEST}}
+```
+
+```
+$ just test foo test bar
+cc main.c
+./a.out --test foo
+./a.out --test bar
+```
+
+#### Running Recipes at the End of a Recipe
+
+Normal dependencies of a recipe always run before a recipe starts. That is to
+say, the dependee always runs before the depender. These dependencies are
+called "prior dependencies".
+
+A recipe can also have subsequent dependencies, which run immediately after the
+recipe and are introduced with an `&&`:
+
+```just
+a:
+  echo 'A!'
+
+b: a && c d
+  echo 'B!'
+
+c:
+  echo 'C!'
+
+d:
+  echo 'D!'
+```
+
+…running _b_ prints:
+
+```console
+$ just b
+echo 'A!'
+A!
+echo 'B!'
+B!
+echo 'C!'
+C!
+echo 'D!'
+D!
+```
+
+#### Running Recipes in the Middle of a Recipe
+
+`just` doesn't support running recipes in the middle of another recipe, but you
+can call `just` recursively in the middle of a recipe. Given the following
+`justfile`:
+
+```just
+a:
+  echo 'A!'
+
+b: a
+  echo 'B start!'
+  just c
+  echo 'B end!'
+
+c:
+  echo 'C!'
+```
+
+…running _b_ prints:
+
+```console
+$ just b
+echo 'A!'
+A!
+echo 'B start!'
+B start!
+echo 'C!'
+C!
+echo 'B end!'
+B end!
+```
+
+This has limitations, since recipe `c` is run with an entirely new invocation
+of `just`: Assignments will be recalculated, dependencies might run twice, and
+command line arguments will not be propagated to the child `just` process.
+
+### Parallelism
+
+Dependencies may be run in parallel with the `[parallel]` attribute.
+
+In this `justfile`, `foo`, `bar`, and `baz` will execute in parallel when
+`main` is run:
+
+```just
+[parallel]
+main: foo bar baz
 
 foo:
-  print("Snake snake snake snake.")
-  print("{{foos}}")
+  sleep 1
+
+bar:
+  sleep 1
+
+baz:
+  sleep 1
 ```
 
-`just` passes the command to be executed as an argument. Many shells will need
-an additional flag, often `-c`, to make them evaluate the first argument.
+The number of simultaneously running recipes may be limited with the `--jobs`
+option<sup>1.56.0</sup>. The `num_jobs()` function returns the number of jobs,
+falling back to the empty list if `--jobs` was not passed.
 
-##### Windows Shell
-
-`just` uses `sh` on Windows by default. To use a different shell on Windows,
-use `windows-shell`:
+GNU `parallel` may be used to run recipe lines concurrently:
 
 ```just
-set windows-shell := ["powershell.exe", "-NoLogo", "-Command"]
-
-hello:
-  Write-Host "Hello, world!"
+parallel:
+  #!/usr/bin/env -S parallel --shebang --ungroup --jobs {{ num_cpus() }}
+  echo task 1 start; sleep 3; echo task 1 done
+  echo task 2 start; sleep 3; echo task 2 done
+  echo task 3 start; sleep 3; echo task 3 done
+  echo task 4 start; sleep 3; echo task 4 done
 ```
-
-See
-[powershell.just](https://github.com/casey/just/blob/master/examples/powershell.just)
-for a justfile that uses PowerShell on all platforms.
-
-##### Windows PowerShell
-
-*`set windows-powershell` uses the legacy `powershell.exe` binary, and is no
-longer recommended. See the `windows-shell` setting above for a more flexible
-way to control which shell is used on Windows.*
-
-`just` uses `sh` on Windows by default. To use `powershell.exe` instead, set
-`windows-powershell` to true.
-
-```just
-set windows-powershell := true
-
-hello:
-  Write-Host "Hello, world!"
-```
-
-##### Python 3
-
-```just
-set shell := ["python3", "-c"]
-```
-
-##### Bash
-
-```just
-set shell := ["bash", "-uc"]
-```
-
-##### Z Shell
-
-```just
-set shell := ["zsh", "-uc"]
-```
-
-##### Fish
-
-```just
-set shell := ["fish", "-c"]
-```
-
-##### Nushell
-
-```just
-set shell := ["nu", "-c"]
-```
-
-If you want to change the default table mode to `light`:
-
-```just
-set shell := ['nu', '-m', 'light', '-c']
-```
-
-*[Nushell](https://github.com/nushell/nushell) was written in Rust, and **has
-cross-platform support for Windows / macOS and Linux**.*
 
 ### Documentation Comments
 
@@ -1715,6 +1606,221 @@ Available recipes:
     build # Build stuff
     test
 ```
+
+The value of `[doc]` may be a const expression<sup>1.56.0</sup>.
+
+### Groups
+
+Recipes and modules may be annotated with one or more group names:
+
+```just
+[group('lint')]
+js-lint:
+    echo 'Running JS linter…'
+
+[group('rust recipes')]
+[group('lint')]
+rust-lint:
+    echo 'Running Rust linter…'
+
+[group('lint')]
+cpp-lint:
+  echo 'Running C++ linter…'
+
+# not in any group
+email-everyone:
+    echo 'Sending mass email…'
+```
+
+Recipes are listed by group:
+
+```
+$ just --list
+Available recipes:
+    email-everyone # not in any group
+
+    [lint]
+    cpp-lint
+    js-lint
+    rust-lint
+
+    [rust recipes]
+    rust-lint
+```
+
+`just --list --unsorted` prints recipes in their justfile order within each group:
+
+```
+$ just --list --unsorted
+Available recipes:
+    (no group)
+    email-everyone # not in any group
+
+    [lint]
+    js-lint
+    rust-lint
+    cpp-lint
+
+    [rust recipes]
+    rust-lint
+```
+
+Groups can be listed with `--groups`:
+
+```
+$ just --groups
+Recipe groups:
+  lint
+  rust recipes
+```
+
+Use `just --groups --unsorted` to print groups in their justfile order.
+
+### Aliases
+
+Aliases allow recipes to be invoked on the command line with alternative names:
+
+```just
+alias b := build
+
+build:
+  echo 'Building!'
+```
+
+```console
+$ just b
+echo 'Building!'
+Building!
+```
+
+The target of an alias may be a recipe in a submodule:
+
+```justfile
+mod foo
+
+alias baz := foo::bar
+```
+
+Or a module<sup>1.55.0</sup>:
+
+```justfile
+mod frontend
+
+alias f := frontend
+```
+
+```console
+$ just f build
+```
+
+### Private Recipes
+
+Recipes and aliases whose name starts with a `_` are omitted from `just --list`:
+
+```just
+test: _test-helper
+  ./bin/test
+
+_test-helper:
+  ./bin/super-secret-test-helper-stuff
+```
+
+```console
+$ just --list
+Available recipes:
+    test
+```
+
+And from `just --summary`:
+
+```console
+$ just --summary
+test
+```
+
+The `[private]` attribute<sup>1.10.0</sup> may also be used to hide recipes or
+aliases without needing to change the name:
+
+```just
+[private]
+foo:
+
+[private]
+alias b := bar
+
+bar:
+```
+
+```console
+$ just --list
+Available recipes:
+    bar
+```
+
+This is useful for helper recipes which are only meant to be used as
+dependencies of other recipes.
+
+### Enabling and Disabling Items
+
+The `[android]`, `[dragonfly]`, `[freebsd]`, `[linux]`, `[macos]`, `[netbsd]`,
+`[openbsd]`, `[unix]`, and `[windows]` attributes are conditional attributes.
+By default, items are always enabled. An item with one or more conditional
+attributes will only be enabled when one or more of those conditional
+attributes is active.
+
+The conditional attributes originally applied only to recipes, but may now be
+applied to all top-level items<sup>1.56.0</sup>.
+
+This can be used to write `justfile`s that behave differently depending on
+which operating system they run on. The `run` recipe in this `justfile` will
+compile and run `main.c`, using a different C compiler and using the correct
+output binary name for that compiler depending on the operating system:
+
+```just
+[unix]
+run:
+  cc main.c
+  ./a.out
+
+[windows]
+run:
+  cl main.c
+  main.exe
+```
+
+Similarly, a setting can be made conditional on the current operating system:
+
+```just
+[unix]
+set shell := ['sh', '-cu']
+
+[windows]
+set shell := ['cmd', '/c']
+```
+
+### Allow Duplicate Recipes
+
+If `allow-duplicate-recipes` is set to `true`, defining multiple recipes with
+the same name is not an error and the last definition is used. Defaults to
+`false`.
+
+```just
+set allow-duplicate-recipes
+
+@foo:
+  echo foo
+
+@foo:
+  echo bar
+```
+
+```console
+$ just foo
+bar
+```
+
+Expressions
+-----------
 
 ### Variables and Assignments
 
@@ -1770,6 +1876,51 @@ $ just --evaluate --evaluate-format just
 bar := "world"
 foo := "hello"
 ```
+
+### Allow Duplicate Variables
+
+If `allow-duplicate-variables` is set to `true`, defining multiple variables
+with the same name is not an error and the last definition is used. Defaults to
+`false`.
+
+```just
+set allow-duplicate-variables
+
+a := "foo"
+a := "bar"
+
+@foo:
+  echo {{a}}
+```
+
+```console
+$ just foo
+bar
+```
+
+### Lazy
+
+The `lazy` setting<sup>1.47.0</sup> causes the evaluator to skip evaluating
+unused variables. This can be beneficial when a `justfile` contains variables
+that are expensive to evaluate but only sometimes used.
+
+In the following `justfile`, `token` will be skipped when only invoking `bar`:
+
+```just
+set lazy
+
+token := `expensive-script-to-get-credentials`
+
+foo:
+  curl -H "Authorization: Bearer {{ token }}" https://example.com/foo
+
+bar:
+  cargo test
+```
+
+Because `just` cannot determine when exported variables are used, assignments
+with `export` and assignments in a module with `set export` will always be
+evaluated.
 
 ### Expressions and Substitutions
 
@@ -2018,856 +2169,233 @@ Use `{{{{` to include a literal `{{` in a format string:
 foo := f'I {{{{LOVE} curly braces!'
 ```
 
-### Sigils
-
-Commands in shell recipes may be prefixed with any combination of the sigils
-`-`, `@`, and `?`.
-
-The `@` sigil toggles command echoing:
-
-```just
-foo:
-  @echo "This line won't be echoed!"
-  echo "This line will be echoed!"
-
-@bar:
-  @echo "This line will be echoed!"
-  echo "This line won't be echoed!"
-```
-
-The `-` sigil causes recipe execution to continue even if the command returns a
-nonzero exit status:
-
-```just
-# execution will continue, even if bar doesn't exist
-foo:
-  -rmdir bar
-  mkdir bar
-  echo 'so much good stuff' > bar/stuff.txt
-```
-
-The `?` sigil<sup>1.47.0</sup> causes the current recipe to stop executing if
-the command exits with status code `1`, however execution of other recipes will
-continue. Exit status `0` causes the current recipe to continue execution as
-normal. All other exit codes are reserved and should not be used, as they may
-be given meaning in a future version of `just`.
-
-If the `guards` setting is unset or false, `?` sigils are ignored and instead
-treated as part of the command.
-
-```just
-set guards
-
-@foo: bar
-  echo FOO
-
-@bar:
-  ?[[ -f baz ]]
-  echo BAR
-```
-
-```console
-$ just foo
-FOO
-$ touch baz
-$ just foo
-BAR
-FOO
-```
-
-### Built-in Functions
-
-`just` provides many built-in functions for use in expressions, including
-recipe body `{{…}}` substitutions, assignments, and default parameter values.
-
-All functions ending in `_directory` can be abbreviated to `_dir`. So
-`home_directory()` can also be written as `home_dir()`. In addition,
-`invocation_directory_native()` can be abbreviated to
-`invocation_dir_native()`.
-
-#### System Information
-
-- `arch()` — Instruction set architecture. Possible values are: `"aarch64"`,
-  `"arm"`, `"asmjs"`, `"hexagon"`, `"mips"`, `"msp430"`, `"powerpc"`,
-  `"powerpc64"`, `"s390x"`, `"sparc"`, `"wasm32"`, `"x86"`, `"x86_64"`, and
-  `"xcore"`.
-- `num_cpus()`<sup>1.15.0</sup> — Number of logical CPUs.
-- `os()` — Operating system. Possible values are: `"android"`, `"bitrig"`,
-  `"dragonfly"`, `"emscripten"`, `"freebsd"`, `"haiku"`, `"ios"`, `"linux"`,
-  `"macos"`, `"netbsd"`, `"openbsd"`, `"solaris"`, and `"windows"`.
-- `os_family()` — Operating system family; possible values are: `"unix"` and
-  `"windows"`.
-
-For example:
-
-```just
-system-info:
-  @echo "This is an {{arch()}} machine."
-```
-
-```console
-$ just system-info
-This is an x86_64 machine.
-```
-
-The `os_family()` function can be used to create cross-platform `justfile`s
-that work on various operating systems. For an example, see
-[cross-platform.just](https://github.com/casey/just/blob/master/examples/cross-platform.just)
-file.
-
-#### External Commands
-
-- `shell(command, args...)`<sup>1.27.0</sup> returns the standard output of shell script
-  `command` with zero or more positional arguments `args`. The shell used to
-  interpret `command` is the same shell that is used to evaluate recipe lines,
-  and can be changed with `set shell := […]`.
+### Lists
 
-  `command` is passed as the first argument, so if the command is `'echo $@'`,
-  the full command line, with the default shell command `sh -cu` and `args`
-  `'foo'` and `'bar'` will be:
+The `lists` setting<sup>1.53.0</sup> allows values that are lists of strings.
+It is currently unstable and will change in backwards incompatible ways. This
+section documents changes in behavior when `set lists` is enabled.
 
-  ```
-  'sh' '-cu' 'echo $@' 'echo $@' 'foo' 'bar'
-  ```
+It has not yet been decided how lists should behave with many of the built-in
+functions. Functions that have been updated to accept lists are mentioned in
+this section. Using lists with any other function is an error. The
+`join_list()` function can be used to convert lists into space-separated
+strings for use with un-upgraded functions. Feedback on how built-in functions
+should behave with lists, and on lists in general, is most welcome! Feel free
+to open an issue or leave a comment in the
+[`set lists` tracking issue](https://github.com/casey/just/issues/3377).
 
-  This is so that `$@` works as expected, and `$1` refers to the first
-  argument. `$@` does not include the first positional argument, which is
-  expected to be the name of the program being run.
+Variadic recipe parameters are lists of strings instead of single
+space-separated strings.
 
-```just
-# arguments can be variables or expressions
-file := '/sys/class/power_supply/BAT0/status'
-bat0stat := shell('cat $1', file)
+List literals are written `[a, b, c]`. List literals flatten their arguments,
+since lists may only contain strings and not other lists. For example,
+`[["a", "b"], [], "c"]` evaluates to `["a", "b", "c"]`.
 
-# commands can be variables or expressions
-command := 'wc -l'
-output := shell(command + ' "$1"', 'main.c')
+Lists in recipe and `f`-string interpolations are joined with spaces into a
+single string.
 
-# arguments referenced by the shell command must be used
-empty := shell('echo', 'foo')
-full := shell('echo $1', 'foo')
-error := shell('echo $1')
-```
+Each argument to a dependency binds to exactly one parameter, and supplying
+extra arguments to a variadic dependency is an error.
 
-```just
-# Using python as the shell. Since `python -c` sets `sys.argv[0]` to `'-c'`,
-# the first "real" positional argument will be `sys.argv[2]`.
-set shell := ["python3", "-c"]
-olleh := shell('import sys; print(sys.argv[2][::-1])', 'hello')
-```
+Dependencies may be invoked once per element of a list with
+`*(recipe *argument)`.
 
-#### Environment Variables
+A parameter evaluates to the default when the argument is the empty list.
 
-- `env(key)`<sup>1.15.0</sup> — Retrieves the environment variable with name `key`, aborting
-  if it is not present.
+Passing an empty list to a non-`*` parameter without a default is an error.
 
-```just
-home_dir := env('HOME')
-
-test:
-  echo "{{home_dir}}"
-```
-
-```console
-$ just
-/home/user1
-```
-
-- `env(key, default)`<sup>1.15.0</sup> — Retrieves the environment variable with
-  name `key`, returning `default` if it is not present.
-- `env_var(key)` — Deprecated alias for `env(key)`.
-- `env_var_or_default(key, default)` — Deprecated alias for `env(key, default)`.
-
-#### Executables
-
-- `require(name)`<sup>1.39.0</sup> — Search directories in the `PATH`
-  environment variable for the executable `name` and return its full path, or
-  halt with an error if no executable with `name` exists.
-
-  ```just
-  bash := require("bash")
-
-  @test:
-      echo "bash: '{{bash}}'"
-  ```
-
-  ```console
-  $ just
-  bash: '/bin/bash'
-  ```
-
-- `which(name)`<sup>1.39.0</sup> — Search directories in the `PATH` environment
-  variable for the executable `name` and return its full path, or the empty
-  list if not found. Requires `set lists`<sup>1.53.0</sup>.
-
-
-  ```just
-  set unstable
-  set lists
-
-  bosh := which("bosh")
-
-  @test:
-      echo "bosh: '{{bosh}}'"
-  ```
-
-  ```console
-  $ just
-  bosh: ''
-  ```
-
-#### Invocation Information
-
-- `is_dependency()` - Returns the string `true` if the current recipe is being
-  run as a dependency of another recipe, rather than being run directly,
-  otherwise returns the string `false`.
-
-- `recipe_name()`<sup>1.53.0</sup> - Returns the name of the current recipe.
-
-#### Invocation Directory
-
-- `invocation_directory()` - Retrieves the absolute path to the current
-  directory when `just` was invoked, before `just` changed it (chdir'd) prior
-  to executing commands. On Windows, `invocation_directory()` uses `cygpath` to
-  convert the invocation directory to a Cygwin-compatible `/`-separated path.
-  Use `invocation_directory_native()` to return the verbatim invocation
-  directory on all platforms.
-
-For example, to call `rustfmt` on files just under the "current directory"
-(from the user/invoker's perspective), use the following recipe:
-
-```just
-rustfmt:
-  find {{invocation_directory()}} -name \*.rs -exec rustfmt {} \;
-```
-
-Alternatively, if your command needs to be run from the current directory, you
-could use (e.g.):
-
-```just
-build:
-  cd {{invocation_directory()}}; ./some_script_that_needs_to_be_run_from_here
-```
-
-- `invocation_directory_native()` - Retrieves the absolute path to the current
-  directory when `just` was invoked, before `just` changed it (chdir'd) prior
-  to executing commands.
-
-#### Justfile and Justfile Directory
-
-- `justfile()` - Retrieves the path of the current `justfile`.
-
-- `justfile_directory()` - Retrieves the path of the parent directory of the
-  current `justfile`.
-
-For example, to run a command relative to the location of the current
-`justfile`:
-
-```just
-script:
-  {{justfile_directory()}}/scripts/some_script
-```
-
-#### Source and Source Directory
-
-- `source_file()`<sup>1.27.0</sup> - Retrieves the path of the current source file.
-
-- `source_directory()`<sup>1.27.0</sup> - Retrieves the path of the parent directory of the
-  current source file.
-
-`source_file()` and `source_directory()` behave the same as `justfile()` and
-`justfile_directory()` in the root `justfile`, but will return the path and
-directory, respectively, of the current `import` or `mod` source file when
-called from within an import or submodule.
-
-#### Module and Module Directory
-
-- `module_file()` - Returns the path of the current module file.
-
-- `module_directory()` - Returns the path of the parent directory of the
-  current module file.
-
-- `module_path()` - Returns the `::`-separated path to the current module.
-
-`module_file()` and `module_directory()` behave the same as `justfile()` and
-`justfile_directory()` in the root `justfile`, but will return the path and
-directory, respectively, of the current `mod` source file when called from
-within a submodule.
-
-#### Just Executable
-
-- `just_executable()` - Absolute path to the `just` executable.
-
-For example:
-
-```just
-executable:
-  @echo The executable is at: {{just_executable()}}
-```
-
-```console
-$ just
-The executable is at: /bin/just
-```
-
-#### Just Process ID
-
-- `just_pid()` - Process ID of the `just` executable.
-
-For example:
-
-```just
-pid:
-  @echo The process ID is: {{ just_pid() }}
-```
-
-```console
-$ just
-The process ID is: 420
-```
-
-#### String Manipulation
-
-- `append(suffix, s)`<sup>1.27.0</sup> - Append `suffix` to
-  whitespace-separated strings in `s`. `append('/src', 'foo bar baz')` →
-  `'foo/src bar/src baz/src'`
-- `prepend(prefix, s)`<sup>1.27.0</sup> - Prepend `prefix` to
-  whitespace-separated strings in `s`. `prepend('src/', 'foo bar baz')` →
-  `'src/foo src/bar src/baz'`
-- `encode_uri_component(s)`<sup>1.27.0</sup> - Percent-encode characters in `s`
-  except `[A-Za-z0-9_.!~*'()-]`, matching the behavior of the
-  [JavaScript `encodeURIComponent` function](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/encodeURIComponent).
-- `quote(s)` - Replace all single quotes with `'\''` and prepend and append
-  single quotes to `s`. This is sufficient to escape special characters for
-  many shells, including most Bourne shell descendants.
-- `replace(s, from, to)` - Replace all occurrences of `from` in `s` with `to`.
-- `replace_regex(s, regex, replacement)` - Replace all occurrences of `regex`
-  in `s` with `replacement`. Regular expressions are provided by the
-  [Rust `regex` crate](https://docs.rs/regex/latest/regex/). See the
-  [syntax documentation](https://docs.rs/regex/latest/regex/#syntax) for usage
-  examples. Capture groups are supported. The `replacement` string uses
-  [Replacement string syntax](https://docs.rs/regex/latest/regex/struct.Regex.html#replacement-string-syntax).
-- `trim(s)` - Remove leading and trailing whitespace from `s`.
-- `trim_end(s)` - Remove trailing whitespace from `s`.
-- `trim_end_match(s, substring)` - Remove suffix of `s` matching `substring`.
-- `trim_end_matches(s, substring)` - Repeatedly remove suffixes of `s` matching
-  `substring`.
-- `trim_start(s)` - Remove leading whitespace from `s`.
-- `trim_start_match(s, substring)` - Remove prefix of `s` matching `substring`.
-- `trim_start_matches(s, substring)` - Repeatedly remove prefixes of `s`
-  matching `substring`.
-
-#### Case Conversion
-
-- `capitalize(s)`<sup>1.7.0</sup> - Convert first character of `s` to uppercase
-  and the rest to lowercase.
-- `kebabcase(s)`<sup>1.7.0</sup> - Convert `s` to `kebab-case`.
-- `lowercamelcase(s)`<sup>1.7.0</sup> - Convert `s` to `lowerCamelCase`.
-- `lowercase(s)` - Convert `s` to lowercase.
-- `shoutykebabcase(s)`<sup>1.7.0</sup> - Convert `s` to `SHOUTY-KEBAB-CASE`.
-- `shoutysnakecase(s)`<sup>1.7.0</sup> - Convert `s` to `SHOUTY_SNAKE_CASE`.
-- `snakecase(s)`<sup>1.7.0</sup> - Convert `s` to `snake_case`.
-- `titlecase(s)`<sup>1.7.0</sup> - Convert `s` to `Title Case`.
-- `uppercamelcase(s)`<sup>1.7.0</sup> - Convert `s` to `UpperCamelCase`.
-- `uppercase(s)` - Convert `s` to uppercase.
-
-#### Path Manipulation
-
-##### Fallible
-
-- `absolute_path(path)` - Absolute path to relative `path` in the working
-  directory. `absolute_path("./bar.txt")` in directory `/foo` is
-  `/foo/bar.txt`.
-- `canonicalize(path)`<sup>1.24.0</sup> - Canonicalize `path` by resolving symlinks and removing
-  `.`, `..`, and extra `/`s where possible.
-- `extension(path)` - Extension of `path`. `extension("/foo/bar.txt")` is
-  `txt`.
-- `file_name(path)` - File name of `path` with any leading directory components
-  removed. `file_name("/foo/bar.txt")` is `bar.txt`.
-- `file_stem(path)` - File name of `path` without extension.
-  `file_stem("/foo/bar.txt")` is `bar`.
-- `parent_directory(path)` - Parent directory of `path`.
-  `parent_directory("/foo/bar.txt")` is `/foo`.
-- `without_extension(path)` - `path` without extension.
-  `without_extension("/foo/bar.txt")` is `/foo/bar`.
-
-These functions can fail, for example if a path does not have an extension,
-which will halt execution.
-
-##### Infallible
-
-- `clean(path)` - Simplify `path` by removing extra path separators,
-  intermediate `.` components, and `..` where possible. `clean("foo//bar")` is
-  `foo/bar`, `clean("foo/..")` is `.`, `clean("foo/./bar")` is `foo/bar`.
-- `join(a, b…)` - *This function uses `/` on Unix and `\` on Windows, which can
-  lead to unwanted behavior. The `/` operator, e.g., `a / b`, which always
-  uses `/`, should be considered as a replacement unless `\`s are specifically
-  desired on Windows.* Join path `a` with path `b`. `join("foo/bar", "baz")` is
-  `foo/bar/baz`. Accepts two or more arguments.
-
-#### Filesystem Access
-
-- `path_exists(path)` - Returns the string `true` if the path points at an
-  existing entity and the string `false` otherwise. Traverses symbolic links,
-  and returns the string `false` if the path is inaccessible or points to a
-  broken symlink.
-- `read(path)`<sup>1.39.0</sup> - Returns the content of file at `path` as a
-  string.
-
-#### Assertions and Error Reporting
-
-- `assert(CONDITION, EXPRESSION)`<sup>1.27.0</sup> - Error with message
-  `EXPRESSION` if `CONDITION` is false. `EXPRESSION` may be
-  omitted<sup>1.53.0</sup>,
-- `error(message)` - Abort execution and report error `message` to user.
-
-#### UUID and Hash Generation
-
-- `blake3(string)`<sup>1.25.0</sup> - Return [BLAKE3] hash of `string` as hexadecimal string.
-- `blake3_file(path)`<sup>1.25.0</sup> - Return [BLAKE3] hash of file at `path` as hexadecimal
-  string.
-- `sha256(string)` - Return the SHA-256 hash of `string` as hexadecimal string.
-- `sha256_file(path)` - Return SHA-256 hash of file at `path` as hexadecimal
-  string.
-- `uuid()` - Generate a random version 4 UUID.
-
-[BLAKE3]: https://github.com/BLAKE3-team/BLAKE3/
-
-#### Random
-
-- `choose(n, alphabet)`<sup>1.27.0</sup> - Generate a string of `n` randomly
-  selected characters from `alphabet`, which may not contain repeated
-  characters. For example, `choose('64', HEX)` will generate a random
-  64-character lowercase hex string.
-
-#### Datetime
-
-- `datetime(format)`<sup>1.30.0</sup> - Return local time with `format`.
-- `datetime_utc(format)`<sup>1.30.0</sup> - Return UTC time with `format`.
-
-The arguments to `datetime` and `datetime_utc` are `strftime`-style format
-strings, see the
-[`chrono` library docs](https://docs.rs/chrono/latest/chrono/format/strftime/index.html)
-for details.
-
-#### Semantic Versions
-
-- `semver_matches(version, requirement)`<sup>1.16.0</sup> - Check whether a
-  [semantic `version`](https://semver.org), e.g., `"0.1.0"` matches a
-  `requirement`, e.g., `">=0.1.0"`, returning the string `"true"` if so and the
-  string `"false"` otherwise.
-
-#### Style
-
-- `style(name)`<sup>1.37.0</sup> - Return a named terminal display attribute
-  escape sequence used by `just`. Unlike terminal display attribute escape
-  sequence constants, which contain standard colors and styles, `style(name)`
-  returns an escape sequence used by `just` itself, and can be used to make
-  recipe output match `just`'s own output.
-
-  Recognized values for `name` are `'command'`, for echoed recipe lines,
-  `error`, and `warning`.
-
-  For example, to style an error message:
-
-  ```just
-  scary:
-    @echo '{{ style("error") }}OH NO{{ NORMAL }}'
-  ```
-
-##### User Directories
-
-These functions<sup>1.23.0</sup> return paths to user-specific directories for
-things like configuration, data, caches, executables, and the user's home
-directory.
-
-On Unix, these functions follow the
-[XDG Base Directory Specification](https://specifications.freedesktop.org/basedir-spec/basedir-spec-latest.html).
-
-On macOS and Windows, these functions return the system-specified user-specific
-directories. For example, `cache_directory()` returns `~/Library/Caches` on
-macOS and `{FOLDERID_LocalAppData}` on Windows.
-
-See the [`dirs`](https://docs.rs/dirs/latest/dirs/index.html) crate for more
-details.
-
-- `cache_directory()` - The user-specific cache directory.
-- `config_directory()` - The user-specific configuration directory.
-- `config_local_directory()` - The local user-specific configuration directory.
-- `data_directory()` - The user-specific data directory.
-- `data_local_directory()` - The local user-specific data directory.
-- `executable_directory()` - The user-specific executable directory.
-- `home_directory()` - The user's home directory.
-- `runtime_directory()` - The user-specific runtime directory. Only defined on
-  Linux.
-
-If you would like to use XDG base directories on all platforms you can use the
-`env(…)` function with the appropriate environment variable and fallback,
-although note that the XDG specification requires ignoring non-absolute paths,
-so for full compatibility with spec-compliant applications, you would need to
-do:
-
-```just
-xdg_config_dir := if env('XDG_CONFIG_HOME', '') =~ '^/' {
-  env('XDG_CONFIG_HOME')
-} else {
-  home_directory() / '.config'
-}
-```
-
-### User-defined functions
-
-New functions may be defined<sup>1.49.0</sup>:
+The `else` of an `if` may be omitted, in which case the `if` evaluates to `[]`
+when its condition is false.
+
+Message values in `assert(condition, message)` and `[confirm(message)]` are
+space-joined for display.
+
+The `+` and `/` operators combine strings and lists. A string and a non-empty
+list are combined by concatenating the string with each element of the list.
+Two lists of the same length are combined into a list containing the pairwise
+concatenated elements of both operands. Combining two lists of different
+lengths is an error.
+
+The `++` operator performs list concatenation.
+
+#### Booleans
+
+The canonical boolean true value is the string `"true"`, and the canonical
+boolean false value is the empty list `[]`. All values other than the empty
+list are truthy, including `''`.
+
+The condition of an `if` or `assert()` may be any expression, which is
+evaluated for truthiness.
+
+The comparison operators `==`, `!=`, `=~`, and `!~` may be used anywhere, not
+just in `if` and `assert()`, and evaluate to `"true"` or `[]`.
+
+`value =~ regexes` is true if any element in `value` matches any regex in
+`regexes`. It is false if either `value` or `regexes` is empty.
+
+`value !~ regexes` is true if no element in `value` matches any regex in
+`regexes`. It is true if either `value` or `regexes` is empty.
+
+Values may be negated with `!`. `!expression` evaluates to `"true"` if
+`expression` is `[]`, otherwise it evaluates to `[]`.
+
+#### Settings
+
+The `script-interpreter`, `shell`, and `windows-shell` settings flatten their
+elements like list literals.
+
+When `positional-arguments` is set, list arguments are space-joined unless they
+are variadic, in which case they are passed as one positional argument per
+element.
+
+The `--dotenv-filename` and `--dotenv-path` options may be passed multiple
+times, and the `dotenv-filename` and `dotenv-path` settings accept lists, in
+which case multiple environment files may be loaded. The values of
+`dotenv-path` are tried first. If none are found the current directory is
+searched for the names in `dotenv-filename`, followed by its ancestors,
+stopping in the first directory that contains any of them and loading all
+matching files in that directory. If multiple environment files are loaded,
+variables in files later in list take precedence over earlier ones.
+
+Each element of the value of `set dotenv-command` is run as a command, with
+variables from commands later in the list taking precedence over variables from
+commands earlier in the list.
+
+#### Attributes
+
+The `[arg(flag)]` attribute makes the parameter a flag which does not take a
+value on the command line. For example, with `[arg('foo', long, flag)]`, `foo`
+will be `"true"` when `--foo` is passed, and `[]` otherwise. Flag parameters
+may not have a default.
+
+The `[arg(multiple)]` attribute allows an option or flag to be passed more than
+once, assigning the list of passed values to the parameter. When combined with
+`flag` or `value=VALUE`, `"true"` or `VALUE`, respectively, are repeated for
+each occurance of the flag.
+
+The `[arg(min=MIN)]` and `[arg(max=MAX)]` attributes<sup>1.56.0</sup> can be
+used to limit the number of values an option or flag may receive.
+
+The value of `[arg(help)]` may be a list, in which case the help string is the
+elements of the list joined with spaces. If the list is empty, the argument has
+no help string.
+
+The value of `[arg(pattern)]` may be a list, in which case the argument is
+accepted if it matches any pattern in the list. If the value is the empty list,
+any argument is accepted. For example, with
+`[arg('foo', pattern=['--help', '--version'])]`, `foo` may be `--help` or
+`--version`.
+
+In `[env(variable, value)]` if `value` is `[]`, `variable` is not set.
+Otherwise it is set to `value` joined with spaces.
+
+#### Functions
+
+- `absolute_path()` - Applies to each list element individually.
+- `append()` - Applies to each list element individually and does not split
+  elements on whitespace.
+- `assert(condition, message)` - Evaluates to `condition`.
+- `bool(value)` Converts `value` to the canonical boolean values. Returns `[]`
+  when `value` is `""` `"0"` `"false"`, or `[]`, and `"true"` when `value` is
+  `"1"` or `"true"`. All other values are an error. Can be used to parse
+  booleans passed as arguments or environment variables.
+- `env(keys, default)` Checks for the environment variables named in `keys` in
+  order and returns the value of the first that is set. Returns `default` if
+  none are set or an error if `default` is omitted.
+- `is_dependency()` - Returns the canonical booleans.
+- `join_list(value, separator)` - Joins `value` into a single string. Elements
+  are joined with `separator`, or with a single space if `separator` is
+  omitted.
+- `len(value)` - Returns the number of elements in `value`.
+- `path_exists()` - Returns the canonical booleans.
+- `prepend()` - Applies to each list element individually and does not split
+  elements on whitespace.
+- `quote()` - Applies to each list element individually.
+- `semver_matches()` - Returns the canonical booleans.
+- `show(value)` - Converts `value` into a string containing its literal
+  representation. Brackets are used for empty and multi-element lists, e.g.,
+  `"[]"` and `"["foo", "bar"]"`, but not single-element lists, e.g., `"foo"`.
+- `split(string, separator)` - Splits `string` into a list on each occurrence
+  of `separator`. If `separator` is omitted, `string` is split on whitespace,
+  with leading and trailing whitespace trimmed.
+- `which()` - Returns the empty list when no executable is found.
+
+#### Examples
+
+Each list element is `quote()`'ed separately:
 
 ```just
 set unstable
+set lists
 
-hello(name) := f"Hello, {{ name }}!"
-
-foo:
-  echo '{{ hello("World") }}'
-```
-
-User-defined functions are currently unstable.
-
-Functions may reference assignments in the same module:
-
-```just
-set unstable
-
-base := "foo"
-
-join(extension) := base + "." + extension
-
-create:
-  touch {{ join("c") }}
-  touch {{ join("html") }}
-  touch {{ join("txt") }}
-```
-
-### Constants
-
-A number of constants are predefined:
-
-| Name | Value | Value on Windows |
-|---|---|---|
-| `HEX`<sup>1.27.0</sup> | `"0123456789abcdef"` |  |
-| `HEXLOWER`<sup>1.27.0</sup> | `"0123456789abcdef"` |  |
-| `HEXUPPER`<sup>1.27.0</sup> | `"0123456789ABCDEF"` |  |
-| `PATH_SEP`<sup>1.41.0</sup> | `"/"` | `"\"` |
-| `PATH_VAR_SEP`<sup>1.41.0</sup> | `":"` | `";"` |
-| `CLEAR`<sup>1.37.0</sup> | `"\ec"` |  |
-| `NORMAL`<sup>1.37.0</sup> | `"\e[0m"` |  |
-| `BOLD`<sup>1.37.0</sup> | `"\e[1m"` |  |
-| `ITALIC`<sup>1.37.0</sup> | `"\e[3m"` |  |
-| `UNDERLINE`<sup>1.37.0</sup> | `"\e[4m"` |  |
-| `INVERT`<sup>1.37.0</sup> | `"\e[7m"` |  |
-| `HIDE`<sup>1.37.0</sup> | `"\e[8m"` |  |
-| `STRIKETHROUGH`<sup>1.37.0</sup> | `"\e[9m"` |  |
-| `BLACK`<sup>1.37.0</sup> | `"\e[30m"` |  |
-| `RED`<sup>1.37.0</sup> | `"\e[31m"` |  |
-| `GREEN`<sup>1.37.0</sup> | `"\e[32m"` |  |
-| `YELLOW`<sup>1.37.0</sup> | `"\e[33m"` |  |
-| `BLUE`<sup>1.37.0</sup> | `"\e[34m"` |  |
-| `MAGENTA`<sup>1.37.0</sup> | `"\e[35m"` |  |
-| `CYAN`<sup>1.37.0</sup> | `"\e[36m"` |  |
-| `WHITE`<sup>1.37.0</sup> | `"\e[37m"` |  |
-| `BG_BLACK`<sup>1.37.0</sup> | `"\e[40m"` |  |
-| `BG_RED`<sup>1.37.0</sup> | `"\e[41m"` |  |
-| `BG_GREEN`<sup>1.37.0</sup> | `"\e[42m"` |  |
-| `BG_YELLOW`<sup>1.37.0</sup> | `"\e[43m"` |  |
-| `BG_BLUE`<sup>1.37.0</sup> | `"\e[44m"` |  |
-| `BG_MAGENTA`<sup>1.37.0</sup> | `"\e[45m"` |  |
-| `BG_CYAN`<sup>1.37.0</sup> | `"\e[46m"` |  |
-| `BG_WHITE`<sup>1.37.0</sup> | `"\e[47m"` |  |
-
-```just
-@foo:
-  echo {{HEX}}
+@foo *args:
+  printf '%s\n' {{ quote(args) }}
 ```
 
 ```console
-$ just foo
-0123456789abcdef
+$ just foo bar 'baz bob'
+bar
+baz bob
 ```
 
-Constants starting with `\e` are
-[ANSI escape sequences](https://en.wikipedia.org/wiki/ANSI_escape_code).
+The return value of `quote(args)` is `'bar' 'baz bob'`, instead of
+`'bar baz bob'`, as would be the case without `set lists`.
 
-`CLEAR` clears the screen, similar to the `clear` command. The rest are of the
-form `\e[Nm`, where `N` is an integer, and set terminal display attributes.
-
-Terminal display attribute escape sequences can be combined, for example text
-weight `BOLD`, text style `STRIKETHROUGH`, foreground color `CYAN`, and
-background color `BG_BLUE`. They should be followed by `NORMAL`, to reset the
-terminal back to normal.
-
-Escape sequences should be quoted, since `[` is treated as a special character
-by some shells.
+Variadic positional arguments:
 
 ```just
-@foo:
-  echo '{{BOLD + STRIKETHROUGH + CYAN + BG_BLUE}}Hi!{{NORMAL}}'
+set unstable
+set lists
+set positional-arguments
+
+foo *args: (bar args 'bob') (baz args)
+
+@bar first second:
+  echo first=$1
+  echo second=$2
+
+@baz *args:
+  echo '$1='$1
+  echo '$2='$2
 ```
 
-### Attributes
+```console
+$ just foo one two
+first=one two
+second=bob
+$1=one
+$2=two
+```
 
-Recipes, `mod` statements, and aliases may be annotated with attributes that
-change their behavior.
-
-| Name | Type | Description |
-|------|------|-------------|
-| `[arg(ARG, help="HELP")]`<sup>1.46.0</sup> | recipe | Print help string `HELP` for `ARG` in usage messages. |
-| `[arg(ARG, long="LONG")]`<sup>1.46.0</sup> | recipe | Require values of argument `ARG` to be passed as `--LONG` option. |
-| `[arg(ARG, pattern="PATTERN")]`<sup>1.45.0</sup> | recipe | Require values of argument `ARG` to match regular expression `PATTERN`. |
-| `[arg(ARG, short="S")]`<sup>1.46.0</sup> | recipe | Require values of argument `ARG` to be passed as short `-S` option. |
-| `[arg(ARG, value=VALUE)]`<sup>1.46.0</sup> | recipe | Makes option `ARG` a flag which does not take a value. |
-| `[cache]`<sup>1.54.0</sup> | recipe | Skip recipe invocations when a matching entry exists in the cache. See [cached recipes](#cached-recipes) for details. Currently unstable. |
-| `[confirm(PROMPT)]`<sup>1.23.0</sup> | recipe | Require confirmation prior to executing recipe with a custom prompt. |
-| `[confirm]`<sup>1.17.0</sup> | recipe | Require confirmation prior to executing recipe. |
-| `[continue(SIGNALS)]`<sup>1.54.0</sup> | recipe | Continue execution normally if a command is interrupted by any of `SIGNALS` and exits successfully. Defaults to `SIGINT`. |
-| `[default]`<sup>1.43.0</sup> | recipe | Use recipe as module's default recipe. |
-| `[doc(DOC)]`<sup>1.27.0</sup> | module, recipe | Set recipe or module's [documentation comment](#documentation-comments) to `DOC`. |
-| `[dragonfly]`<sup>1.47.0</sup> | recipe | Enable recipe on DragonFly BSD. |
-| `[env(NAME, VALUE)]` <sup>1.47.0</sup> | recipe | Set environment variable `NAME` to `VALUE` for recipe. `NAME` and `VALUE` may be expressions<sup>1.51.0</sup>. |
-| `[extension(EXT)]`<sup>1.32.0</sup> | recipe | Set shebang recipe script's file extension to `EXT`. `EXT` should include a period if one is desired. |
-| `[exit-message]`<sup>1.39.0</sup> | recipe | Print error message if recipe fails regardless of `set no-exit-message`. |
-| `[freebsd]`<sup>1.47.0</sup> | recipe | Enable recipe on FreeBSD. |
-| `[group(NAME)]`<sup>1.27.0</sup> | module, recipe | Put recipe or module in [group](#groups) `NAME`. |
-| `[android]`<sup>1.50.0</sup> | recipe | Enable recipe on Android. |
-| `[linux]`<sup>1.8.0</sup> | recipe | Enable recipe on Linux. |
-| `[macos]`<sup>1.8.0</sup> | recipe | Enable recipe on macOS. |
-| `[metadata(METADATA)]`<sup>1.42.0</sup> | recipe | Attach `METADATA` to recipe. |
-| `[netbsd]`<sup>1.47.0</sup> | recipe | Enable recipe on NetBSD. |
-| `[no-cd]`<sup>1.9.0</sup> | recipe | Don't change directory before executing recipe. |
-| `[no-exit-message]`<sup>1.7.0</sup> | recipe | Don't print an error message if recipe fails. |
-| `[no-quiet]`<sup>1.23.0</sup> | recipe | Override globally quiet recipes and always echo out the recipe. |
-| `[openbsd]`<sup>1.38.0</sup> | recipe | Enable recipe on OpenBSD. |
-| `[parallel]`<sup>1.42.0</sup> | recipe | Run this recipe's dependencies in parallel. |
-| `[positional-arguments]`<sup>1.29.0</sup> | recipe | Turn on [positional arguments](#positional-arguments) for this recipe. |
-| `[private]`<sup>1.10.0</sup> | alias, recipe | Make recipe, alias, or variable private. See [Private Recipes](#private-recipes). |
-| `[script(COMMAND)]`<sup>1.32.0</sup> | recipe | Execute recipe as a script interpreted by `COMMAND`. See [script recipes](#script-recipes) for more details. |
-| `[script]`<sup>1.33.0</sup> | recipe | Execute recipe as script. See [script recipes](#script-recipes) for more details. |
-| `[shell]`<sup>1.52.0</sup> | recipe | Execute recipe as a shell recipe, overriding `set default-script`. |
-| `[unix]`<sup>1.8.0</sup> | recipe | Enable recipe on unixes. (Includes macOS). |
-| `[windows]`<sup>1.8.0</sup> | recipe | Enable recipe on Windows. |
-| `[working-directory(PATH)]`<sup>1.38.0</sup> | recipe | Set recipe working directory. `PATH` may be an expression<sup>1.51.0</sup> whose value is relative or absolute. If relative, it is interpreted relative to the default working directory. |
-
-A recipe can have multiple attributes, either on multiple lines:
+A mapped dependency is invoked once per element of its starred argument, with
+`[parallel]` to run them in parallel:
 
 ```just
-[no-cd]
-[private]
-foo:
-    echo "foo"
+set unstable
+set lists
+
+[parallel]
+build target *platform: *(compile target *platform)
+
+@compile target platform:
+  echo compiling {{ target }} for {{ platform }}…
 ```
 
-Or separated by commas on a single line<sup>1.14.0</sup>:
+```console
+$ just build x86 foo bar
+compiling foo for x86…
+compiling bar for x86…
+```
+
+The canonical false value `[]` is recommended as a default for options:
 
 ```just
-[no-cd, private]
-foo:
-    echo "foo"
+set unstable
+set lists
+
+[arg('bar', long)]
+foo bar=[]:
 ```
-
-Attributes with a single argument may be written with a colon:
-
-```just
-[group: 'bar']
-foo:
-```
-
-#### Enabling and Disabling Recipes
-
-The `[linux]`, `[macos]`, `[unix]`, and `[windows]` attributes<sup>1.8.0</sup>
-are configuration attributes. By default, recipes are always enabled. A recipe
-with one or more configuration attributes will only be enabled when one or more
-of those configurations is active.
-
-This can be used to write `justfile`s that behave differently depending on
-which operating system they run on. The `run` recipe in this `justfile` will
-compile and run `main.c`, using a different C compiler and using the correct
-output binary name for that compiler depending on the operating system:
-
-```just
-[unix]
-run:
-  cc main.c
-  ./a.out
-
-[windows]
-run:
-  cl main.c
-  main.exe
-```
-
-#### Disabling Changing Directory
-
-`just` normally executes recipes with the current directory set to the
-directory that contains the `justfile`. This can be disabled using the
-`[no-cd]` attribute<sup>1.9.0</sup>. This can be used to create recipes which
-use paths relative to the invocation directory, or which operate on the current
-directory.
-
-For example, this `commit` recipe:
-
-```just
-[no-cd]
-commit file:
-  git add {{file}}
-  git commit
-```
-
-Can be used with paths that are relative to the current directory, because
-`[no-cd]` prevents `just` from changing the current directory when executing
-`commit`.
-
-#### Requiring Confirmation for Recipes
-
-`just` normally executes all recipes unless there is an error. The `[confirm]`
-attribute<sup>1.17.0</sup> allows recipes to require confirmation in the terminal
-prior to running. This can be overridden by passing `--yes` to `just`, which
-will automatically confirm any recipes marked by this attribute.
-
-Recipes dependent on a recipe that requires confirmation will not be run if the
-relied upon recipe is not confirmed, as well as recipes passed after any recipe
-that requires confirmation.
-
-```just
-[confirm]
-delete-all:
-  rm -rf *
-```
-
-#### Custom Confirmation Prompt
-
-The default confirmation prompt can be overridden with
-`[confirm(PROMPT)]`<sup>1.23.0</sup>:
-
-```just
-[confirm("Are you sure you want to delete everything?")]
-delete-everything:
-  rm -rf *
-```
-
-The confirmation prompt may also be an expression<sup>1.49.0</sup> which may
-reference assignments or recipe arguments:
-
-```just
-[confirm("Deploy to " + env + "?")]
-deploy env:
-  echo 'Deploying to {{env}}...'
-```
-
-#### Metadata
-
-Metadata in the form of lists of strings may be attached to recipes with the
-`[metadata(METADATA)]` attribute<sup>1.42.0</sup>:
-
-```just
-[metadata("hello", "goodbye")]
-foo:
-```
-
-Metadata can be read using `just --dump --dump-format json`.
-
-### Groups
-
-Recipes and modules may be annotated with one or more group names:
-
-```just
-[group('lint')]
-js-lint:
-    echo 'Running JS linter…'
-
-[group('rust recipes')]
-[group('lint')]
-rust-lint:
-    echo 'Running Rust linter…'
-
-[group('lint')]
-cpp-lint:
-  echo 'Running C++ linter…'
-
-# not in any group
-email-everyone:
-    echo 'Sending mass email…'
-```
-
-Recipes are listed by group:
-
-```
-$ just --list
-Available recipes:
-    email-everyone # not in any group
-
-    [lint]
-    cpp-lint
-    js-lint
-    rust-lint
-
-    [rust recipes]
-    rust-lint
-```
-
-`just --list --unsorted` prints recipes in their justfile order within each group:
-
-```
-$ just --list --unsorted
-Available recipes:
-    (no group)
-    email-everyone # not in any group
-
-    [lint]
-    js-lint
-    rust-lint
-    cpp-lint
-
-    [rust recipes]
-    rust-lint
-```
-
-Groups can be listed with `--groups`:
-
-```
-$ just --groups
-Recipe groups:
-  lint
-  rust recipes
-```
-
-Use `just --groups --unsorted` to print groups in their justfile order.
-
-### Command Evaluation Using Backticks
-
-Backticks can be used to store the result of commands:
-
-```just
-localhost := `dumpinterfaces | cut -d: -f2 | sed 's/\/.*//' | sed 's/ //g'`
-
-serve:
-  ./serve {{localhost}} 8080
-```
-
-Indented backticks, delimited by three backticks, are de-indented in the same
-manner as indented strings:
-
-````just
-# This backtick evaluates the command `echo foo\necho bar\n`, which produces the value `foo\nbar\n`.
-stuff := ```
-    echo foo
-    echo bar
-  ```
-````
-
-See the [Strings](#strings) section for details on unindenting.
-
-Backticks may not start with `#!`. This syntax is reserved for a future
-upgrade.
-
-The [`shell(…)` function](#external-commands) provides a more general mechanism
-to invoke external commands, including the ability to execute the contents of a
-variable as a command, and to pass arguments to a command.
 
 ### Conditional Expressions
 
@@ -2955,6 +2483,37 @@ $ just bar
 abc
 ```
 
+### Command Evaluation Using Backticks
+
+Backticks can be used to store the result of commands:
+
+```just
+localhost := `dumpinterfaces | cut -d: -f2 | sed 's/\/.*//' | sed 's/ //g'`
+
+serve:
+  ./serve {{localhost}} 8080
+```
+
+Indented backticks, delimited by three backticks, are de-indented in the same
+manner as indented strings:
+
+````just
+# This backtick evaluates the command `echo foo\necho bar\n`, which produces the value `foo\nbar\n`.
+stuff := ```
+    echo foo
+    echo bar
+  ```
+````
+
+See the [Strings](#strings) section for details on unindenting.
+
+Backticks may not start with `#!`. This syntax is reserved for a future
+upgrade.
+
+The [`shell(…)` function](#external-commands) provides a more general mechanism
+to invoke external commands, including the ability to execute the contents of a
+variable as a command, and to pass arguments to a command.
+
 ### Stopping execution with error
 
 Execution can be halted with the `error` function. For example:
@@ -2977,603 +2536,211 @@ error: Call to function `error` failed: 123
 16 |   error("123")
 ```
 
-### Setting Variables from the Command Line
+### Built-in Functions
 
-Variables can be overridden from the command line.
+`just` provides many built-in functions for use in expressions, including
+recipe body `{{…}}` substitutions, assignments, and default parameter values.
 
-```just
-os := "linux"
+All functions ending in `_directory` can be abbreviated to `_dir`. So
+`home_directory()` can also be written as `home_dir()`. In addition,
+`invocation_directory_native()` can be abbreviated to
+`invocation_dir_native()`.
 
-test: build
-  ./test --test {{os}}
+### User-defined functions
 
-build:
-  ./build {{os}}
-```
-
-```console
-$ just
-./build linux
-./test --test linux
-```
-
-Any number of arguments of the form `NAME=VALUE` can be passed before recipes:
-
-```console
-$ just os=plan9
-./build plan9
-./test --test plan9
-```
-
-Or you can use the `--set` flag:
-
-```console
-$ just --set os bsd
-./build bsd
-./test --test bsd
-```
-
-Variables in submodules can be overridden using the `::`-separated path to the
-variable. A variable named `bar` in a submodule named `foo` may be overridden
-with `foo::bar=VALUE` or `--set foo::bar VALUE`.
-
-### Getting and Setting Environment Variables
-
-#### Exporting `just` Variables
-
-Assignments prefixed with the `export` keyword will be exported to recipes as
-environment variables:
+New functions may be defined<sup>1.49.0</sup>:
 
 ```just
-export RUST_BACKTRACE := "1"
+set unstable
 
-test:
-  # will print a stack trace if it crashes
-  cargo test
+hello(name) := f"Hello, {{ name }}!"
+
+foo:
+  echo '{{ hello("World") }}'
 ```
 
-Parameters prefixed with a `$` will be exported as environment variables:
+User-defined functions are currently unstable.
+
+Functions may reference assignments in the same module:
 
 ```just
-test $RUST_BACKTRACE="1":
-  # will print a stack trace if it crashes
-  cargo test
+set unstable
+
+base := "foo"
+
+join(extension) := base + "." + extension
+
+create:
+  touch {{ join("c") }}
+  touch {{ join("html") }}
+  touch {{ join("txt") }}
 ```
 
-You can also use the `[env(NAME, VALUE)]` attribute to export environment
-variables to a specific recipe:
+Execution
+---------
+
+### Sigils
+
+Commands in shell recipes may be prefixed with any combination of the sigils
+`-`, `@`, and `?`.
+
+The `@` sigil toggles command echoing:
 
 ```just
-[env("RUST_BACKTRACE", "1")]
-test:
-  # will print a stack trace if it crashes
-  cargo test
+foo:
+  @echo "This line won't be echoed!"
+  echo "This line will be echoed!"
+
+@bar:
+  @echo "This line will be echoed!"
+  echo "This line won't be echoed!"
 ```
 
-Exported variables and parameters are not exported to backticks in the same scope.
+The `-` sigil causes recipe execution to continue even if the command returns a
+nonzero exit status:
 
 ```just
-export WORLD := "world"
-# This backtick will fail with "WORLD: unbound variable"
-BAR := `echo hello $WORLD`
+# execution will continue, even if bar doesn't exist
+foo:
+  -rmdir bar
+  mkdir bar
+  echo 'so much good stuff' > bar/stuff.txt
 ```
+
+The `?` sigil<sup>1.47.0</sup> causes the current recipe to stop executing if
+the command exits with status code `1`, however execution of other recipes will
+continue. Exit status `0` causes the current recipe to continue execution as
+normal. All other exit codes are reserved and should not be used, as they may
+be given meaning in a future version of `just`.
+
+If the `guards` setting is unset or false, `?` sigils are ignored and instead
+treated as part of the command.
 
 ```just
-# Running `just a foo` will fail with "A: unbound variable"
-a $A $B=`echo $A`:
-  echo $A $B
+set guards
+
+@foo: bar
+  echo FOO
+
+@bar:
+  ?[[ -f baz ]]
+  echo BAR
 ```
-
-When [export](#export) is set, all `just` variables are exported as environment
-variables.
-
-#### Unexporting Environment Variables
-
-Environment variables can be unexported with the `unexport`
-keyword<sup>1.29.0</sup>:
-
-```just
-unexport FOO
-
-@foo:
-  echo $FOO
-```
-
-```
-$ export FOO=bar
-$ just foo
-sh: FOO: unbound variable
-```
-
-#### Getting Environment Variables from the Environment
-
-Environment variables from the environment are passed automatically to the
-recipes.
-
-```just
-print_home_folder:
-  @echo "HOME is: '${HOME}'"
-```
-
-```console
-$ just
-HOME is: '/home/myuser'
-```
-
-#### Setting `just` Variables from Environment Variables
-
-Environment variables can be propagated to `just` variables using the `env()` function.
-See
-[environment-variables](#environment-variables).
-
-### Recipe Parameters
-
-Recipes may have parameters. Here recipe `build` has a parameter called
-`target`:
-
-```just
-build target:
-  @echo 'Building {{target}}…'
-  cd {{target}} && make
-```
-
-To pass arguments on the command line, put them after the recipe name:
-
-```console
-$ just build my-awesome-project
-Building my-awesome-project…
-cd my-awesome-project && make
-```
-
-To pass arguments to a dependency, put the dependency in parentheses along with
-the arguments:
-
-```just
-default: (build "main")
-
-build target:
-  @echo 'Building {{target}}…'
-  cd {{target}} && make
-```
-
-Variables can also be passed as arguments to dependencies:
-
-```just
-target := "main"
-
-_build version:
-  @echo 'Building {{version}}…'
-  cd {{version}} && make
-
-build: (_build target)
-```
-
-A command's arguments can be passed to a dependency by putting the dependency in
-parentheses along with the arguments:
-
-```just
-build target:
-  @echo "Building {{target}}…"
-
-push target: (build target)
-  @echo 'Pushing {{target}}…'
-```
-
-Parameters may have default values:
-
-```just
-default := 'all'
-
-test target tests=default:
-  @echo 'Testing {{target}}:{{tests}}…'
-  ./test --tests {{tests}} {{target}}
-```
-
-Parameters with default values may be omitted:
-
-```console
-$ just test server
-Testing server:all…
-./test --tests all server
-```
-
-Or supplied:
-
-```console
-$ just test server unit
-Testing server:unit…
-./test --tests unit server
-```
-
-Default values may be arbitrary expressions, but expressions containing the
-`+`, `&&`, `||`, or `/` operators must be parenthesized:
-
-```just
-arch := "wasm"
-
-test triple=(arch + "-unknown-unknown") input=(arch / "input.dat"):
-  ./test {{triple}}
-```
-
-The last parameter of a recipe may be variadic, indicated with either a `+` or
-a `*` before the argument name:
-
-```just
-backup +FILES:
-  scp {{FILES}} me@server.com:
-```
-
-Variadic parameters prefixed with `+` accept _one or more_ arguments and expand
-to a string containing those arguments separated by spaces:
-
-```console
-$ just backup FAQ.md GRAMMAR.md
-scp FAQ.md GRAMMAR.md me@server.com:
-FAQ.md                  100% 1831     1.8KB/s   00:00
-GRAMMAR.md              100% 1666     1.6KB/s   00:00
-```
-
-Variadic parameters prefixed with `*` accept _zero or more_ arguments and
-expand to a string containing those arguments separated by spaces, or an empty
-string if no arguments are present:
-
-```just
-commit MESSAGE *FLAGS:
-  git commit {{FLAGS}} -m "{{MESSAGE}}"
-```
-
-Variadic parameters can be assigned default values. These are overridden by
-arguments passed on the command line:
-
-```just
-test +FLAGS='-q':
-  cargo test {{FLAGS}}
-```
-
-`{{…}}` substitutions may need to be quoted if they contain spaces. For
-example, if you have the following recipe:
-
-```just
-search QUERY:
-  lynx https://www.google.com/?q={{QUERY}}
-```
-
-And you type:
-
-```console
-$ just search "cat toupee"
-```
-
-`just` will run the command `lynx https://www.google.com/?q=cat toupee`, which
-will get parsed by `sh` as `lynx`, `https://www.google.com/?q=cat`, and
-`toupee`, and not the intended `lynx` and `https://www.google.com/?q=cat toupee`.
-
-You can fix this by adding quotes:
-
-```just
-search QUERY:
-  lynx 'https://www.google.com/?q={{QUERY}}'
-```
-
-Parameters prefixed with a `$` will be exported as environment variables:
-
-```just
-foo $bar:
-  echo $bar
-```
-
-Parameters may be constrained to match regular expression patterns using the
-`[arg("name", pattern="pattern")]` attribute<sup>1.45.0</sup>:
-
-```just
-[arg('n', pattern='\d+')]
-double n:
-  echo $(({{n}} * 2))
-```
-
-A leading `^` and trailing `$` are added to the pattern, so it must match the
-entire argument value.
-
-You may constrain the pattern to a number of alternatives using the `|`
-operator:
-
-```just
-[arg('flag', pattern='--help|--version')]
-info flag:
-  just {{flag}}
-```
-
-Regular expressions are provided by the
-[Rust `regex` crate](https://docs.rs/regex/latest/regex/). See the
-[syntax documentation](https://docs.rs/regex/latest/regex/#syntax) for usage
-examples.
-
-Usage information for a recipe may be printed with the `--usage`
-subcommand<sup>1.46.0</sup>:
-
-```console
-$ just --usage foo
-Usage: just foo [OPTIONS] bar
-
-Arguments:
-  bar
-```
-
-Help strings may be added to arguments using the `[arg(ARG, help=HELP)]` attribute:
-
-```just
-[arg("bar", help="hello")]
-foo bar:
-```
-
-```console
-$ just --usage foo
-Usage: just foo bar
-
-Arguments:
-  bar hello
-```
-
-#### Recipe Flags and Options
-
-Recipe parameters are positional by default.
-
-In this `justfile`:
-
-```just
-@foo bar:
-  echo bar={{bar}}
-```
-
-The parameter `bar` is positional:
-
-```console
-$ just foo hello
-bar=hello
-```
-
-The `[arg(ARG, long=OPTION)]`<sup>1.46.0</sup> attribute can be used to make a
-parameter a long option.
-
-In this `justfile`:
-
-```just
-[arg("bar", long="bar")]
-foo bar:
-```
-
-The parameter `bar` is given with the `--bar` option:
-
-```console
-$ just foo --bar hello
-bar=hello
-```
-
-Options may also be passed with `--name=value` syntax:
-
-```console
-$ just foo --bar=hello
-bar=hello
-```
-
-The value of `long` can be omitted, in which case the option defaults to the
-name of the parameter:
-
-```just
-[arg("bar", long)]
-foo bar:
-```
-
-The `[arg(ARG, short=OPTION)]`<sup>1.46.0</sup> attribute can be used to make a
-parameter a short option.
-
-In this `justfile`:
-
-```just
-[arg("bar", short="b")]
-foo bar:
-```
-
-The parameter `bar` is given with the `-b` option:
-
-```console
-$ just foo -b hello
-bar=hello
-```
-
-If a parameter has both a long and short option, it may be passed using either.
-
-Variadic `*` and `+` parameters cannot be options.
-
-The `[arg(ARG, value=VALUE, …)]`<sup>1.46.0</sup> attribute can be used with
-`long` or `short` to make a parameter a flag which does not take a value.
-`VALUE` may be an expression<sup>1.54.0</sup>.
-
-In this `justfile`:
-
-```just
-[arg("bar", long="bar", value="hello")]
-foo bar:
-```
-
-The parameter `bar` is given with the `--bar` option, but does not take a
-value, and instead takes the value given in the `[arg]` attribute:
-
-```console
-$ just foo --bar
-bar=hello
-```
-
-This is useful for unconditionally requiring a flag like `--force` on dangerous
-commands.
-
-A flag is optional if its parameter has a default:
-
-```just
-[arg("bar", long="bar", value="hello")]
-foo bar="goodbye":
-```
-
-Causing it to receive the default when not passed in the invocation:
 
 ```console
 $ just foo
-bar=goodbye
+FOO
+$ touch baz
+$ just foo
+BAR
+FOO
 ```
 
-### Dependencies
+### Quiet Recipes
 
-Dependencies run before recipes that depend on them:
+A recipe name may be prefixed with `@` to invert the meaning of `@` before each
+line:
 
 ```just
-a: b
-  @echo A
-
-b:
-  @echo B
+@quiet:
+  echo hello
+  echo goodbye
+  @# all done!
 ```
 
-```
-$ just a
-B
-A
-```
-
-In a given invocation of `just`, a recipe with the same arguments will only run
-once, regardless of how many times it appears in the command-line invocation,
-or how many times it appears as a dependency:
-
-```just
-a:
-  @echo A
-
-b: a
-  @echo B
-
-c: a
-  @echo C
-```
-
-```
-$ just a a a a a
-A
-$ just b c
-A
-B
-C
-```
-
-Multiple recipes may depend on a recipe that performs some kind of setup, and
-when those recipes run, that setup will only be performed once:
-
-```just
-build:
-  cc main.c
-
-test-foo: build
-  ./a.out --test foo
-
-test-bar: build
-  ./a.out --test bar
-```
-
-```
-$ just test-foo test-bar
-cc main.c
-./a.out --test foo
-./a.out --test bar
-```
-
-Recipes in a given run are only skipped when they receive the same arguments:
-
-```just
-build:
-  cc main.c
-
-test TEST: build
-  ./a.out --test {{TEST}}
-```
-
-```
-$ just test foo test bar
-cc main.c
-./a.out --test foo
-./a.out --test bar
-```
-
-#### Running Recipes at the End of a Recipe
-
-Normal dependencies of a recipe always run before a recipe starts. That is to
-say, the dependee always runs before the depender. These dependencies are
-called "prior dependencies".
-
-A recipe can also have subsequent dependencies, which run immediately after the
-recipe and are introduced with an `&&`:
-
-```just
-a:
-  echo 'A!'
-
-b: a && c d
-  echo 'B!'
-
-c:
-  echo 'C!'
-
-d:
-  echo 'D!'
-```
-
-…running _b_ prints:
+Now only the lines starting with `@` will be echoed:
 
 ```console
-$ just b
-echo 'A!'
-A!
-echo 'B!'
-B!
-echo 'C!'
-C!
-echo 'D!'
-D!
+$ just quiet
+hello
+goodbye
+# all done!
 ```
 
-#### Running Recipes in the Middle of a Recipe
-
-`just` doesn't support running recipes in the middle of another recipe, but you
-can call `just` recursively in the middle of a recipe. Given the following
-`justfile`:
+All recipes in a justfile can be made quiet with `set quiet`:
 
 ```just
-a:
-  echo 'A!'
+set quiet
 
-b: a
-  echo 'B start!'
-  just c
-  echo 'B end!'
+foo:
+  echo "This is quiet"
 
-c:
-  echo 'C!'
+@foo2:
+  echo "This is also quiet"
 ```
 
-…running _b_ prints:
+The `[no-quiet]` attribute overrides this setting:
+
+```just
+set quiet
+
+foo:
+  echo "This is quiet"
+
+[no-quiet]
+foo2:
+  echo "This is not quiet"
+```
+
+Shebang recipes are quiet by default:
+
+```just
+foo:
+  #!/usr/bin/env bash
+  echo 'Foo!'
+```
 
 ```console
-$ just b
-echo 'A!'
-A!
-echo 'B start!'
-B start!
-echo 'C!'
-C!
-echo 'B end!'
-B end!
+$ just foo
+Foo!
 ```
 
-This has limitations, since recipe `c` is run with an entirely new invocation
-of `just`: Assignments will be recalculated, dependencies might run twice, and
-command line arguments will not be propagated to the child `just` process.
+Adding `@` to a shebang recipe name makes `just` print the recipe before
+executing it:
+
+```just
+@bar:
+  #!/usr/bin/env bash
+  echo 'Bar!'
+```
+
+```console
+$ just bar
+#!/usr/bin/env bash
+echo 'Bar!'
+Bar!
+```
+
+`just` normally prints error messages when a recipe line fails. These error
+messages can be suppressed using the `[no-exit-message]`<sup>1.7.0</sup>
+attribute on individual recipes, or module-wide with
+`set no-exit-message`<sup>1.39.0</sup>. You may find this especially useful
+with a recipe that wraps a tool:
+
+```just
+git *args:
+    @git {{args}}
+```
+
+```console
+$ just git status
+fatal: not a git repository (or any of the parent directories): .git
+error: Recipe `git` failed on line 2 with exit code 128
+```
+
+Add the attribute to suppress the exit error message when the tool exits with a
+non-zero code:
+
+```just
+[no-exit-message]
+git *args:
+    @git {{args}}
+```
+
+```console
+$ just git status
+fatal: not a git repository (or any of the parent directories): .git
+```
 
 ### Shebang Recipes
 
@@ -3686,40 +2853,6 @@ number of ways, from highest to lowest precedence:
 - Falling back to the directory returned by
   [std::env::temp_dir](https://doc.rust-lang.org/std/env/fn.temp_dir.html).
 
-### Python Recipes with `uv`
-
-[`uv`](https://github.com/astral-sh/uv) is an excellent cross-platform python
-project manager, written in Rust.
-
-Using the `[script]` attribute and `script-interpreter` setting, `just` can
-easily be configured to run Python recipes with `uv`:
-
-```just
-set script-interpreter := ['uv', 'run', '--script']
-
-[script]
-hello:
-  print("Hello from Python!")
-
-[script]
-goodbye:
-  # /// script
-  # requires-python = ">=3.11"
-  # dependencies=["sh"]
-  # ///
-  import sh
-  print(sh.echo("Goodbye from Python!"), end='')
-```
-
-Of course, a shebang also works:
-
-```just
-hello:
-  #!/usr/bin/env -S uv run --script
-  print("Hello from Python!")
-```
-
-
 ### Safer Bash Shebang Recipes
 
 If you're writing a `bash` shebang recipe, consider adding `set -euxo
@@ -3769,127 +2902,6 @@ If the interpreter path does not contain a `/` it will be executed without
 being translated. This is useful if `cygpath` is not available, or you wish to
 pass a Windows-style path to the interpreter.
 
-### Setting Variables in a Recipe
-
-Recipe lines are interpreted by the shell, not `just`, so it's not possible to
-set `just` variables in the middle of a recipe:
-
-```justfile
-foo:
-  x := "hello" # This doesn't work!
-  echo {{x}}
-```
-
-It is possible to use shell variables, but there's another problem. Every
-recipe line is run by a new shell instance, so variables set in one line won't
-be set in the next:
-
-```just
-foo:
-  x=hello && echo $x # This works!
-  y=bye
-  echo $y            # This doesn't, `y` is undefined here!
-```
-
-The best way to work around this is to use a shebang recipe. Shebang recipe
-bodies are extracted and run as scripts, so a single shell instance will run
-the whole thing:
-
-```just
-foo:
-  #!/usr/bin/env bash
-  set -euxo pipefail
-  x=hello
-  echo $x
-```
-
-### Sharing Environment Variables Between Recipes
-
-Each line of each recipe is executed by a fresh shell, so it is not possible to
-share environment variables between recipes.
-
-#### Using Python Virtual Environments
-
-Some tools, like [Python's venv](https://docs.python.org/3/library/venv.html),
-require loading environment variables in order to work, making them challenging
-to use with `just`. As a workaround, you can execute the virtual environment
-binaries directly:
-
-```just
-venv:
-  [ -d foo ] || python3 -m venv foo
-
-run: venv
-  ./foo/bin/python3 main.py
-```
-
-### Activating Environments
-
-Some tools require an activation step, such as Python virtual environments:
-
-```sh
-. .venv/bin/activate
-```
-
-Because these tools modify the environment of a running shell, it is not
-possible for `just` to perform this activation step for you. However, there are
-some workarounds.
-
-The best workaround for Python environment management is to switch to
-[`uv`](https://docs.astral.sh/uv/). `uv` sets up the correct environment for
-each command, so no activation step is needed.
-
-If that isn't possible, and for other tools, you can create a shared prelude
-and include it in script recipes that need it. It can span multiple lines and
-include any number of steps:
-
-```just
-prelude := '''
-  set -eux
-  . .venv/bin/activate
-'''
-
-[script]
-run:
-  {{ prelude }}
-  python script.py
-```
-
-This workaround doesn't work with shell recipes, which spawn a new shell for
-each command.
-
-### Changing the Working Directory in a Recipe
-
-Each recipe line is executed by a new shell, so if you change the working
-directory on one line, it won't have an effect on later lines:
-
-```just
-foo:
-  pwd    # This `pwd` will print the same directory…
-  cd bar
-  pwd    # …as this `pwd`!
-```
-
-There are a couple ways around this. One is to call `cd` on the same line as
-the command you want to run:
-
-```just
-foo:
-  cd bar && pwd
-```
-
-The other is to use a shebang recipe. Shebang recipe bodies are extracted and
-run as scripts, so a single shell instance will run the whole thing, and thus a
-`cd` on one line will affect later lines, just like a shell script:
-
-```just
-foo:
-  #!/usr/bin/env bash
-  set -euxo pipefail
-  cd bar
-  pwd
-```
-
 ### Indentation
 
 Recipe lines can be indented with spaces or tabs, but not a mix of both. All of
@@ -3903,7 +2915,8 @@ Here's a justfile with a recipe indented with spaces, represented as `·`, and
 tabs, represented as `→`.
 
 ```justfile
-set windows-shell := ["pwsh", "-NoLogo", "-NoProfileLoadTime", "-Command"]
+[windows]
+set shell := ["pwsh", "-NoLogo", "-NoProfileLoadTime", "-Command"]
 
 set ignore-comments
 
@@ -4089,423 +3102,476 @@ recipe:
   echo 'back to recipe body'
 ```
 
-### Command-line Options
+### Setting Variables in a Recipe
 
-`just` supports a number of useful command-line options for listing, dumping,
-and debugging recipes and variables:
+Recipe lines are interpreted by the shell, not `just`, so it's not possible to
+set `just` variables in the middle of a recipe:
 
-```console
-$ just --list
-Available recipes:
-  js
-  perl
-  polyglot
-  python
-  ruby
-$ just --show perl
-perl:
-  #!/usr/bin/env perl
-  print "Larry Wall says Hi!\n";
-$ just --show polyglot
-polyglot: python js perl sh ruby
-```
-
-#### Setting Command-line Options with Environment Variables
-
-Some command-line options can be set with environment variables
-
-For example, unstable features can be enabled either with the `--unstable`
-flag:
-
-```console
-$ just --unstable
-```
-
-Or by setting the `JUST_UNSTABLE` environment variable:
-
-```console
-$ export JUST_UNSTABLE=1
-$ just
-```
-
-Since environment variables are inherited by child processes, command-line
-options set with environment variables are inherited by recursive invocations
-of `just`, whereas command-line options set with arguments are not.
-
-Consult `just --help` for which options can be set with environment variables.
-
-### Cached Recipes
-
-`just` will skip invocations of recipes with the `[cache]`
-attribute<sup>1.54.0</sup> if it finds an entry matching the invocation in the
-cache. The `[cache]` attribute may only be used with script recipes and is
-currently unstable.
-
-Unlike many other features of `just`, which are, hopefully, well thought-out
-and user-friendly, cached recipes are inherently fragile. It is important to
-understand their limitations before relying on them. Please read this section
-thoroughly, including the friendly admonitions below.
-
-The cache is a directory named `.justcache` alongside the `justfile` and should
-not be committed to version control systems. It contains cache entries named
-`HASH.json`, where `HASH` is the BLAKE3 hash of a serialized cache key JSON
-object.
-
-The keys of the cache key object are:
-
-- `body`: evaluated recipe body
-- `environment`: map of environment variable names to values
-- `executor`: script interpreter or shebang
-- `extra`: user-supplied value
-- `inputs`: map of file paths to content hashs
-- `positional`: positional arguments
-- `recipe`: `::`-separated module path to invoked recipe
-- `working_directory`: current working directory
-
-Cache key objects for invoked recipes can be printed to standard error with
-`just -vv`.
-
-The value of `extra` may be supplied with `[cache(extra = EXPRESSION)]`, where
-`EXPRESSION` is an arbitrary expression evaluated with recipe arguments in
-scope. Changes to the value of `extra` will cause a cache miss.
-
-Before `just` runs a cached recipe, it creates a cache key, hashes it, and
-looks for the corresponding cache entry.
-
-If the cache entry is non-empty, it skips the invocation.
-
-If the cache entry does not exist or is empty, it runs the invocation and
-writes `{}` to the cache entry.
-
-File locks are taken on cache entries, so concurrent execution of cached
-recipes by multiple `just` processes is safe. If two processes run a recipe
-invocation with the same cache key, the first will take the lock, run the
-recipe, write to the cache entry, and relinquish the lock. The second will
-block until the first relinquishes the lock, see that the entry is non-empty,
-and skip the invocation.
-
-The cache can be bypassed entirely with the `--no-cache` flag.
-
-#### Clearing the Cache
-
-The recipe cache is stored in a directory named `.justcache` alongside the
-`justfile`. Deleting it will clear the cache.
-
-The cache can also be cleared with `just --clean`, which can selectively clear
-cache entries:
-
-```sh
-# clear all cache entries
-just --clean
-
-# clear cache entries for recipe `foo`
-just --clean foo
-
-# clear cache entries for recipe `baz` in submodule `bar`
-just --clean bar baz
-
-# clear cache entries for recipes in submodule module `bar`
-just --clean bar
-
-# clear cache entries for recipes in submodule module `bar::bob`
-just --clean bar bob
-
-# '::'-separated paths may also be used
-just --clean bar::bob
-```
-
-#### Input Files
-
-Input files can be provided with `[cache(inputs = FILES)]`, where `FILES` is an
-expression that is evaluated with recipe arguments in scope and whose evaluated
-elements are paths. Paths may be absolute or relative to the recipe's working
-directory.
-
-Each input file is hashed with BLAKE3 and added to the `inputs` cache key,
-which contains a map of paths to hashes.
-
-Any changes to the contents of an input file changes the cache key, which
-causes the next invocation to miss the cache and re-run.
-
-Missing inputs and paths to directories are errors.
-
-In this example, the `build` recipe will re-run if `lib.c` or `main.c` change:
-
-```just
-set unstable
-set lists
-
-[script]
-[cache(inputs = ["lib.c", "main.c"])]
-build:
-  cc lib.c main.c -o main
-```
-
-#### Output Files
-
-Output files can be provided with `[cache(outputs = FILES)]`, where `FILES` is
-an expression that is evaluated with recipe arguments in scope and whose
-evaluated elements are paths. Paths may be absolute or relative to the recipe's
-working directory.
-
-Outputs are not part of the cache key.
-
-All output files must exist for an invocation to be skipped, and after an
-invocation runs successfully, it is an error if any output file does not exist.
-
-In this example, `build` re-runs whenever `main` is missing, and errors if it
-runs without producing `main`:
-
-```just
-set unstable
-set lists
-
-[script]
-[cache(inputs = ["lib.c", "main.c"], outputs = "main")]
-build:
-  cc lib.c main.c -o main
-
-clean:
-  rm -f main
-```
-
-This forces `build` to re-run if `main` is deleted by `clean`.
-
-#### Friendly Admonitions
-
-`just` will happily skip cached recipes, but it is your responsibility to make
-sure that this is safe, and that the contents of the cache key capture enough
-information about recipe invocations for caching to make sense in the first
-place.
-
-In particular, there are many details about the context in which a recipe runs
-that are not captured by cache keys.
-
-These include the time, input files, output files, system binaries, operating
-system version, databases, systems over the network, the DNS, and any of the
-myriad other things which may change the execution of a computer program.
-
-Attempting to skip execution based on the type of crude heuristics that `just`
-employs has a long and sordid history. However, it is an undeniably convenient
-and powerful tool, and it is provided in the hopes that you find it useful.
-
-### Private Recipes
-
-Recipes and aliases whose name starts with a `_` are omitted from `just --list`:
-
-```just
-test: _test-helper
-  ./bin/test
-
-_test-helper:
-  ./bin/super-secret-test-helper-stuff
-```
-
-```console
-$ just --list
-Available recipes:
-    test
-```
-
-And from `just --summary`:
-
-```console
-$ just --summary
-test
-```
-
-The `[private]` attribute<sup>1.10.0</sup> may also be used to hide recipes or
-aliases without needing to change the name:
-
-```just
-[private]
+```justfile
 foo:
-
-[private]
-alias b := bar
-
-bar:
+  x := "hello" # This doesn't work!
+  echo {{x}}
 ```
 
-```console
-$ just --list
-Available recipes:
-    bar
-```
-
-This is useful for helper recipes which are only meant to be used as
-dependencies of other recipes.
-
-### Quiet Recipes
-
-A recipe name may be prefixed with `@` to invert the meaning of `@` before each
-line:
+It is possible to use shell variables, but there's another problem. Every
+recipe line is run by a new shell instance, so variables set in one line won't
+be set in the next:
 
 ```just
-@quiet:
-  echo hello
-  echo goodbye
-  @# all done!
+foo:
+  x=hello && echo $x # This works!
+  y=bye
+  echo $y            # This doesn't, `y` is undefined here!
 ```
 
-Now only the lines starting with `@` will be echoed:
+The best way to work around this is to use a shebang recipe. Shebang recipe
+bodies are extracted and run as scripts, so a single shell instance will run
+the whole thing:
+
+```just
+foo:
+  #!/usr/bin/env bash
+  set -euxo pipefail
+  x=hello
+  echo $x
+```
+
+### Configuring the Shell
+
+There are a number of ways to configure the shell for shell recipes, which are
+the default when a recipe does not start with a `#!` shebang. Their precedence,
+from highest to lowest, is:
+
+1. The `--shell` and `--shell-arg` command line options. Passing either of
+   these will cause `just` to ignore any settings in the current justfile.
+2. `set windows-shell := [...]` (deprecated)
+3. `set windows-powershell` (deprecated)
+4. `set shell := [...]`
+
+Use the `[windows]` and `[unix]` attributes with `set shell` to use different a
+shells on Windows.
+
+### Shell
+
+The `shell` setting controls the command used to invoke recipe lines and
+backticks. Shebang recipes are unaffected. The default shell is `sh -cu`.
+
+```just
+# use python3 to execute recipe lines and backticks
+set shell := ["python3", "-c"]
+
+# use print to capture result of evaluation
+foos := `print("foo" * 4)`
+
+foo:
+  print("Snake snake snake snake.")
+  print("{{foos}}")
+```
+
+`just` passes the command to be executed as an argument. Many shells will need
+an additional flag, often `-c`, to make them evaluate the first argument.
+
+#### Windows Shell
+
+`just` uses `sh` on Windows by default. To use a different shell on Windows,
+use the `[windows]` attribute on the `shell` setting:
+
+```just
+[windows]
+set shell := ["powershell.exe", "-NoLogo", "-Command"]
+
+hello:
+  Write-Host "Hello, world!"
+```
+
+See
+[powershell.just](https://github.com/casey/just/blob/master/examples/powershell.just)
+for a justfile that uses PowerShell on all platforms.
+
+#### Python 3
+
+```just
+set shell := ["python3", "-c"]
+```
+
+#### Bash
+
+```just
+set shell := ["bash", "-uc"]
+```
+
+#### Z Shell
+
+```just
+set shell := ["zsh", "-uc"]
+```
+
+#### Fish
+
+```just
+set shell := ["fish", "-c"]
+```
+
+#### Nushell
+
+```just
+set shell := ["nu", "-c"]
+```
+
+If you want to change the default table mode to `light`:
+
+```just
+set shell := ['nu', '-m', 'light', '-c']
+```
+
+*[Nushell](https://github.com/nushell/nushell) was written in Rust, and **has
+cross-platform support for Windows / macOS and Linux**.*
+
+Environment Variables
+---------------------
+
+### Getting and Setting Environment Variables
+
+#### Exporting `just` Variables
+
+Assignments prefixed with the `export` keyword will be exported to recipes as
+environment variables:
+
+```just
+export RUST_BACKTRACE := "1"
+
+test:
+  # will print a stack trace if it crashes
+  cargo test
+```
+
+Parameters prefixed with a `$` will be exported as environment variables:
+
+```just
+test $RUST_BACKTRACE="1":
+  # will print a stack trace if it crashes
+  cargo test
+```
+
+You can also use the `[env(NAME, VALUE)]` attribute to export environment
+variables to a specific recipe:
+
+```just
+[env("RUST_BACKTRACE", "1")]
+test:
+  # will print a stack trace if it crashes
+  cargo test
+```
+
+Exported variables and parameters are not exported to backticks in the same scope.
+
+```just
+export WORLD := "world"
+# This backtick will fail with "WORLD: unbound variable"
+BAR := `echo hello $WORLD`
+```
+
+```just
+# Running `just a foo` will fail with "A: unbound variable"
+a $A $B=`echo $A`:
+  echo $A $B
+```
+
+When [export](#export) is set, all `just` variables are exported as environment
+variables.
+
+#### Unexporting Environment Variables
+
+Environment variables can be unexported with the `unexport`
+keyword<sup>1.29.0</sup>:
+
+```just
+unexport FOO
+
+@foo:
+  echo $FOO
+```
+
+```
+$ export FOO=bar
+$ just foo
+sh: FOO: unbound variable
+```
+
+#### Getting Environment Variables from the Environment
+
+Environment variables from the environment are passed automatically to the
+recipes.
+
+```just
+print_home_folder:
+  @echo "HOME is: '${HOME}'"
+```
 
 ```console
-$ just quiet
+$ just
+HOME is: '/home/myuser'
+```
+
+#### Setting `just` Variables from Environment Variables
+
+Environment variables can be propagated to `just` variables using the `env()` function.
+See
+[environment-variables](#environment-variables).
+
+### Dotenv Settings
+
+If any of `dotenv-load`, `dotenv-filename`, `dotenv-override`, `dotenv-path`,
+or `dotenv-required` are set, `just` will try to load environment variables
+from a file.
+
+If `dotenv-path` is set, `just` will look for a file at the given path, which
+may be absolute, or relative to the working directory.
+
+The command-line option `--dotenv-path`, short form `-E`, can be used to set or
+override `dotenv-path` at runtime.
+
+If `dotenv-filename` is set, `just` will look for a file at the given path,
+relative to the working directory and each of its ancestors.
+
+The command-line option `--dotenv-filename`, short form `-F`, can be used to
+set or override `dotenv-filename` at runtime.
+
+If `dotenv-filename` is not set, but `dotenv-load` or `dotenv-required` are
+set, `just` will look for a file named `.env`, relative to the working directory
+and each of its ancestors.
+
+`dotenv-filename` and `dotenv-path` are similar, but `dotenv-path` is only
+checked relative to the working directory, whereas `dotenv-filename` is checked
+relative to the working directory and each of its ancestors.
+
+It is not an error if an environment file is not found, unless
+`dotenv-required` is set.
+
+The loaded variables are environment variables, not `just` variables, and so
+must be accessed using `$VARIABLE_NAME` in recipes and backticks.
+
+If `dotenv-override` is set, variables from the environment file will override
+existing environment variables.
+
+If `dotenv-command` is set, `just` runs it with the configured `shell` and loads
+its standard output as an environment file.
+
+This is useful for sourcing secrets from a secret manager or vault:
+
+```just
+set dotenv-command := 'sops -d .enc.env'
+```
+
+The command-line option `--dotenv-command` can be used to set or override
+`dotenv-command` at runtime, and may be passed multiple times. Each value is
+run as a command, with variables from later commands taking precedence over
+variables from earlier commands.
+
+For example, if your `.env` file contains:
+
+```console
+# a comment, will be ignored
+DATABASE_ADDRESS=localhost:6379
+SERVER_PORT=1337
+```
+
+And your `justfile` contains:
+
+```just
+set dotenv-load
+
+serve:
+  @echo "Starting server with database $DATABASE_ADDRESS on port $SERVER_PORT…"
+  ./server --database $DATABASE_ADDRESS --port $SERVER_PORT
+```
+
+`just serve` will output:
+
+```console
+$ just serve
+Starting server with database localhost:6379 on port 1337…
+./server --database $DATABASE_ADDRESS --port $SERVER_PORT
+```
+
+Variables in environment files loaded in parent modules are inherited by
+submodules.
+
+Environment files are loaded in submodules<sup>1.49.0</sup> and may override
+variables defined in parent module environment files.
+
+### Export
+
+The `export` setting causes all `just` variables to be exported as environment
+variables. Defaults to `false`.
+
+```just
+set export
+
+a := "hello"
+
+@foo b:
+  echo $a
+  echo $b
+```
+
+```console
+$ just foo goodbye
 hello
 goodbye
-# all done!
 ```
 
-All recipes in a justfile can be made quiet with `set quiet`:
+### Sharing Environment Variables Between Recipes
+
+Each line of each recipe is executed by a fresh shell, so it is not possible to
+share environment variables between recipes.
+
+#### Using Python Virtual Environments
+
+Some tools, like [Python's venv](https://docs.python.org/3/library/venv.html),
+require loading environment variables in order to work, making them challenging
+to use with `just`. As a workaround, you can execute the virtual environment
+binaries directly:
 
 ```just
-set quiet
+venv:
+  [ -d foo ] || python3 -m venv foo
 
-foo:
-  echo "This is quiet"
-
-@foo2:
-  echo "This is also quiet"
+run: venv
+  ./foo/bin/python3 main.py
 ```
 
-The `[no-quiet]` attribute overrides this setting:
+Working Directory
+-----------------
+
+By default, recipes run with the working directory set to the directory that
+contains the `justfile`.
+
+The `[no-cd]` attribute can be used to make recipes run with the working
+directory set to the directory in which `just` was invoked.
 
 ```just
-set quiet
+@foo:
+  pwd
 
-foo:
-  echo "This is quiet"
-
-[no-quiet]
-foo2:
-  echo "This is not quiet"
-```
-
-Shebang recipes are quiet by default:
-
-```just
-foo:
-  #!/usr/bin/env bash
-  echo 'Foo!'
-```
-
-```console
-$ just foo
-Foo!
-```
-
-Adding `@` to a shebang recipe name makes `just` print the recipe before
-executing it:
-
-```just
+[no-cd]
 @bar:
-  #!/usr/bin/env bash
-  echo 'Bar!'
+  pwd
 ```
 
 ```console
+$ cd subdir
+$ just foo
+/
 $ just bar
-#!/usr/bin/env bash
-echo 'Bar!'
-Bar!
+/subdir
 ```
 
-`just` normally prints error messages when a recipe line fails. These error
-messages can be suppressed using the `[no-exit-message]`<sup>1.7.0</sup>
-attribute on individual recipes, or module-wide with
-`set no-exit-message`<sup>1.39.0</sup>. You may find this especially useful
-with a recipe that wraps a tool:
+Note that this does not affect dotenv file search, or the working directory of
+backtick and `shell()` invocations.
+
+Use `set no-cd`<sup>1.51.0</sup> to make all recipes in the current module
+default to the same behavior.
+
+`set no-cd` and `set working-directory` can be overridden on a per-recipe basis
+with the `[no-cd]` and `[working-directory]` attributes.
+
+You can override the working directory for all recipes with
+`set working-directory := '…'`:
 
 ```just
-git *args:
-    @git {{args}}
+set working-directory := 'bar'
+
+@foo:
+  pwd
 ```
 
 ```console
-$ just git status
-fatal: not a git repository (or any of the parent directories): .git
-error: Recipe `git` failed on line 2 with exit code 128
+$ pwd
+/home/bob
+$ just foo
+/home/bob/bar
 ```
 
-Add the attribute to suppress the exit error message when the tool exits with a
-non-zero code:
+You can override the working directory for a specific recipe with the
+`working-directory` attribute<sup>1.38.0</sup>:
 
 ```just
-[no-exit-message]
-git *args:
-    @git {{args}}
+[working-directory: 'bar']
+@foo:
+  pwd
 ```
 
 ```console
-$ just git status
-fatal: not a git repository (or any of the parent directories): .git
+$ pwd
+/home/bob
+$ just foo
+/home/bob/bar
 ```
 
-### Selecting Recipes to Run With an Interactive Chooser
+The argument to the `working-directory` setting or `working-directory`
+attribute may be an expression<sup>1.51.0</sup> whose value is absolute or
+relative. If it is relative it is interpreted relative to the default working
+directory.
 
-The `--choose` subcommand makes `just` invoke a chooser to select which recipes
-to run. Choosers should read lines containing recipe names from standard input
-and print one or more of those names separated by spaces to standard output.
+### Changing the Working Directory in a Recipe
 
-Because there is currently no way to run a recipe that requires arguments with
-`--choose`, such recipes will not be given to the chooser. Private recipes and
-aliases are also skipped.
-
-The chooser can be overridden with the `--chooser` flag. If `--chooser` is not
-given, then `just` first checks if `$JUST_CHOOSER` is set. If it isn't, then
-the chooser defaults to `fzf`, a popular fuzzy finder.
-
-Arguments can be included in the chooser, i.e. `fzf --exact`.
-
-The chooser is invoked in the same way as recipe lines. For example, if the
-chooser is `fzf`, it will be invoked with `sh -cu 'fzf'`, and if the shell, or
-the shell arguments are overridden, the chooser invocation will respect those
-overrides.
-
-If you'd like `just` to default to selecting recipes with a chooser, you can
-use this as your default recipe:
+Each recipe line is executed by a new shell, so if you change the working
+directory on one line, it won't have an effect on later lines:
 
 ```just
-default:
-  @just --choose
+foo:
+  pwd    # This `pwd` will print the same directory…
+  cd bar
+  pwd    # …as this `pwd`!
 ```
 
-### Invoking `justfile`s in Other Directories
+There are a couple ways around this. One is to call `cd` on the same line as
+the command you want to run:
 
-If the first argument passed to `just` contains a `/`, then the following
-occurs:
-
-1.  The argument is split at the last `/`.
-
-2.  The part before the last `/` is treated as a directory. `just` will start
-    its search for the `justfile` there, instead of in the current directory.
-
-3.  The part after the last slash is treated as a normal argument, or ignored
-    if it is empty.
-
-This may seem a little strange, but it's useful if you wish to run a command in
-a `justfile` that is in a subdirectory.
-
-For example, if you are in a directory which contains a subdirectory named
-`foo`, which contains a `justfile` with the recipe `build`, which is also the
-default recipe, the following are all equivalent:
-
-```console
-$ (cd foo && just build)
-$ just foo/build
-$ just foo/
+```just
+foo:
+  cd bar && pwd
 ```
 
-Additional recipes after the first are sought in the same `justfile`. For
-example, the following are both equivalent:
+The other is to use a shebang recipe. Shebang recipe bodies are extracted and
+run as scripts, so a single shell instance will run the whole thing, and thus a
+`cd` on one line will affect later lines, just like a shell script:
 
-```console
-$ just foo/a b
-$ (cd foo && just a b)
+```just
+foo:
+  #!/usr/bin/env bash
+  set -euxo pipefail
+  cd bar
+  pwd
 ```
 
-And will both invoke recipes `a` and `b` in `foo/justfile`.
+### Disabling Changing Directory
+
+`just` normally executes recipes with the current directory set to the
+directory that contains the `justfile`. This can be disabled using the
+`[no-cd]` attribute<sup>1.9.0</sup>. This can be used to create recipes which
+use paths relative to the invocation directory, or which operate on the current
+directory.
+
+For example, this `commit` recipe:
+
+```just
+[no-cd]
+commit file:
+  git add {{file}}
+  git commit
+```
+
+Can be used with paths that are relative to the current directory, because
+`[no-cd]` prevents `just` from changing the current directory when executing
+`commit`.
+
+Note that this does not affect dotenv file search, or the working directory of
+backtick and `shell()` invocations.
+
+Organization
+------------
 
 ### Imports
 
@@ -4721,10 +3787,176 @@ Modules are still missing a lot of features, for example, the ability to refer
 to variables in other modules. See the [module improvement tracking
 issue](https://github.com/casey/just/issues/2252) for more information.
 
-### Hiding `justfile`s
+### Invoking `justfile`s in Other Directories
 
-`just` looks for `justfile`s named `justfile` and `.justfile`, which can be
-used to keep a `justfile` hidden.
+If the first argument passed to `just` contains a `/`, then the following
+occurs:
+
+1.  The argument is split at the last `/`.
+
+2.  The part before the last `/` is treated as a directory. `just` will start
+    its search for the `justfile` there, instead of in the current directory.
+
+3.  The part after the last slash is treated as a normal argument, or ignored
+    if it is empty.
+
+This may seem a little strange, but it's useful if you wish to run a command in
+a `justfile` that is in a subdirectory.
+
+For example, if you are in a directory which contains a subdirectory named
+`foo`, which contains a `justfile` with the recipe `build`, which is also the
+default recipe, the following are all equivalent:
+
+```console
+$ (cd foo && just build)
+$ just foo/build
+$ just foo/
+```
+
+Additional recipes after the first are sought in the same `justfile`. For
+example, the following are both equivalent:
+
+```console
+$ just foo/a b
+$ (cd foo && just a b)
+```
+
+And will both invoke recipes `a` and `b` in `foo/justfile`.
+
+### Fallback to parent `justfile`s
+
+If a recipe is not found in a `justfile` and the `fallback` setting is set,
+`just` will look for `justfile`s in the parent directory and up, until it
+reaches the root directory. `just` will stop after it reaches a `justfile` in
+which the `fallback` setting is `false` or unset.
+
+As an example, suppose the current directory contains this `justfile`:
+
+```just
+set fallback
+foo:
+  echo foo
+```
+
+And the parent directory contains this `justfile`:
+
+```just
+bar:
+  echo bar
+```
+
+```console
+$ just bar
+Trying ../justfile
+echo bar
+bar
+```
+
+### Remote Justfiles
+
+If you wish to include a `mod` or `import` source file in many `justfiles`
+without needing to duplicate it, you can use an optional `mod` or `import`,
+along with a recipe to fetch the module source:
+
+```just
+import? 'foo.just'
+
+fetch:
+  curl https://raw.githubusercontent.com/casey/just/master/justfile > foo.just
+```
+
+Given the above `justfile`, after running `just fetch`, the recipes in
+`foo.just` will be available.
+
+### Global and User `justfile`s
+
+If you want some recipes to be available everywhere, you have a few options.
+
+#### Global Justfile
+
+`just --global-justfile`, or `just -g` for short, searches the following paths,
+in-order, for a justfile:
+
+- `$XDG_CONFIG_HOME/just/justfile`
+- `$HOME/.config/just/justfile`
+- `$HOME/justfile`
+- `$HOME/.justfile`
+
+You can put recipes that are used across many projects in a global justfile to
+easily invoke them from any directory.
+
+#### User justfile tips
+
+You can also adopt some of the following workflows. These tips assume you've
+created a `justfile` at `~/.user.justfile`, but you can put this `justfile`
+at any convenient path on your system.
+
+##### Recipe Aliases
+
+If you want to call the recipes in `~/.user.justfile` by name, and don't mind
+creating an alias for every recipe, add the following to your shell's
+initialization script:
+
+```console
+for recipe in `just --justfile ~/.user.justfile --summary`; do
+  alias $recipe="just --justfile ~/.user.justfile --working-directory . $recipe"
+done
+```
+
+Now, if you have a recipe called `foo` in `~/.user.justfile`, you can just type
+`foo` at the command line to run it.
+
+It took me way too long to realize that you could create recipe aliases like
+this. Notwithstanding my tardiness, I am very pleased to bring you this major
+advance in `justfile` technology.
+
+##### Forwarding Alias
+
+If you'd rather not create aliases for every recipe, you can create a single alias:
+
+```console
+alias .j='just --justfile ~/.user.justfile --working-directory .'
+```
+
+Now, if you have a recipe called `foo` in `~/.user.justfile`, you can just type
+`.j foo` at the command line to run it.
+
+I'm pretty sure that nobody actually uses this feature, but it's there.
+
+¯\\\_(ツ)\_/¯
+
+##### Customization
+
+You can customize the above aliases with additional options. For example, if
+you'd prefer to have the recipes in your `justfile` run in your home directory,
+instead of the current directory:
+
+```console
+alias .j='just --justfile ~/.user.justfile --working-directory ~'
+```
+
+### Markdown `justfile`s
+
+If the argument to `--justfile` ends in `.md`, `just` extracts the contents of
+unindented `just` fenced code blocks and writes them to a `justfile` in a
+temporary directory<sup>1.53.0</sup>:
+
+````markdown
+# Project
+
+Build the project:
+
+```just
+build:
+  echo Building…
+```
+````
+
+```console
+$ just --justfile README.md build
+echo Building…
+Building…
+```
 
 ### Just Scripts
 
@@ -4763,194 +3995,309 @@ default:
   echo foo
 ```
 
-### Markdown `justfile`s
+### Hiding `justfile`s
 
-If the argument to `--justfile` ends in `.md`, `just` extracts the contents of
-unindented `just` fenced code blocks and writes them to a `justfile` in a
-temporary directory<sup>1.53.0</sup>:
+`just` looks for `justfile`s named `justfile` and `.justfile`, which can be
+used to keep a `justfile` hidden.
 
-````markdown
-# Project
+Command Line
+------------
 
-Build the project:
+### Listing Available Recipes
+
+Recipes can be listed in alphabetical order with `just --list`:
+
+```console
+$ just --list
+Available recipes:
+    build
+    test
+    deploy
+    lint
+```
+
+Recipes in [submodules](#modules) can be listed with `just --list PATH`, where
+`PATH` is a space- or `::`-separated module path:
+
+```
+$ cat justfile
+mod foo
+$ cat foo.just
+mod bar
+$ cat bar.just
+baz:
+$ just --list foo bar
+Available recipes:
+    baz
+$ just --list foo::bar
+Available recipes:
+    baz
+```
+
+`just --summary` is more concise:
+
+```console
+$ just --summary
+build test deploy lint
+```
+
+Pass `--unsorted` to print recipes in the order they appear in the `justfile`:
+
+```just
+test:
+  echo 'Testing!'
+
+build:
+  echo 'Building!'
+```
+
+```console
+$ just --list --unsorted
+Available recipes:
+    test
+    build
+```
+
+```console
+$ just --summary --unsorted
+test build
+```
+
+If you'd like `just` to default to listing the recipes in the `justfile`, set
+`default-list`<sup>1.52.0</sup>:
+
+```just
+set default-list := true
+```
+
+The setting is per-module, so invoking a module path with `default-list`
+enabled lists that module's recipes.
+
+You can also default to listing recipes this behavior by settting the
+environment variable `JUST_DEFAULT_LIST=true` or passing
+`--default-list`<sup>1.52.0</sup>.
+
+
+The heading text can be customized with `--list-heading`:
+
+```console
+$ just --list --list-heading $'Cool stuff…\n'
+Cool stuff…
+    test
+    build
+```
+
+And the indentation can be customized with `--list-prefix`:
+
+```console
+$ just --list --list-prefix ····
+Available recipes:
+····test
+····build
+```
+
+The argument to `--list-heading` replaces both the heading and the newline
+following it, so it should contain a newline if non-empty. It works this way so
+you can suppress the heading line entirely by passing the empty string:
+
+```console
+$ just --list --list-heading ''
+    test
+    build
+```
+
+### Invoking Multiple Recipes
+
+Multiple recipes may be invoked on the command line at once:
 
 ```just
 build:
-  echo Building…
-```
-````
+  make web
 
-```console
-$ just --justfile README.md build
-echo Building…
-Building…
-```
-
-### Formatting and dumping `justfile`s
-
-Each `justfile` has a canonical formatting with respect to whitespace and
-newlines.
-
-You can overwrite the current justfile with a canonically-formatted version
-using the `--fmt` flag:
-
-```console
-$ cat justfile
-# A lot of blank lines
-
-
-
-
-
-some-recipe:
-  echo "foo"
-$ just --fmt
-$ cat justfile
-# A lot of blank lines
-
-some-recipe:
-    echo "foo"
-```
-
-When the `justfile` is read from standard input with `--justfile -` or
-extracted from a markdown file, `--fmt` prints the formatted `justfile` to
-stdout.
-
-Note that formatting is not covered by any backwards compatibility guarantee
-and is subject to change from time to time.
-
-Invoking `just --fmt --check` runs `--fmt` in check mode. Instead of
-overwriting the `justfile`, `just` will exit with an exit code of 0 if it is
-formatted correctly, and will exit with 1 and print a diff if it is not.
-
-You can use the `--dump` command to output a formatted version of the
-`justfile` to stdout:
-
-```console
-$ just --dump > formatted-justfile
-```
-
-The `--dump` command can be used with `--dump-format json` to print a JSON
-representation of a `justfile`.
-
-### Fallback to parent `justfile`s
-
-If a recipe is not found in a `justfile` and the `fallback` setting is set,
-`just` will look for `justfile`s in the parent directory and up, until it
-reaches the root directory. `just` will stop after it reaches a `justfile` in
-which the `fallback` setting is `false` or unset.
-
-As an example, suppose the current directory contains this `justfile`:
-
-```just
-set fallback
-foo:
-  echo foo
-```
-
-And the parent directory contains this `justfile`:
-
-```just
-bar:
-  echo bar
+serve:
+  python3 -m http.server -d out 8000
 ```
 
 ```console
-$ just bar
-Trying ../justfile
-echo bar
-bar
+$ just build serve
+make web
+python3 -m http.server -d out 8000
 ```
 
-### Avoiding Argument Splitting
-
-Given this `justfile`:
+Keep in mind that recipes with parameters will swallow arguments, even if they
+match the names of other recipes:
 
 ```just
-foo argument:
-  touch {{argument}}
-```
+build project:
+  make {{project}}
 
-The following command will create two files, `some` and `argument.txt`:
+serve:
+  python3 -m http.server -d out 8000
+```
 
 ```console
-$ just foo "some argument.txt"
+$ just build serve
+make: *** No rule to make target `serve'.  Stop.
 ```
 
-The user's shell will parse `"some argument.txt"` as a single argument, but
-when `just` replaces `touch {{argument}}` with `touch some argument.txt`, the
-quotes are not preserved, and `touch` will receive two arguments.
+The `--one` flag can be used to restrict command-line invocations to a single
+recipe:
 
-There are a few ways to avoid this: quoting, positional arguments, and exported
-arguments.
+```console
+$ just --one build serve
+error: Expected 1 command-line recipe invocation but found 2.
+```
 
-#### Quoting
+### Setting Variables from the Command Line
 
-Quotes can be added around the `{{argument}}` interpolation:
+Variables can be overridden from the command line.
 
 ```just
-foo argument:
-  touch '{{argument}}'
+os := "linux"
+
+test: build
+  ./test --test {{os}}
+
+build:
+  ./build {{os}}
 ```
 
-This preserves `just`'s ability to catch variable name typos before running,
-for example if you were to write `{{argument}}`, but will not do what you want
-if the value of `argument` contains single quotes.
+```console
+$ just
+./build linux
+./test --test linux
+```
 
-#### Positional Arguments
+Any number of arguments of the form `NAME=VALUE` can be passed before recipes:
 
-The `positional-arguments` setting causes all arguments to be passed as
-positional arguments, allowing them to be accessed with `$1`, `$2`, …, and
-`$@`, which can then be double-quoted to avoid further splitting by the shell:
+```console
+$ just os=plan9
+./build plan9
+./test --test plan9
+```
+
+Or you can use the `--set` flag:
+
+```console
+$ just --set os bsd
+./build bsd
+./test --test bsd
+```
+
+Variables in submodules can be overridden using the `::`-separated path to the
+variable. A variable named `bar` in a submodule named `foo` may be overridden
+with `foo::bar=VALUE` or `--set foo::bar VALUE`.
+
+### Command-line Options
+
+`just` supports a number of useful command-line options for listing, dumping,
+and debugging recipes and variables:
+
+```console
+$ just --list
+Available recipes:
+  js
+  perl
+  polyglot
+  python
+  ruby
+$ just --show perl
+perl:
+  #!/usr/bin/env perl
+  print "Larry Wall says Hi!\n";
+$ just --show polyglot
+polyglot: python js perl sh ruby
+```
+
+#### Setting Command-line Options with Environment Variables
+
+Some command-line options can be set with environment variables
+
+For example, unstable features can be enabled either with the `--unstable`
+flag:
+
+```console
+$ just --unstable
+```
+
+Or by setting the `JUST_UNSTABLE` environment variable:
+
+```console
+$ export JUST_UNSTABLE=1
+$ just
+```
+
+Since environment variables are inherited by child processes, command-line
+options set with environment variables are inherited by recursive invocations
+of `just`, whereas command-line options set with arguments are not.
+
+Consult `just --help` for which options can be set with environment variables.
+
+### Selecting Recipes to Run With an Interactive Chooser
+
+The `--choose` subcommand makes `just` invoke a chooser to select which recipes
+to run. Choosers should read lines containing recipe names from standard input
+and print one or more of those names separated by spaces to standard output.
+
+Because there is currently no way to run a recipe that requires arguments with
+`--choose`, such recipes will not be given to the chooser. Private recipes and
+aliases are also skipped.
+
+The chooser can be overridden with the `--chooser` flag. If `--chooser` is not
+given, then `just` first checks if `$JUST_CHOOSER` is set. If it isn't, then
+the chooser defaults to `fzf`, a popular fuzzy finder.
+
+Arguments can be included in the chooser, i.e. `fzf --exact`.
+
+The chooser is invoked in the same way as recipe lines. For example, if the
+chooser is `fzf`, it will be invoked with `sh -cu 'fzf'`, and if the shell, or
+the shell arguments are overridden, the chooser invocation will respect those
+overrides.
+
+If you'd like `just` to default to selecting recipes with a chooser, you can
+use this as your default recipe:
 
 ```just
-set positional-arguments
-
-foo argument:
-  touch "$1"
+default:
+  @just --choose
 ```
 
-This defeats `just`'s ability to catch typos, for example if you type `$2`
-instead of `$1`, but works for all possible values of `argument`, including
-those with double quotes.
+### Requiring Confirmation for Recipes
 
-#### Exported Arguments
+`just` normally executes all recipes unless there is an error. The `[confirm]`
+attribute<sup>1.17.0</sup> allows recipes to require confirmation in the terminal
+prior to running. This can be overridden by passing `--yes` to `just`, which
+will automatically confirm any recipes marked by this attribute.
 
-All arguments are exported when the `export` setting is set:
+Recipes dependent on a recipe that requires confirmation will not be run if the
+relied upon recipe is not confirmed, as well as recipes passed after any recipe
+that requires confirmation.
 
 ```just
-set export
-
-foo argument:
-  touch "$argument"
+[confirm]
+delete-all:
+  rm -rf *
 ```
 
-Or individual arguments may be exported by prefixing them with `$`:
+#### Custom Confirmation Prompt
+
+The default confirmation prompt can be overridden with
+`[confirm(PROMPT)]`<sup>1.23.0</sup>:
 
 ```just
-foo $argument:
-  touch "$argument"
+[confirm("Are you sure you want to delete everything?")]
+delete-everything:
+  rm -rf *
 ```
 
-This defeats `just`'s ability to catch typos, for example if you type
-`$argument`, but works for all possible values of `argument`, including those
-with double quotes.
+The confirmation prompt may also be an expression<sup>1.49.0</sup> which may
+reference assignments or recipe arguments:
 
-### Configuring the Shell
-
-There are a number of ways to configure the shell for shell recipes, which are
-the default when a recipe does not start with a `#!` shebang. Their precedence,
-from highest to lowest, is:
-
-1. The `--shell` and `--shell-arg` command line options. Passing either of
-   these will cause `just` to ignore any settings in the current justfile.
-2. `set windows-shell := [...]`
-3. `set windows-powershell` (deprecated)
-4. `set shell := [...]`
-
-Since `set windows-shell` has higher precedence than `set shell`, you can use
-`set windows-shell` to pick a shell on Windows, and `set shell` to pick a shell
-for all other platforms.
+```just
+[confirm("Deploy to " + env + "?")]
+deploy env:
+  echo 'Deploying to {{env}}...'
+```
 
 ### Timestamps
 
@@ -4988,6 +4335,35 @@ The argument to `--timestamp-format` is a `strftime`-style format string, see
 the
 [`chrono` library docs](https://docs.rs/chrono/latest/chrono/format/strftime/index.html)
 for details.
+
+The `[timestamp]` attribute<sup>1.58.0</sup> can be used to enable timestamps
+for a specific recipe:
+
+```just
+[timestamp]
+foo:
+  echo hello
+```
+
+```
+$ just foo
+[07:28:46] echo hello
+hello
+```
+
+Which may include a format string:
+
+```just
+[timestamp('%H:%M:%S%.3f')]
+foo:
+  echo hello
+```
+
+```
+$ just foo
+[07:28:46.487] echo hello
+hello
+```
 
 ### Signal Handling
 
@@ -5063,69 +4439,6 @@ commands<sup>1.41.0</sup>.
 
 On Windows, `just` behaves as if it had received `SIGINT` when the user types
 `ctrl-c`. Other signals are unsupported.
-
-Changelog
----------
-
-A changelog for the latest release is available in
-[CHANGELOG.md](https://raw.githubusercontent.com/casey/just/master/CHANGELOG.md).
-Changelogs for previous releases are available on
-[the releases page](https://github.com/casey/just/releases). `just --changelog`
-can also be used to make a `just` binary print its changelog.
-
-Miscellanea
------------
-
-### Re-running recipes when files change
-
-[`watchexec`](https://github.com/mattgreen/watchexec) can re-run any command
-when files change.
-
-To re-run the recipe `foo` when any file changes:
-
-```console
-watchexec just foo
-```
-
-See `watchexec --help` for more info, including how to specify which files
-should be watched for changes.
-
-### Parallelism
-
-Dependencies may be run in parallel with the `[parallel]` attribute.
-
-In this `justfile`, `foo`, `bar`, and `baz` will execute in parallel when
-`main` is run:
-
-```just
-[parallel]
-main: foo bar baz
-
-foo:
-  sleep 1
-
-bar:
-  sleep 1
-
-baz:
-  sleep 1
-```
-
-GNU `parallel` may be used to run recipe lines concurrently:
-
-```just
-parallel:
-  #!/usr/bin/env -S parallel --shebang --ungroup --jobs {{ num_cpus() }}
-  echo task 1 start; sleep 3; echo task 1 done
-  echo task 2 start; sleep 3; echo task 2 done
-  echo task 3 start; sleep 3; echo task 3 done
-  echo task 4 start; sleep 3; echo task 4 done
-```
-
-### Shell Alias
-
-For lightning-fast command running, put `alias j=just` in your shell's
-configuration file.
 
 ### Shell Completion Scripts
 
@@ -5238,6 +4551,952 @@ language and one of the first practical applications of Unix. If you have
 [`groff`](https://www.gnu.org/software/groff/) installed you can view the man
 page with `just --man | groff -mandoc -Tascii | less`.
 
+### Formatting and dumping `justfile`s
+
+Each `justfile` has a canonical formatting with respect to whitespace and
+newlines.
+
+You can overwrite the current justfile with a canonically-formatted version
+using the `--fmt` flag:
+
+```console
+$ cat justfile
+# A lot of blank lines
+
+
+
+
+
+some-recipe:
+  echo "foo"
+$ just --fmt
+$ cat justfile
+# A lot of blank lines
+
+some-recipe:
+    echo "foo"
+```
+
+When the `justfile` is read from standard input with `--justfile -` or
+extracted from a markdown file, `--fmt` prints the formatted `justfile` to
+stdout.
+
+Note that formatting is not covered by any backwards compatibility guarantee
+and is subject to change from time to time.
+
+Recipe bodies are indented with four spaces by default. This can be changed
+with the `--indentation` command-line option, the `JUST_INDENTATION`
+environment variable, or the `indentation` setting:
+
+```just
+set indentation := "  "
+```
+
+Invoking `just --fmt --check` runs `--fmt` in check mode. Instead of
+overwriting the `justfile`, `just` will exit with an exit code of 0 if it is
+formatted correctly, and will exit with 1 and print a diff if it is not.
+
+You can use the `--dump` command to output a formatted version of the
+`justfile` to stdout:
+
+```console
+$ just --dump > formatted-justfile
+```
+
+The `--dump` command can be used with `--dump-format json` to print a JSON
+representation of a `justfile`.
+
+Cached Recipes
+--------------
+
+`just` will skip invocations of recipes with the `[cache]`
+attribute<sup>1.54.0</sup> if it finds an entry matching the invocation in the
+cache. The `[cache]` attribute may only be used with script recipes and is
+currently unstable.
+
+For example, this recipe will be skipped if `image.jpg` exists and the contents
+of `image.png` and the output of `convert -version` haven't changed since the
+last run:
+
+```just
+set unstable
+
+[script]
+[cache(inputs = "image.png", outputs = "image.jpg", extra = `convert -version`)]
+convert:
+  convert image.png image.jpg
+```
+
+Unlike many other features of `just`, which are, hopefully, well thought-out
+and user-friendly, cached recipes are inherently fragile. It is important to
+understand their limitations before relying on them. Please read this section
+thoroughly, including the friendly admonitions below.
+
+### Friendly Admonitions
+
+`just` will happily skip cached recipes, but it is your responsibility to make
+sure that this is safe, and that the contents of the cache key capture enough
+information about recipe invocations for caching to make sense in the first
+place.
+
+In particular, there are many details about the context in which a recipe runs
+that are not captured by cache keys.
+
+These include the time, input files, output files, system binaries, operating
+system version, databases, systems over the network, the DNS, and any of the
+myriad other things which may change the execution of a computer program.
+
+Attempting to skip execution based on the type of crude heuristics that `just`
+employs has a long and sordid history. However, it is an undeniably convenient
+and powerful tool, and it is provided in the hopes that you find it useful.
+
+### Implementation
+
+The cache is a directory named `.justcache` alongside the `justfile` and should
+not be committed to version control systems. It contains cache entries named
+`HASH.json`, where `HASH` is the BLAKE3 hash of a serialized cache key JSON
+object.
+
+The keys of the cache key object are:
+
+- `body`: evaluated recipe body
+- `environment`: map of environment variable names to values
+- `executor`: script interpreter or shebang
+- `extension`: script file extension
+- `extra`: user-supplied value
+- `inputs`: map of file paths to content hashs
+- `positional`: positional arguments
+- `recipe`: `::`-separated module path to invoked recipe
+- `working_directory`: current working directory
+
+All keys other than `extra` and `inputs` are populated automatically.
+
+Cache key objects for invoked recipes can be printed to standard error with
+`just -vv`.
+
+The value of `extra` may be supplied with `[cache(extra = EXPRESSION)]`, where
+`EXPRESSION` is an arbitrary expression evaluated with recipe arguments in
+scope. Changes to the value of `extra` will cause a cache miss.
+
+Before `just` runs a cached recipe, it creates a cache key, hashes it, and
+looks for the corresponding cache entry.
+
+If the cache entry is non-empty, it skips the invocation.
+
+If the cache entry does not exist or is empty, it runs the invocation and
+writes `{}` to the cache entry.
+
+File locks are taken on cache entries, so concurrent execution of cached
+recipes by multiple `just` processes is safe. If two processes run a recipe
+invocation with the same cache key, the first will take the lock, run the
+recipe, write to the cache entry, and relinquish the lock. The second will
+block until the first relinquishes the lock, see that the entry is non-empty,
+and skip the invocation.
+
+The cache can be bypassed entirely with the `--no-cache` flag.
+
+### Clearing the Cache
+
+The recipe cache is stored in a directory named `.justcache` alongside the
+`justfile`. Deleting it will clear the cache.
+
+The cache can also be cleared with `just --clean`, which can selectively clear
+cache entries:
+
+```sh
+# clear all cache entries
+just --clean
+
+# clear cache entries for recipe `foo`
+just --clean foo
+
+# clear cache entries for recipe `baz` in submodule `bar`
+just --clean bar baz
+
+# clear cache entries for recipes in submodule module `bar`
+just --clean bar
+
+# clear cache entries for recipes in submodule module `bar::bob`
+just --clean bar bob
+
+# '::'-separated paths may also be used
+just --clean bar::bob
+```
+
+### Input Files
+
+Input files can be provided with `[cache(inputs = FILES)]`, where `FILES` is an
+expression that is evaluated with recipe arguments in scope and whose evaluated
+elements are paths. Paths may be absolute or relative to the recipe's working
+directory.
+
+Each input file is hashed with BLAKE3 and added to the `inputs` cache key,
+which contains a map of paths to hashes.
+
+Any changes to the contents of an input file changes the cache key, which
+causes the next invocation to miss the cache and re-run.
+
+Missing inputs and paths to directories are errors.
+
+In this example, the `build` recipe will re-run if `lib.c` or `main.c` change:
+
+```just
+set unstable
+set lists
+
+[script]
+[cache(inputs = ["lib.c", "main.c"])]
+build:
+  cc lib.c main.c -o main
+```
+
+### Output Files
+
+Output files can be provided with `[cache(outputs = FILES)]`, where `FILES` is
+an expression that is evaluated with recipe arguments in scope and whose
+evaluated elements are paths. Paths may be absolute or relative to the recipe's
+working directory.
+
+Outputs are not part of the cache key.
+
+All output files must exist for an invocation to be skipped, and after an
+invocation runs successfully, it is an error if any output file does not exist.
+
+In this example, `build` re-runs whenever `main` is missing, and errors if it
+runs without producing `main`:
+
+```just
+set unstable
+set lists
+
+[script]
+[cache(inputs = ["lib.c", "main.c"], outputs = "main")]
+build:
+  cc lib.c main.c -o main
+
+clean:
+  rm -f main
+```
+
+This forces `build` to re-run if `main` is deleted by `clean`.
+
+Reference
+---------
+
+### Attributes
+
+Recipes, `mod` statements, and aliases may be annotated with attributes that
+change their behavior.
+
+| Name | Type | Description |
+|------|------|-------------|
+| `[arg(ARG, help="HELP")]`<sup>1.46.0</sup> | recipe | Print help string `HELP` for `ARG` in usage messages. May be a const expression<sup>1.55.0</sup>. |
+| `[arg(ARG, long="LONG")]`<sup>1.46.0</sup> | recipe | Require values of argument `ARG` to be passed as `--LONG` option. If the parameter is variadic, the option is repeatable<sup>1.55.0master</sup>. |
+| `[arg(ARG, max="MAX")]`<sup>1.56.0</sup> | recipe | Allow at most `MAX` values to be passed to argument `ARG`. Requires `multiple` or a variadic parameter. |
+| `[arg(ARG, min="MIN")]`<sup>1.56.0</sup> | recipe | Require at least `MIN` values to be passed to argument `ARG`. Requires `multiple` or a variadic parameter. |
+| `[arg(ARG, pattern="PATTERN")]`<sup>1.45.0</sup> | recipe | Require values of argument `ARG` to match regular expression `PATTERN`. May be a const expression<sup>1.55.0</sup>. |
+| `[arg(ARG, short="S")]`<sup>1.46.0</sup> | recipe | Require values of argument `ARG` to be passed as short `-S` option. If the parameter is variadic, the option is repeatable<sup>1.55.0</sup>. |
+| `[arg(ARG, value=VALUE)]`<sup>1.46.0</sup> | recipe | Makes option `ARG` a flag which does not take a value. |
+| `[cache]`<sup>1.54.0</sup> | recipe | Skip recipe invocations when a matching entry exists in the cache. See [cached recipes](#cached-recipes) for details. Currently unstable. |
+| `[confirm(PROMPT)]`<sup>1.23.0</sup> | recipe | Require confirmation prior to executing recipe with a custom prompt. |
+| `[confirm]`<sup>1.17.0</sup> | recipe | Require confirmation prior to executing recipe. |
+| `[continue(SIGNALS)]`<sup>1.54.0</sup> | recipe | Continue execution normally if a command is interrupted by any of `SIGNALS` and exits successfully. Defaults to `SIGINT`. |
+| `[default]`<sup>1.43.0</sup> | recipe | Use recipe as module's default recipe. |
+| `[doc(DOC)]`<sup>1.27.0</sup> | module, recipe | Set recipe or module's [documentation comment](#documentation-comments) to `DOC`. May be a const expression<sup>1.56.0</sup>. |
+| `[dragonfly]`<sup>1.47.0</sup> | any<sup>1.56.0</sup> | Enable item on DragonFly BSD. |
+| `[env(NAME, VALUE)]` <sup>1.47.0</sup> | recipe | Set environment variable `NAME` to `VALUE` for recipe. `NAME` and `VALUE` may be expressions<sup>1.51.0</sup>. |
+| `[extension(EXT)]`<sup>1.32.0</sup> | recipe | Set shebang recipe script's file extension to `EXT`. `EXT` should include a period if one is desired. |
+| `[exit-message]`<sup>1.39.0</sup> | recipe | Print error message if recipe fails regardless of `set no-exit-message`. |
+| `[freebsd]`<sup>1.47.0</sup> | any<sup>1.56.0</sup> | Enable item on FreeBSD. |
+| `[group(NAME)]`<sup>1.27.0</sup> | module, recipe | Put recipe or module in [group](#groups) `NAME`. |
+| `[android]`<sup>1.50.0</sup> | any<sup>1.56.0</sup> | Enable item on Android. |
+| `[linux]`<sup>1.8.0</sup> | any<sup>1.56.0</sup> | Enable item on Linux. |
+| `[macos]`<sup>1.8.0</sup> | any<sup>1.56.0</sup> | Enable item on macOS. |
+| `[metadata(METADATA)]`<sup>1.42.0</sup> | recipe | Attach `METADATA` to recipe. |
+| `[netbsd]`<sup>1.47.0</sup> | any<sup>1.56.0</sup> | Enable item on NetBSD. |
+| `[no-cd]`<sup>1.9.0</sup> | recipe | Don't change directory before executing recipe. |
+| `[no-exit-message]`<sup>1.7.0</sup> | recipe | Don't print an error message if recipe fails. |
+| `[no-quiet]`<sup>1.23.0</sup> | recipe | Override globally quiet recipes and always echo out the recipe. |
+| `[openbsd]`<sup>1.38.0</sup> | any<sup>1.56.0</sup> | Enable item on OpenBSD. |
+| `[parallel]`<sup>1.42.0</sup> | recipe | Run this recipe's dependencies in parallel. |
+| `[positional-arguments]`<sup>1.29.0</sup> | recipe | Turn on [positional arguments](#positional-arguments) for this recipe. |
+| `[private]`<sup>1.10.0</sup> | alias, recipe | Make recipe, alias, or variable private. See [Private Recipes](#private-recipes). |
+| `[script(COMMAND)]`<sup>1.32.0</sup> | recipe | Execute recipe as a script interpreted by `COMMAND`. See [script recipes](#script-recipes) for more details. |
+| `[script]`<sup>1.33.0</sup> | recipe | Execute recipe as script. See [script recipes](#script-recipes) for more details. |
+| `[shell]`<sup>1.52.0</sup> | recipe | Execute recipe as a shell recipe, overriding `set default-script`. |
+| `[timestamp(FORMAT)]`<sup>1.58.0</sup> | recipe | Print command timestamps with format `FORMAT`. `FORMAT` may be an expression. |
+| `[timestamp]`<sup>1.58.0</sup> | recipe | Print command timestamps. |
+| `[unix]`<sup>1.8.0</sup> | any<sup>1.56.0</sup> | Enable item on unixes. (Includes macOS). |
+| `[windows]`<sup>1.8.0</sup> | any<sup>1.56.0</sup> | Enable item on Windows. |
+| `[working-directory(PATH)]`<sup>1.38.0</sup> | recipe | Set recipe working directory. `PATH` may be an expression<sup>1.51.0</sup> whose value is relative or absolute. If relative, it is interpreted relative to the default working directory. |
+
+A recipe can have multiple attributes, either on multiple lines:
+
+```just
+[no-cd]
+[private]
+foo:
+    echo "foo"
+```
+
+Or separated by commas on a single line<sup>1.14.0</sup>:
+
+```just
+[no-cd, private]
+foo:
+    echo "foo"
+```
+
+Attributes with a single argument may be written with a colon:
+
+```just
+[group: 'bar']
+foo:
+```
+
+### Settings
+
+Settings control interpretation and execution. Each setting may be specified at
+most once, anywhere in the `justfile`.
+
+For example:
+
+```just
+set shell := ["zsh", "-cu"]
+
+foo:
+  # this line will be run as `zsh -cu 'ls **/*.txt'`
+  ls **/*.txt
+```
+
+#### Table of Settings
+
+| Name | Value | Default | Description |
+|------|-------|---------|-------------|
+| `allow-duplicate-recipes` | boolean | `false` | Allow recipes appearing later in a `justfile` to override earlier recipes with the same name. |
+| `allow-duplicate-variables` | boolean | `false` | Allow variables appearing later in a `justfile` to override earlier variables with the same name. |
+| `default-list` | boolean | `false` | List recipes instead of running the default recipe. |
+| `default-script`<sup>1.52.0</sup> | boolean | `false` | Default recipes to script instead of shell. |
+| `dotenv-command`<sup>1.54.0</sup> | string | - | Run a command and load its output as an environment file. |
+| `dotenv-filename` | string | - | Load a `.env` file with a custom name, if present. |
+| `dotenv-load` | boolean | `false` | Load a `.env` file, if present. |
+| `dotenv-override` | boolean | `false` | Override existing environment variables with values from the `.env` file. |
+| `dotenv-path` | string | - | Load a `.env` file from a custom path and error if not present. Overrides `dotenv-filename`. |
+| `dotenv-required` | boolean | `false` | Error if a `.env` file isn't found. |
+| `export` | boolean | `false` | Export all variables as environment variables. |
+| `fallback` | boolean | `false` | Search for `justfile` in parent directory if the first recipe on the command line is not found. |
+| `guards`<sup>1.47.0</sup> | boolean | `false` | Enable the `?` guard sigil on recipe lines. See [sigils](#sigils). |
+| `ignore-comments` | boolean | `false` | Ignore shell recipe lines beginning with `#`. Does not apply to script recipes.  |
+| `indentation`<sup>1.56.0</sup> | string | - | Set recipe body indentation used when formatting with `--fmt` or `--dump`. |
+| `lazy`<sup>1.47.0</sup> | boolean | `false` | Don't evaluate unused variables. |
+| `lists`<sup>1.53.0</sup> | boolean | `false` | Values may be lists of strings instead of strings. Currently unstable. |
+| `minimum-version`<sup>1.55.0</sup> | string | - | Error if `just` is older than `minimum-version`. Accepts a string of the form `MAJOR.MINOR.PATCH`, e.g., `"1.55.0"`. |
+| `no-cd`<sup>1.51.0</sup> | boolean | `false` | Don't change directory when executing recipes by recipe attribute. |
+| `no-exit-message`<sup>1.39.0</sup> | boolean | `false` | Don't print exit messages if recipes fail. |
+| `positional-arguments` | boolean | `false` | Pass positional arguments. |
+| `quiet` | boolean | `false` | Disable echoing recipe lines before executing. |
+| `script-interpreter`<sup>1.33.0</sup> | `[COMMAND, ARGS…]` | `['sh', '-eu']` | Set command used to invoke recipes with empty `[script]` attribute. |
+| `shell` | `[COMMAND, ARGS…]` | - | Set command used to invoke recipes and evaluate backticks. |
+| `tempdir` | string | - | Create temporary directories in `tempdir` instead of the system default temporary directory. |
+| `unstable`<sup>1.31.0</sup> | boolean | `false` | Enable unstable features. |
+| `windows-powershell` | boolean | `false` | Use PowerShell on Windows as default shell. (Deprecated. Use the `[windows]` attribute on `set shell`.) |
+| `windows-shell` | `[COMMAND, ARGS…]` | - | Set the command used to invoke recipes and evaluate backticks. (Deprecated. Use the `[windows]` attribute on `set shell`.) |
+| `working-directory`<sup>1.33.0</sup> | string | - | Set the working directory for recipes and backticks, relative to the default working directory. |
+
+Boolean settings can be written as:
+
+```justfile
+set NAME
+```
+
+Which is equivalent to:
+
+```justfile
+set NAME := true
+```
+
+Non-boolean settings can be set to both strings and
+expressions<sup>1.46.0</sup>.
+
+However, because settings affect the behavior of backticks and many functions,
+those expressions may not contain backticks or function calls, directly or
+transitively via reference.
+
+### Functions
+
+#### System Information
+
+- `arch()` — Instruction set architecture. Possible values are: `"aarch64"`,
+  `"arm"`, `"asmjs"`, `"hexagon"`, `"mips"`, `"msp430"`, `"powerpc"`,
+  `"powerpc64"`, `"s390x"`, `"sparc"`, `"wasm32"`, `"x86"`, `"x86_64"`, and
+  `"xcore"`.
+- `num_cpus()`<sup>1.15.0</sup> — Number of logical CPUs.
+- `os()` — Operating system. Possible values are: `"android"`, `"bitrig"`,
+  `"dragonfly"`, `"emscripten"`, `"freebsd"`, `"haiku"`, `"ios"`, `"linux"`,
+  `"macos"`, `"netbsd"`, `"openbsd"`, `"solaris"`, and `"windows"`.
+- `os_family()` — Operating system family; possible values are: `"unix"` and
+  `"windows"`.
+
+For example:
+
+```just
+system-info:
+  @echo "This is an {{arch()}} machine."
+```
+
+```console
+$ just system-info
+This is an x86_64 machine.
+```
+
+The `os_family()` function can be used to create cross-platform `justfile`s
+that work on various operating systems. For an example, see
+[cross-platform.just](https://github.com/casey/just/blob/master/examples/cross-platform.just)
+file.
+
+#### External Commands
+
+- `shell(command, args...)`<sup>1.27.0</sup> returns the standard output of shell script
+  `command` with zero or more positional arguments `args`. The shell used to
+  interpret `command` is the same shell that is used to evaluate recipe lines,
+  and can be changed with `set shell := […]`.
+
+  `command` is passed as the first argument, so if the command is `'echo $@'`,
+  the full command line, with the default shell command `sh -cu` and `args`
+  `'foo'` and `'bar'` will be:
+
+  ```
+  'sh' '-cu' 'echo $@' 'echo $@' 'foo' 'bar'
+  ```
+
+  This is so that `$@` works as expected, and `$1` refers to the first
+  argument. `$@` does not include the first positional argument, which is
+  expected to be the name of the program being run.
+
+```just
+# arguments can be variables or expressions
+file := '/sys/class/power_supply/BAT0/status'
+bat0stat := shell('cat $1', file)
+
+# commands can be variables or expressions
+command := 'wc -l'
+output := shell(command + ' "$1"', 'main.c')
+
+# arguments referenced by the shell command must be used
+empty := shell('echo', 'foo')
+full := shell('echo $1', 'foo')
+error := shell('echo $1')
+```
+
+```just
+# Using python as the shell. Since `python -c` sets `sys.argv[0]` to `'-c'`,
+# the first "real" positional argument will be `sys.argv[2]`.
+set shell := ["python3", "-c"]
+olleh := shell('import sys; print(sys.argv[2][::-1])', 'hello')
+```
+
+#### Environment Variables
+
+- `env(key)`<sup>1.15.0</sup> — Retrieves the environment variable with name `key`, aborting
+  if it is not present.
+
+```just
+home_dir := env('HOME')
+
+test:
+  echo "{{home_dir}}"
+```
+
+```console
+$ just
+/home/user1
+```
+
+- `env(key, default)`<sup>1.15.0</sup> — Retrieves the environment variable with
+  name `key`, returning `default` if it is not present.
+- `env_var(key)` — Deprecated alias for `env(key)`.
+- `env_var_or_default(key, default)` — Deprecated alias for `env(key, default)`.
+
+#### Executables
+
+- `require(name)`<sup>1.39.0</sup> — Search directories in the `PATH`
+  environment variable for the executable `name` and return its full path, or
+  halt with an error if no executable with `name` exists.
+
+  ```just
+  bash := require("bash")
+
+  @test:
+      echo "bash: '{{bash}}'"
+  ```
+
+  ```console
+  $ just
+  bash: '/bin/bash'
+  ```
+
+- `which(name)`<sup>1.39.0</sup> — Search directories in the `PATH` environment
+  variable for the executable `name` and return its full path, or the empty
+  list if not found. Requires `set lists`<sup>1.53.0</sup>.
+
+
+  ```just
+  set unstable
+  set lists
+
+  bosh := which("bosh")
+
+  @test:
+      echo "bosh: '{{bosh}}'"
+  ```
+
+  ```console
+  $ just
+  bosh: ''
+  ```
+
+#### Invocation Information
+
+- `is_dependency()` - Returns the string `true` if the current recipe is being
+  run as a dependency of another recipe, rather than being run directly,
+  otherwise returns the string `false`.
+
+- `num_jobs()`<sup>1.56.0</sup> — The value of `--jobs` or the empty list,
+  `[]`, if it was not passed.
+
+- `recipe_name()`<sup>1.53.0</sup> - Returns the name of the current recipe.
+
+#### Invocation Directory
+
+- `invocation_directory()` - Retrieves the absolute path to the current
+  directory when `just` was invoked, before `just` changed it (chdir'd) prior
+  to executing commands. On Windows, `invocation_directory()` uses `cygpath` to
+  convert the invocation directory to a Cygwin-compatible `/`-separated path.
+  Use `invocation_directory_native()` to return the verbatim invocation
+  directory on all platforms.
+
+For example, to call `rustfmt` on files just under the "current directory"
+(from the user/invoker's perspective), use the following recipe:
+
+```just
+rustfmt:
+  find {{invocation_directory()}} -name \*.rs -exec rustfmt {} \;
+```
+
+Alternatively, if your command needs to be run from the current directory, you
+could use (e.g.):
+
+```just
+build:
+  cd {{invocation_directory()}}; ./some_script_that_needs_to_be_run_from_here
+```
+
+- `invocation_directory_native()` - Retrieves the absolute path to the current
+  directory when `just` was invoked, before `just` changed it (chdir'd) prior
+  to executing commands.
+
+#### Justfile and Justfile Directory
+
+- `justfile()` - Retrieves the path of the current `justfile`.
+
+- `justfile_directory()` - Retrieves the path of the parent directory of the
+  current `justfile`.
+
+For example, to run a command relative to the location of the current
+`justfile`:
+
+```just
+script:
+  {{justfile_directory()}}/scripts/some_script
+```
+
+#### Source and Source Directory
+
+- `source_file()`<sup>1.27.0</sup> - Retrieves the path of the current source file.
+
+- `source_directory()`<sup>1.27.0</sup> - Retrieves the path of the parent directory of the
+  current source file.
+
+`source_file()` and `source_directory()` behave the same as `justfile()` and
+`justfile_directory()` in the root `justfile`, but will return the path and
+directory, respectively, of the current `import` or `mod` source file when
+called from within an import or submodule.
+
+#### Module and Module Directory
+
+- `module_file()` - Returns the path of the current module file.
+
+- `module_directory()` - Returns the path of the parent directory of the
+  current module file.
+
+- `module_path()` - Returns the `::`-separated path to the current module.
+
+`module_file()` and `module_directory()` behave the same as `justfile()` and
+`justfile_directory()` in the root `justfile`, but will return the path and
+directory, respectively, of the current `mod` source file when called from
+within a submodule.
+
+#### Just Process and Executable
+
+- `just_executable()` - Absolute path to the `just` executable.
+- `just_pid()` - Process ID of the `just` executable.
+- `just_version()`<sup>1.55.0</sup> - Version of the `just` executable.
+
+For example:
+
+```just
+just-info:
+  @echo The executable is at: {{just_executable()}}
+  @echo The process ID is: {{ just_pid() }}
+  @echo The version is: {{ just_version() }}
+```
+
+```console
+$ just
+The executable is at: /bin/just
+The process ID is: 420
+The version is: 1.54.0
+```
+
+#### String Manipulation
+
+- `append(suffix, s)`<sup>1.27.0</sup> - Append `suffix` to
+  whitespace-separated strings in `s`. `append('/src', 'foo bar baz')` →
+  `'foo/src bar/src baz/src'`
+- `prepend(prefix, s)`<sup>1.27.0</sup> - Prepend `prefix` to
+  whitespace-separated strings in `s`. `prepend('src/', 'foo bar baz')` →
+  `'src/foo src/bar src/baz'`
+- `encode_uri_component(s)`<sup>1.27.0</sup> - Percent-encode characters in `s`
+  except `[A-Za-z0-9_.!~*'()-]`, matching the behavior of the
+  [JavaScript `encodeURIComponent` function](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/encodeURIComponent).
+- `quote(s)` - Replace all single quotes with `'\''` and prepend and append
+  single quotes to `s`. This is sufficient to escape special characters for
+  many shells, including most Bourne shell descendants.
+- `replace(s, from, to)` - Replace all occurrences of `from` in `s` with `to`.
+- `replace_regex(s, regex, replacement)` - Replace all occurrences of `regex`
+  in `s` with `replacement`. Regular expressions are provided by the
+  [Rust `regex` crate](https://docs.rs/regex/latest/regex/). See the
+  [syntax documentation](https://docs.rs/regex/latest/regex/#syntax) for usage
+  examples. Capture groups are supported. The `replacement` string uses
+  [Replacement string syntax](https://docs.rs/regex/latest/regex/struct.Regex.html#replacement-string-syntax).
+- `trim(s)` - Remove leading and trailing whitespace from `s`.
+- `trim_end(s)` - Remove trailing whitespace from `s`.
+- `trim_end_match(s, substring)` - Remove suffix of `s` matching `substring`.
+- `trim_end_matches(s, substring)` - Repeatedly remove suffixes of `s` matching
+  `substring`.
+- `trim_start(s)` - Remove leading whitespace from `s`.
+- `trim_start_match(s, substring)` - Remove prefix of `s` matching `substring`.
+- `trim_start_matches(s, substring)` - Repeatedly remove prefixes of `s`
+  matching `substring`.
+
+#### Case Conversion
+
+- `capitalize(s)`<sup>1.7.0</sup> - Convert first character of `s` to uppercase
+  and the rest to lowercase.
+- `kebabcase(s)`<sup>1.7.0</sup> - Convert `s` to `kebab-case`.
+- `lowercamelcase(s)`<sup>1.7.0</sup> - Convert `s` to `lowerCamelCase`.
+- `lowercase(s)` - Convert `s` to lowercase.
+- `shoutykebabcase(s)`<sup>1.7.0</sup> - Convert `s` to `SHOUTY-KEBAB-CASE`.
+- `shoutysnakecase(s)`<sup>1.7.0</sup> - Convert `s` to `SHOUTY_SNAKE_CASE`.
+- `snakecase(s)`<sup>1.7.0</sup> - Convert `s` to `snake_case`.
+- `titlecase(s)`<sup>1.7.0</sup> - Convert `s` to `Title Case`.
+- `uppercamelcase(s)`<sup>1.7.0</sup> - Convert `s` to `UpperCamelCase`.
+- `uppercase(s)` - Convert `s` to uppercase.
+
+#### Path Manipulation
+
+##### Fallible
+
+- `absolute_path(path)` - Absolute path to relative `path` in the working
+  directory. `absolute_path("./bar.txt")` in directory `/foo` is
+  `/foo/bar.txt`.
+- `canonicalize(path)`<sup>1.24.0</sup> - Canonicalize `path` by resolving symlinks and removing
+  `.`, `..`, and extra `/`s where possible.
+- `extension(path)` - Extension of `path`. `extension("/foo/bar.txt")` is
+  `txt`.
+- `file_name(path)` - File name of `path` with any leading directory components
+  removed. `file_name("/foo/bar.txt")` is `bar.txt`.
+- `file_stem(path)` - File name of `path` without extension.
+  `file_stem("/foo/bar.txt")` is `bar`.
+- `parent_directory(path)` - Parent directory of `path`.
+  `parent_directory("/foo/bar.txt")` is `/foo`.
+- `without_extension(path)` - `path` without extension.
+  `without_extension("/foo/bar.txt")` is `/foo/bar`.
+
+These functions can fail, for example if a path does not have an extension,
+which will halt execution.
+
+##### Infallible
+
+- `clean(path)` - Simplify `path` by removing extra path separators,
+  intermediate `.` components, and `..` where possible. `clean("foo//bar")` is
+  `foo/bar`, `clean("foo/..")` is `.`, `clean("foo/./bar")` is `foo/bar`.
+- `join(a, b…)` - *This function uses `/` on Unix and `\` on Windows, which can
+  lead to unwanted behavior. The `/` operator, e.g., `a / b`, which always
+  uses `/`, should be considered as a replacement unless `\`s are specifically
+  desired on Windows.* Join path `a` with path `b`. `join("foo/bar", "baz")` is
+  `foo/bar/baz`. Accepts two or more arguments.
+
+#### Filesystem Access
+
+- `path_exists(path)` - Returns the string `true` if the path points at an
+  existing entity and the string `false` otherwise. Traverses symbolic links,
+  and returns the string `false` if the path is inaccessible or points to a
+  broken symlink.
+- `read(path)`<sup>1.39.0</sup> - Returns the content of file at `path` as a
+  string.
+
+#### Assertions and Error Reporting
+
+- `assert(CONDITION, EXPRESSION)`<sup>1.27.0</sup> - Error with message
+  `EXPRESSION` if `CONDITION` is false. `EXPRESSION` may be
+  omitted<sup>1.53.0</sup>,
+- `error(message)` - Abort execution and report error `message` to user.
+
+#### UUID and Hash Generation
+
+- `blake3(string)`<sup>1.25.0</sup> - Return [BLAKE3] hash of `string` as hexadecimal string.
+- `blake3_file(path)`<sup>1.25.0</sup> - Return [BLAKE3] hash of file at `path` as hexadecimal
+  string.
+- `sha256(string)` - Return the SHA-256 hash of `string` as hexadecimal string.
+- `sha256_file(path)` - Return SHA-256 hash of file at `path` as hexadecimal
+  string.
+- `uuid()` - Generate a random version 4 UUID.
+
+[BLAKE3]: https://github.com/BLAKE3-team/BLAKE3/
+
+#### Random
+
+- `choose(n, alphabet)`<sup>1.27.0</sup> - Generate a string of `n` randomly
+  selected characters from `alphabet`, which may not contain repeated
+  characters. For example, `choose('64', HEX)` will generate a random
+  64-character lowercase hex string.
+
+#### Datetime
+
+- `datetime(format)`<sup>1.30.0</sup> - Return local time with `format`.
+- `datetime_utc(format)`<sup>1.30.0</sup> - Return UTC time with `format`.
+
+The arguments to `datetime` and `datetime_utc` are `strftime`-style format
+strings, see the
+[`chrono` library docs](https://docs.rs/chrono/latest/chrono/format/strftime/index.html)
+for details.
+
+#### Semantic Versions
+
+- `semver_matches(version, requirement)`<sup>1.16.0</sup> - Check whether a
+  [semantic `version`](https://semver.org), e.g., `"0.1.0"` matches a
+  `requirement`, e.g., `">=0.1.0"`, returning the string `"true"` if so and the
+  string `"false"` otherwise.
+
+#### Style
+
+- `style(styles)`<sup>1.37.0</sup> - Return a terminal escape sequence
+  combining the named styles in `styles`.
+
+  The styles supported by version 1.37.0 and later can be used to duplicate
+  `just`'s own styles:
+
+  - `command`: echoed recipe lines
+  - `error`: errors
+  - `warning`: warnings
+
+  Additional styles supported by <sup>1.55.0</sup> and later include
+  named colors:
+
+  - `black`
+  - `blue`
+  - `cyan`
+  - `green`
+  - `magenta`
+  - `red`
+  - `white`
+  - `yellow`
+
+  The 256 indexed colors, written as integers between `0` and `255`, e.g., `1`
+  or `67`.
+
+  The 24-bit colors, written as `#RRGGBB` or `#RGB` hex codes, e.g., `#065535`
+  or `#AAA`.
+
+  And display properties:
+
+  - `blink`
+  - `bold`
+  - `dim`
+  - `hidden`
+  - `italic`
+  - `reverse`
+  - `strikethrough`
+  - `underline`
+
+  Two stream names<sup>1.55.0</sup> gate the style on whether `just` would
+  color the output stream, determined by `--color`, `JUST_COLOR`, and whether
+  the stream is connected to a terminal:
+
+  - `stdout`
+  - `stderr`
+
+  All color styles color the foreground by default, and come in explicit
+  foreground variants prefixed with `fg:` and background variants prefixed with
+  `bg:`, e.g., `bg:blue`, `fg:133`, and `#FFF`.
+
+  `styles` may be a list of styles, in which case all listed styles are
+  combined to produce the final escape sequence.
+
+  Note that the escape sequence returned by `style(styles)` are prefixes. You
+  can use the `NORMAL` constant to reset the style after use:
+
+  ```just
+  error message:
+    echo '{{style("error") + message + NORMAL}}'
+  ```
+
+- `style(styles, text)`<sup>1.55.0</sup> Style `text` with `styles` as in the
+  one-argument form. The style is reset automatically, so use of `NORMAL` to
+  reset the terminal is not needed:
+
+  ```just
+  error message:
+    echo '{{style("error", message)}}'
+  ```
+
+##### User Directories
+
+These functions<sup>1.23.0</sup> return paths to user-specific directories for
+things like configuration, data, caches, executables, and the user's home
+directory.
+
+On Unix, these functions follow the
+[XDG Base Directory Specification](https://specifications.freedesktop.org/basedir-spec/basedir-spec-latest.html).
+
+On macOS and Windows, these functions return the system-specified user-specific
+directories. For example, `cache_directory()` returns `~/Library/Caches` on
+macOS and `{FOLDERID_LocalAppData}` on Windows.
+
+See the [`dirs`](https://docs.rs/dirs/latest/dirs/index.html) crate for more
+details.
+
+- `cache_directory()` - The user-specific cache directory.
+- `config_directory()` - The user-specific configuration directory.
+- `config_local_directory()` - The local user-specific configuration directory.
+- `data_directory()` - The user-specific data directory.
+- `data_local_directory()` - The local user-specific data directory.
+- `executable_directory()` - The user-specific executable directory.
+- `home_directory()` - The user's home directory.
+- `runtime_directory()` - The user-specific runtime directory. Only defined on
+  Linux.
+
+If you would like to use XDG base directories on all platforms you can use the
+`env(…)` function with the appropriate environment variable and fallback,
+although note that the XDG specification requires ignoring non-absolute paths,
+so for full compatibility with spec-compliant applications, you would need to
+do:
+
+```just
+xdg_config_dir := if env('XDG_CONFIG_HOME', '') =~ '^/' {
+  env('XDG_CONFIG_HOME')
+} else {
+  home_directory() / '.config'
+}
+```
+
+### Constants
+
+A number of constants are predefined:
+
+| Name | Value | Value on Windows |
+|---|---|---|
+| `HEX`<sup>1.27.0</sup> | `"0123456789abcdef"` |  |
+| `HEXLOWER`<sup>1.27.0</sup> | `"0123456789abcdef"` |  |
+| `HEXUPPER`<sup>1.27.0</sup> | `"0123456789ABCDEF"` |  |
+| `PATH_SEP`<sup>1.41.0</sup> | `"/"` | `"\"` |
+| `PATH_VAR_SEP`<sup>1.41.0</sup> | `":"` | `";"` |
+| `CLEAR`<sup>1.37.0</sup> | `"\ec"` |  |
+| `NORMAL`<sup>1.37.0</sup> | `"\e[0m"` |  |
+| `BOLD`<sup>1.37.0</sup> | `"\e[1m"` |  |
+| `ITALIC`<sup>1.37.0</sup> | `"\e[3m"` |  |
+| `UNDERLINE`<sup>1.37.0</sup> | `"\e[4m"` |  |
+| `INVERT`<sup>1.37.0</sup> | `"\e[7m"` |  |
+| `HIDE`<sup>1.37.0</sup> | `"\e[8m"` |  |
+| `STRIKETHROUGH`<sup>1.37.0</sup> | `"\e[9m"` |  |
+| `BLACK`<sup>1.37.0</sup> | `"\e[30m"` |  |
+| `RED`<sup>1.37.0</sup> | `"\e[31m"` |  |
+| `GREEN`<sup>1.37.0</sup> | `"\e[32m"` |  |
+| `YELLOW`<sup>1.37.0</sup> | `"\e[33m"` |  |
+| `BLUE`<sup>1.37.0</sup> | `"\e[34m"` |  |
+| `MAGENTA`<sup>1.37.0</sup> | `"\e[35m"` |  |
+| `CYAN`<sup>1.37.0</sup> | `"\e[36m"` |  |
+| `WHITE`<sup>1.37.0</sup> | `"\e[37m"` |  |
+| `BG_BLACK`<sup>1.37.0</sup> | `"\e[40m"` |  |
+| `BG_RED`<sup>1.37.0</sup> | `"\e[41m"` |  |
+| `BG_GREEN`<sup>1.37.0</sup> | `"\e[42m"` |  |
+| `BG_YELLOW`<sup>1.37.0</sup> | `"\e[43m"` |  |
+| `BG_BLUE`<sup>1.37.0</sup> | `"\e[44m"` |  |
+| `BG_MAGENTA`<sup>1.37.0</sup> | `"\e[45m"` |  |
+| `BG_CYAN`<sup>1.37.0</sup> | `"\e[46m"` |  |
+| `BG_WHITE`<sup>1.37.0</sup> | `"\e[47m"` |  |
+
+```just
+@foo:
+  echo {{HEX}}
+```
+
+```console
+$ just foo
+0123456789abcdef
+```
+
+Constants starting with `\e` are
+[ANSI escape sequences](https://en.wikipedia.org/wiki/ANSI_escape_code).
+
+`CLEAR` clears the screen, similar to the `clear` command. The rest are of the
+form `\e[Nm`, where `N` is an integer, and set terminal display attributes.
+
+Terminal display attribute escape sequences can be combined, for example text
+weight `BOLD`, text style `STRIKETHROUGH`, foreground color `CYAN`, and
+background color `BG_BLUE`. They should be followed by `NORMAL`, to reset the
+terminal back to normal.
+
+Escape sequences should be quoted, since `[` is treated as a special character
+by some shells.
+
+```just
+@foo:
+  echo '{{BOLD + STRIKETHROUGH + CYAN + BG_BLUE}}Hi!{{NORMAL}}'
+```
+
+Changelog
+---------
+
+A changelog for the latest release is available in
+[CHANGELOG.md](https://raw.githubusercontent.com/casey/just/master/CHANGELOG.md).
+Changelogs for previous releases are available on
+[the releases page](https://github.com/casey/just/releases). `just --changelog`
+can also be used to make a `just` binary print its changelog.
+
+Miscellanea
+-----------
+
+### Re-running recipes when files change
+
+[`watchexec`](https://github.com/mattgreen/watchexec) can re-run any command
+when files change.
+
+To re-run the recipe `foo` when any file changes:
+
+```console
+watchexec just foo
+```
+
+See `watchexec --help` for more info, including how to specify which files
+should be watched for changes.
+
+### Shell Alias
+
+For lightning-fast command running, put `alias j=just` in your shell's
+configuration file.
+
 ### Grammar
 
 A non-normative grammar of `justfile`s can be found in
@@ -5248,73 +5507,6 @@ A non-normative grammar of `justfile`s can be found in
 Before `just` was a fancy Rust program it was a tiny shell script that called
 `make`. You can find the old version in
 [contrib/just.sh](https://github.com/casey/just/blob/master/contrib/just.sh).
-
-### Global and User `justfile`s
-
-If you want some recipes to be available everywhere, you have a few options.
-
-#### Global Justfile
-
-`just --global-justfile`, or `just -g` for short, searches the following paths,
-in-order, for a justfile:
-
-- `$XDG_CONFIG_HOME/just/justfile`
-- `$HOME/.config/just/justfile`
-- `$HOME/justfile`
-- `$HOME/.justfile`
-
-You can put recipes that are used across many projects in a global justfile to
-easily invoke them from any directory.
-
-#### User justfile tips
-
-You can also adopt some of the following workflows. These tips assume you've
-created a `justfile` at `~/.user.justfile`, but you can put this `justfile`
-at any convenient path on your system.
-
-##### Recipe Aliases
-
-If you want to call the recipes in `~/.user.justfile` by name, and don't mind
-creating an alias for every recipe, add the following to your shell's
-initialization script:
-
-```console
-for recipe in `just --justfile ~/.user.justfile --summary`; do
-  alias $recipe="just --justfile ~/.user.justfile --working-directory . $recipe"
-done
-```
-
-Now, if you have a recipe called `foo` in `~/.user.justfile`, you can just type
-`foo` at the command line to run it.
-
-It took me way too long to realize that you could create recipe aliases like
-this. Notwithstanding my tardiness, I am very pleased to bring you this major
-advance in `justfile` technology.
-
-##### Forwarding Alias
-
-If you'd rather not create aliases for every recipe, you can create a single alias:
-
-```console
-alias .j='just --justfile ~/.user.justfile --working-directory .'
-```
-
-Now, if you have a recipe called `foo` in `~/.user.justfile`, you can just type
-`.j foo` at the command line to run it.
-
-I'm pretty sure that nobody actually uses this feature, but it's there.
-
-¯\\\_(ツ)\_/¯
-
-##### Customization
-
-You can customize the above aliases with additional options. For example, if
-you'd prefer to have the recipes in your `justfile` run in your home directory,
-instead of the current directory:
-
-```console
-alias .j='just --justfile ~/.user.justfile --working-directory ~'
-```
 
 ### Node.js `package.json` Script Compatibility
 
@@ -5363,22 +5555,6 @@ foo_windows := shell('cygpath --windows $1', foo_unix)
 bar_windows := 'C:\hello\world'
 bar_unix := shell('cygpath --unix $1', bar_windows)
 ```
-
-### Remote Justfiles
-
-If you wish to include a `mod` or `import` source file in many `justfiles`
-without needing to duplicate it, you can use an optional `mod` or `import`,
-along with a recipe to fetch the module source:
-
-```just
-import? 'foo.just'
-
-fetch:
-  curl https://raw.githubusercontent.com/casey/just/master/justfile > foo.just
-```
-
-Given the above `justfile`, after running `just fetch`, the recipes in
-`foo.just` will be available.
 
 ### Printing Complex Strings
 
@@ -5448,6 +5624,86 @@ to `just` include:
   written in Rust.
 - [mise](https://mise.jdx.dev/): A development environment tool manager written
   in Rust supporting tasks in TOML files and standalone scripts.
+
+### Metadata
+
+Metadata in the form of lists of strings may be attached to recipes with the
+`[metadata(METADATA)]` attribute<sup>1.42.0</sup>:
+
+```just
+[metadata("hello", "goodbye")]
+foo:
+```
+
+Metadata can be read using `just --dump --dump-format json`.
+
+### Python Recipes with `uv`
+
+[`uv`](https://github.com/astral-sh/uv) is an excellent cross-platform python
+project manager, written in Rust.
+
+Using the `[script]` attribute and `script-interpreter` setting, `just` can
+easily be configured to run Python recipes with `uv`:
+
+```just
+set script-interpreter := ['uv', 'run', '--script']
+
+[script]
+hello:
+  print("Hello from Python!")
+
+[script]
+goodbye:
+  # /// script
+  # requires-python = ">=3.11"
+  # dependencies=["sh"]
+  # ///
+  import sh
+  print(sh.echo("Goodbye from Python!"), end='')
+```
+
+Of course, a shebang also works:
+
+```just
+hello:
+  #!/usr/bin/env -S uv run --script
+  print("Hello from Python!")
+```
+
+### Activating Environments
+
+Some tools require an activation step, such as Python virtual environments:
+
+```sh
+. .venv/bin/activate
+```
+
+Because these tools modify the environment of a running shell, it is not
+possible for `just` to perform this activation step for you. However, there are
+some workarounds.
+
+The best workaround for Python environment management is to switch to
+[`uv`](https://docs.astral.sh/uv/). `uv` sets up the correct environment for
+each command, so no activation step is needed.
+
+If that isn't possible, and for other tools, you can create a shared prelude
+and include it in script recipes that need it. It can span multiple lines and
+include any number of steps:
+
+```just
+prelude := '''
+  set -eux
+  . .venv/bin/activate
+'''
+
+[script]
+run:
+  {{ prelude }}
+  python script.py
+```
+
+This workaround doesn't work with shell recipes, which spawn a new shell for
+each command.
 
 Contributing
 ------------

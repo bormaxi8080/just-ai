@@ -8,7 +8,7 @@ impl Compiler {
     loader: &'src Loader,
     root: &Path,
   ) -> RunResult<'src, Compilation<'src>> {
-    let mut asts = HashMap::<PathBuf, Ast>::new();
+    let mut asts = HashMap::<(Modulepath, PathBuf), Ast>::new();
     let mut loaded = Vec::new();
     let mut numerator = Numerator::new();
     let mut paths = HashMap::<PathBuf, PathBuf>::new();
@@ -16,17 +16,35 @@ impl Compiler {
     stack.push(Source::root(root));
 
     while let Some(current) = stack.pop() {
-      if paths.contains_key(&current.path) {
+      let key = (
+        current
+          .namepath
+          .as_ref()
+          .map(Modulepath::from)
+          .unwrap_or_default(),
+        current.path.clone(),
+      );
+
+      if asts.contains_key(&key) {
         continue;
       }
 
       let (relative, src) = loader.load(config, root, &current.path)?;
-      loaded.push(relative.into());
+
+      if paths
+        .insert(current.path.clone(), relative.into())
+        .is_none()
+      {
+        loaded.push(relative.into());
+      }
+
       let mut ast = Parser::parse_source(&mut numerator, relative, &current, src)?;
 
-      paths.insert(current.path.clone(), relative.into());
-
       for item in &mut ast.items {
+        if !item.is_enabled() {
+          continue;
+        }
+
         match item {
           Item::Module {
             absolute,
@@ -61,13 +79,14 @@ impl Compiler {
             relative,
             absolute,
             optional,
+            ..
           } => {
             let import = current
               .path
               .parent()
               .unwrap()
               .join(Self::expand_tilde(&relative.cooked)?)
-              .lexiclean();
+              .clean();
 
             if filesystem::is_file(&import)? {
               if current.file_path.contains(&import) {
@@ -88,7 +107,7 @@ impl Compiler {
         }
       }
 
-      asts.insert(current.path, ast.clone());
+      asts.insert(key, ast.clone());
     }
 
     let mut overrides = HashMap::new();
@@ -99,12 +118,32 @@ impl Compiler {
       None,
       &[],
       &loaded,
+      &Modulepath::default(),
       None,
       &mut overrides,
       &paths,
       false,
       root,
     )?;
+
+    let mut unknown_overrides = Vec::new();
+
+    for ((path, name), value) in &config.overrides {
+      if let Some(assignment) = justfile
+        .submodule(path)
+        .and_then(|module| module.assignments.get(name))
+      {
+        overrides.insert(assignment.number, value.clone());
+      } else {
+        unknown_overrides.push(path.join(name).to_string());
+      }
+    }
+
+    if !unknown_overrides.is_empty() {
+      return Err(Error::UnknownOverrides {
+        overrides: unknown_overrides,
+      });
+    }
 
     Ok(Compilation {
       asts,
@@ -122,7 +161,7 @@ impl Compiler {
     let mut candidates = Vec::new();
 
     if let Some(path) = path {
-      let full = parent.join(path);
+      let full = parent.join(path).clean();
 
       if filesystem::is_file(&full)? {
         return Ok(Some(full));
@@ -145,7 +184,7 @@ impl Compiler {
     let mut grouped = BTreeMap::<PathBuf, Vec<(PathBuf, bool)>>::new();
 
     for (candidate, case_sensitive) in candidates {
-      let candidate = parent.join(candidate).lexiclean();
+      let candidate = parent.join(candidate).clean();
       grouped
         .entry(candidate.parent().unwrap().into())
         .or_default()
@@ -158,7 +197,9 @@ impl Compiler {
       let entries = match fs::read_dir(&directory) {
         Ok(entries) => entries,
         Err(io_error) => {
-          if io_error.kind() == io::ErrorKind::NotFound {
+          if io_error.kind() == io::ErrorKind::NotADirectory
+            || io_error.kind() == io::ErrorKind::NotFound
+          {
             continue;
           }
 
@@ -201,7 +242,12 @@ impl Compiler {
       Err(Error::AmbiguousModuleFile {
         found: found
           .into_iter()
-          .map(|found| found.strip_prefix(parent).unwrap().into())
+          .map(|found| {
+            found
+              .strip_prefix(parent)
+              .map(PathBuf::from)
+              .unwrap_or(found)
+          })
           .collect(),
         module,
       })
@@ -221,12 +267,12 @@ impl Compiler {
   }
 
   #[cfg(test)]
-  pub(crate) fn test_compile(src: &str) -> RunResult<Justfile> {
+  pub(crate) fn test_compile(src: &str) -> CompileResult<Justfile> {
     let tokens = Lexer::test_lex(src)?;
     let ast = Parser::parse_tokens(&mut Numerator::new(), &tokens)?;
     let root = PathBuf::from("justfile");
-    let mut asts: HashMap<PathBuf, Ast> = HashMap::new();
-    asts.insert(root.clone(), ast);
+    let mut asts: HashMap<(Modulepath, PathBuf), Ast> = HashMap::new();
+    asts.insert((Modulepath::default(), root.clone()), ast);
     let mut paths: HashMap<PathBuf, PathBuf> = HashMap::new();
     paths.insert(root.clone(), root.clone());
     Analyzer::analyze(
@@ -235,6 +281,7 @@ impl Compiler {
       None,
       &[],
       &[],
+      &Modulepath::default(),
       None,
       &mut HashMap::new(),
       &paths,
@@ -246,16 +293,14 @@ impl Compiler {
 
 #[cfg(test)]
 mod tests {
-  use {super::*, temptree::temptree};
+  use super::*;
 
   #[test]
   fn recursive_includes_fail() {
-    let tmp = temptree! {
-      justfile: "import './subdir/b'\na: b",
-      subdir: {
-        b: "import '../justfile'\nb:"
-      }
-    };
+    let tmp = tempfile::tempdir().unwrap();
+    fs::write(tmp.path().join("justfile"), "import './subdir/b'\na: b").unwrap();
+    fs::create_dir_all(tmp.path().join("subdir")).unwrap();
+    fs::write(tmp.path().join("subdir/b"), "import '../justfile'\nb:").unwrap();
 
     let loader = Loader::new();
 
@@ -264,8 +309,8 @@ mod tests {
       Compiler::compile(&Config::new().unwrap(), &loader, &justfile_a_path).unwrap_err();
 
     assert_matches!(loader_output, Error::CircularImport { current, import }
-      if current == tmp.path().join("subdir").join("b").lexiclean() &&
-      import == tmp.path().join("justfile").lexiclean()
+      if current == tmp.path().join("subdir").join("b").clean() &&
+      import == tmp.path().join("justfile").clean()
     );
   }
 

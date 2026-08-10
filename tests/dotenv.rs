@@ -6,7 +6,13 @@ fn dotenv() {
     .justfile("")
     .write(".env", "KEY=ROOT")
     .write("sub/.env", "KEY=SUB")
-    .write("sub/justfile", "default:\n\techo KEY=${KEY:-unset}")
+    .write(
+      "sub/justfile",
+      "
+        default:
+        \techo KEY=${KEY:-unset}
+      ",
+    )
     .args(["sub/default"])
     .stdout("KEY=unset\n")
     .stderr("echo KEY=${KEY:-unset}\n")
@@ -101,11 +107,7 @@ fn path_resolves() {
           @echo $JUST_TEST_VARIABLE
       ",
     )
-    .tree(tree! {
-      subdir: {
-        ".env": "JUST_TEST_VARIABLE=bar"
-      }
-    })
+    .write("subdir/.env", "JUST_TEST_VARIABLE=bar")
     .args(["--dotenv-path", "subdir/.env"])
     .stdout("bar\n")
     .success();
@@ -120,9 +122,7 @@ fn filename_resolves() {
           @echo $JUST_TEST_VARIABLE
       ",
     )
-    .tree(tree! {
-      ".env.special": "JUST_TEST_VARIABLE=bar"
-    })
+    .write(".env.special", "JUST_TEST_VARIABLE=bar")
     .args(["--dotenv-filename", ".env.special"])
     .stdout("bar\n")
     .success();
@@ -139,9 +139,7 @@ fn filename_flag_overwrites_no_load() {
           @echo $JUST_TEST_VARIABLE
       ",
     )
-    .tree(tree! {
-      ".env.special": "JUST_TEST_VARIABLE=bar"
-    })
+    .write(".env.special", "JUST_TEST_VARIABLE=bar")
     .args(["--dotenv-filename", ".env.special"])
     .stdout("bar\n")
     .success();
@@ -158,11 +156,7 @@ fn path_flag_overwrites_no_load() {
           @echo $JUST_TEST_VARIABLE
       ",
     )
-    .tree(tree! {
-      subdir: {
-        ".env": "JUST_TEST_VARIABLE=bar"
-      }
-    })
+    .write("subdir/.env", "JUST_TEST_VARIABLE=bar")
     .args(["--dotenv-path", "subdir/.env"])
     .stdout("bar\n")
     .success();
@@ -179,9 +173,7 @@ fn can_set_dotenv_filename_from_justfile() {
           @echo $JUST_TEST_VARIABLE
       ",
     )
-    .tree(tree! {
-      ".env.special": "JUST_TEST_VARIABLE=bar"
-    })
+    .write(".env.special", "JUST_TEST_VARIABLE=bar")
     .stdout("bar\n")
     .success();
 }
@@ -197,11 +189,7 @@ fn can_set_dotenv_path_from_justfile() {
           @echo $JUST_TEST_VARIABLE
       ",
     )
-    .tree(tree! {
-      subdir: {
-        ".env": "JUST_TEST_VARIABLE=bar"
-      }
-    })
+    .write("subdir/.env", "JUST_TEST_VARIABLE=bar")
     .stdout("bar\n")
     .success();
 }
@@ -217,10 +205,8 @@ fn program_argument_has_priority_for_dotenv_filename() {
           @echo $JUST_TEST_VARIABLE
       ",
     )
-    .tree(tree! {
-      ".env.special": "JUST_TEST_VARIABLE=bar",
-      ".env.superspecial": "JUST_TEST_VARIABLE=baz"
-    })
+    .write(".env.special", "JUST_TEST_VARIABLE=bar")
+    .write(".env.superspecial", "JUST_TEST_VARIABLE=baz")
     .args(["--dotenv-filename", ".env.superspecial"])
     .stdout("baz\n")
     .success();
@@ -237,12 +223,8 @@ fn program_argument_has_priority_for_dotenv_path() {
           @echo $JUST_TEST_VARIABLE
       ",
     )
-    .tree(tree! {
-      subdir: {
-        ".env": "JUST_TEST_VARIABLE=bar",
-        ".env.special": "JUST_TEST_VARIABLE=baz"
-      }
-    })
+    .write("subdir/.env", "JUST_TEST_VARIABLE=bar")
+    .write("subdir/.env.special", "JUST_TEST_VARIABLE=baz")
     .args(["--dotenv-path", "subdir/.env.special"])
     .stdout("baz\n")
     .success();
@@ -260,7 +242,7 @@ fn dotenv_path_is_relative_to_working_directory() {
       ",
     )
     .write(".env", "DOTENV_KEY=dotenv-value")
-    .tree(tree! { subdir: { } })
+    .create_dir("subdir")
     .current_dir("subdir")
     .stdout("dotenv-value\n")
     .success();
@@ -429,7 +411,11 @@ fn dotenv_path_does_not_override_dotenv_file() {
     .write(".env", "KEY=ROOT")
     .write(
       "sub/justfile",
-      "set dotenv-path := '.'\n@foo:\n echo ${KEY}",
+      "
+        set dotenv-path := '.'
+        @foo:
+         echo ${KEY}
+      ",
     )
     .current_dir("sub")
     .stdout("ROOT\n")
@@ -512,7 +498,7 @@ fn path_list_last_wins() {
           echo $KEY
       ",
     )
-    .env("JUST_UNSTABLE", "1")
+    .unstable()
     .write("foo.env", "KEY=foo")
     .write("bar.env", "KEY=bar")
     .stdout("bar\n")
@@ -531,9 +517,21 @@ fn filename_list_loads_all_in_directory() {
           echo $FOO $BAR $SHARED
       ",
     )
-    .env("JUST_UNSTABLE", "1")
-    .write(".env.foo", "FOO=foo\nSHARED=from-foo")
-    .write(".env.bar", "BAR=bar\nSHARED=from-bar")
+    .unstable()
+    .write(
+      ".env.foo",
+      "
+        FOO=foo
+        SHARED=from-foo
+      ",
+    )
+    .write(
+      ".env.bar",
+      "
+        BAR=bar
+        SHARED=from-bar
+      ",
+    )
     .stdout("foo bar from-bar\n")
     .success();
 }
@@ -544,11 +542,16 @@ fn filename_list_stops_at_first_directory() {
     .justfile("")
     .write(
       "sub/justfile",
-      "set lists\nset dotenv-filename := ['.env.foo', '.env.bar']\n@foo:\n\techo \"${FOO:-unset} ${BAR:-unset}\"",
+      "
+        set lists
+        set dotenv-filename := ['.env.foo', '.env.bar']
+        @foo:
+        \techo \"${FOO:-unset} ${BAR:-unset}\"
+      ",
     )
     .write("sub/.env.foo", "FOO=foo")
     .write(".env.bar", "BAR=bar")
-    .env("JUST_UNSTABLE", "1")
+    .unstable()
     .current_dir("sub")
     .args(["foo"])
     .stdout("foo unset\n")
@@ -567,7 +570,7 @@ fn path_list_falls_through_to_filename_search() {
           echo $KEY
       ",
     )
-    .env("JUST_UNSTABLE", "1")
+    .unstable()
     .write(".env", "KEY=foo")
     .stdout("foo\n")
     .success();
@@ -586,7 +589,7 @@ fn list_override() {
           echo $KEY
       ",
     )
-    .env("JUST_UNSTABLE", "1")
+    .unstable()
     .env("KEY", "environment")
     .write("foo.env", "KEY=foo")
     .write("bar.env", "KEY=bar")
@@ -606,7 +609,7 @@ fn list_does_not_override_environment() {
           echo $KEY
       ",
     )
-    .env("JUST_UNSTABLE", "1")
+    .unstable()
     .env("KEY", "environment")
     .write("foo.env", "KEY=foo")
     .write("bar.env", "KEY=bar")
@@ -627,7 +630,7 @@ fn required_satisfied_by_one_file() {
           echo $KEY
       ",
     )
-    .env("JUST_UNSTABLE", "1")
+    .unstable()
     .write("present.env", "KEY=foo")
     .stdout("foo\n")
     .success();
@@ -645,7 +648,7 @@ fn empty_filename_list_is_unset() {
           echo ${KEY:-unset}
       ",
     )
-    .env("JUST_UNSTABLE", "1")
+    .unstable()
     .write(".env", "KEY=foo")
     .stdout("unset\n")
     .success();
@@ -684,7 +687,7 @@ fn path_argument_list() {
           echo $KEY
       ",
     )
-    .env("JUST_UNSTABLE", "1")
+    .unstable()
     .write("foo.env", "KEY=foo")
     .write("bar.env", "KEY=bar")
     .args(["--dotenv-path", "foo.env", "--dotenv-path", "bar.env"])
@@ -703,7 +706,7 @@ fn filename_argument_list() {
           echo $FOO $BAR
       ",
     )
-    .env("JUST_UNSTABLE", "1")
+    .unstable()
     .write(".env.foo", "FOO=foo")
     .write(".env.bar", "BAR=bar")
     .args([
@@ -792,7 +795,7 @@ fn command_list_runs_each_and_merges() {
           echo $FOO $BAZ
       ",
     )
-    .env("JUST_UNSTABLE", "1")
+    .unstable()
     .stdout("bar qux\n")
     .success();
 }
@@ -809,7 +812,7 @@ fn command_list_last_wins() {
           echo $KEY
       ",
     )
-    .env("JUST_UNSTABLE", "1")
+    .unstable()
     .stdout("bar\n")
     .success();
 }
@@ -921,5 +924,61 @@ fn command_composes_with_dotenv_override_setting() {
     )
     .env("KEY", "environment")
     .stdout("command\n")
+    .success();
+}
+
+#[test]
+fn command_is_not_executed_in_dry_run() {
+  Test::new()
+    .justfile(
+      "
+        set dotenv-command := 'exit 1'
+
+        foo:
+          echo bar
+      ",
+    )
+    .arg("--dry-run")
+    .stderr("echo bar\n")
+    .success();
+}
+
+#[test]
+fn dotenv_command_exit_code_is_propagated() {
+  Test::new()
+    .justfile(
+      "
+        set dotenv-command := 'exit 42'
+
+        foo:
+      ",
+    )
+    .stderr("error: dotenv command `exit 42` failed: process exited with status code 42\n")
+    .status(42);
+}
+
+#[test]
+fn command_only_runs_in_root_module() {
+  Test::new()
+    .write(
+      "foo.just",
+      "set dotenv-command := 'echo KEY=submodule'\nbaz:\n  @echo $KEY\n",
+    )
+    .write("bar.env", "KEY=value\n")
+    .justfile(
+      "
+        mod foo
+
+        bar:
+          @echo $KEY
+      ",
+    )
+    .args(["--dotenv-command", "echo KEY=root", "bar", "foo::baz"])
+    .stdout(
+      "
+        root
+        submodule
+      ",
+    )
     .success();
 }
