@@ -15,4 +15,5 @@
 /tmp
 
 .docker/
+.codegraph/
 .DS_Store
