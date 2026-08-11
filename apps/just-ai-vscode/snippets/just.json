@@ -1,0 +1,224 @@
+{
+  "recipe": {
+    "prefix": "recipe",
+    "body": [
+      "# $1",
+      "$2:",
+      "  $3"
+    ],
+    "description": "Create a new recipe"
+  },
+  "recipe-with-params": {
+    "prefix": "recipe-params",
+    "body": [
+      "# $1",
+      "$2 ${3:PARAM}='${4:default}':",
+      "  $5"
+    ],
+    "description": "Create a new recipe with a parameter"
+  },
+  "recipe-with-variadic": {
+    "prefix": "recipe-variadic",
+    "body": [
+      "# $1",
+      "$2 ${3:*ARGS}:",
+      "  $4"
+    ],
+    "description": "Create a new recipe with variadic parameters"
+  },
+  "dependency": {
+    "prefix": "dep",
+    "body": [
+      "$1: $2",
+      "  $3"
+    ],
+    "description": "Create a recipe with a dependency"
+  },
+  "shebang": {
+    "prefix": "shebang",
+    "body": [
+      "#!/usr/bin/env $1",
+      "$2"
+    ],
+    "description": "Add a shebang line"
+  },
+  "assignment": {
+    "prefix": "var",
+    "body": [
+      "$1 = \"$2\""
+    ],
+    "description": "Create a variable assignment"
+  },
+  "default-assignment": {
+    "prefix": "var?",
+    "body": [
+      "$1 ?= \"$2\""
+    ],
+    "description": "Create a default variable assignment"
+  },
+  "export": {
+    "prefix": "export",
+    "body": [
+      "export $1"
+    ],
+    "description": "Export a variable"
+  },
+  "unexport": {
+    "prefix": "unexport",
+    "body": [
+      "unexport $1"
+    ],
+    "description": "Unexport a variable"
+  },
+  "import": {
+    "prefix": "import",
+    "body": [
+      "import \"$1\""
+    ],
+    "description": "Import another justfile"
+  },
+  "import-optional": {
+    "prefix": "import?",
+    "body": [
+      "import? \"$1\""
+    ],
+    "description": "Optionally import another justfile"
+  },
+  "module": {
+    "prefix": "mod",
+    "body": [
+      "mod $1 {",
+      "  $2",
+      "}"
+    ],
+    "description": "Create a module"
+  },
+  "alias": {
+    "prefix": "alias",
+    "body": [
+      "alias $1 := $2"
+    ],
+    "description": "Create an alias"
+  },
+  "set": {
+    "prefix": "set",
+    "body": [
+      "set $1 := \"$2\""
+    ],
+    "description": "Set a just setting"
+  },
+  "backtick": {
+    "prefix": "`",
+    "body": [
+      "`$1`"
+    ],
+    "description": "Inline backtick command substitution"
+  },
+  "interpolation": {
+    "prefix": "{{",
+    "body": [
+      "{{$1}}"
+    ],
+    "description": "Variable interpolation"
+  },
+  "cargo-test": {
+    "prefix": "cargo-test",
+    "body": [
+      "# Run tests",
+      "test:",
+      "  cargo test ${1:--all}"
+    ],
+    "description": "Cargo test recipe"
+  },
+  "cargo-build": {
+    "prefix": "cargo-build",
+    "body": [
+      "# Build the project",
+      "build ${1:MODE}='release':",
+      "  cargo build ${1/--release/--release/}${1/--debug/--debug/}"
+    ],
+    "description": "Cargo build recipe with mode parameter"
+  },
+  "docker-build": {
+    "prefix": "docker-build",
+    "body": [
+      "# Build Docker image",
+      "docker-build ${1:TAG}='latest':",
+      "  docker build -t $1 ."
+    ],
+    "description": "Docker build recipe"
+  },
+  "docker-run": {
+    "prefix": "docker-run",
+    "body": [
+      "# Run Docker container",
+      "docker-run ${1:IMAGE}='myapp':",
+      "  docker run --rm -it $1"
+    ],
+    "description": "Docker run recipe"
+  },
+  "git-status": {
+    "prefix": "git-status",
+    "body": [
+      "# Show git status",
+      "status:",
+      "  git status"
+    ],
+    "description": "Git status recipe"
+  },
+  "git-commit": {
+    "prefix": "git-commit",
+    "body": [
+      "# Commit changes",
+      "commit ${1:MESSAGE}='chore: update':",
+      "  git add -A",
+      "  git commit -m \"$1\""
+    ],
+    "description": "Git commit recipe"
+  },
+  "npm-install": {
+    "prefix": "npm-install",
+    "body": [
+      "# Install npm dependencies",
+      "install:",
+      "  npm ci"
+    ],
+    "description": "npm install recipe"
+  },
+  "npm-test": {
+    "prefix": "npm-test",
+    "body": [
+      "# Run npm tests",
+      "test:",
+      "  npm test"
+    ],
+    "description": "npm test recipe"
+  },
+  "python-test": {
+    "prefix": "python-test",
+    "body": [
+      "# Run Python tests",
+      "test ${1:ARGS}='':",
+      "  python -m pytest $1"
+    ],
+    "description": "Python pytest recipe"
+  },
+  "help": {
+    "prefix": "help",
+    "body": [
+      "# Show help",
+      "help:",
+      "  @just --list"
+    ],
+    "description": "Help recipe showing all available recipes"
+  },
+  "default": {
+    "prefix": "default",
+    "body": [
+      "# Default recipe",
+      "default: $1",
+      "  $2"
+    ],
+    "description": "Default recipe (runs when no recipe specified)"
+  }
+}

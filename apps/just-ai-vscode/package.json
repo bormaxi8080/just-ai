@@ -1,0 +1,254 @@
+{
+  "name": "just-ai",
+  "displayName": "just-ai",
+  "description": "AI-oriented companion utilities for justfiles with inline risk diagnostics, recipe suggestions, and history panel",
+  "version": "0.1.0",
+  "publisher": "just-ai",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/bormaxi8080/just-ai"
+  },
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Other",
+    "Programming Languages",
+    "Snippets"
+  ],
+  "keywords": [
+    "just",
+    "justfile",
+    "task-runner",
+    "ai",
+    "risk-analysis",
+    "history"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "just-ai.doctor",
+        "title": "just-ai: Run Doctor (Risk Analysis)",
+        "category": "just-ai"
+      },
+      {
+        "command": "just-ai.suggest",
+        "title": "just-ai: Suggest Missing Recipes",
+        "category": "just-ai"
+      },
+      {
+        "command": "just-ai.explain",
+        "title": "just-ai: Explain Recipe",
+        "category": "just-ai"
+      },
+      {
+        "command": "just-ai.add",
+        "title": "just-ai: Add New Recipe",
+        "category": "just-ai"
+      },
+      {
+        "command": "just-ai.fix",
+        "title": "just-ai: Fix Failed Recipe",
+        "category": "just-ai"
+      },
+      {
+        "command": "just-ai.exportContext",
+        "title": "just-ai: Export Context for AI",
+        "category": "just-ai"
+      },
+      {
+        "command": "just-ai.openHistory",
+        "title": "just-ai: Open History Panel",
+        "category": "just-ai"
+      },
+      {
+        "command": "just-ai.configure",
+        "title": "just-ai: Configure Settings",
+        "category": "just-ai"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "when": "resourceLangId == just",
+          "command": "just-ai.explain",
+          "group": "just-ai@1"
+        },
+        {
+          "when": "resourceLangId == just",
+          "command": "just-ai.add",
+          "group": "just-ai@2"
+        }
+      ],
+      "explorer/context": [
+        {
+          "when": "resourceLangId == just",
+          "command": "just-ai.doctor",
+          "group": "just-ai@1"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "just-ai.doctor",
+          "when": "resourceLangId == just"
+        },
+        {
+          "command": "just-ai.suggest",
+          "when": "resourceLangId == just"
+        },
+        {
+          "command": "just-ai.explain",
+          "when": "resourceLangId == just"
+        },
+        {
+          "command": "just-ai.add",
+          "when": "resourceLangId == just"
+        },
+        {
+          "command": "just-ai.fix",
+          "when": "resourceLangId == just"
+        },
+        {
+          "command": "just-ai.exportContext",
+          "when": "resourceLangId == just"
+        },
+        {
+          "command": "just-ai.openHistory",
+          "when": "resourceLangId == just"
+        },
+        {
+          "command": "just-ai.configure"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "just-ai",
+      "properties": {
+        "just-ai.justBinary": {
+          "type": "string",
+          "default": "just",
+          "description": "Path to the just binary"
+        },
+        "just-ai.enableRiskDiagnostics": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable inline risk diagnostics in justfiles"
+        },
+        "just-ai.aiProvider": {
+          "type": "string",
+          "default": "openai",
+          "enum": ["openai", "ollama", "openai-compatible", "anthropic", "azure", "gemini"],
+          "description": "AI provider to use for suggestions and explanations"
+        },
+        "just-ai.aiModel": {
+          "type": "string",
+          "default": "",
+          "description": "Model name (empty = provider default)"
+        },
+        "just-ai.aiBaseUrl": {
+          "type": "string",
+          "default": "",
+          "description": "Base URL for API (empty = provider default)"
+        },
+        "just-ai.aiApiKey": {
+          "type": "string",
+          "default": "",
+          "description": "API key (can also use JUST_AI_API_KEY env var)"
+        },
+        "just-ai.historyBackend": {
+          "type": "string",
+          "default": "sqlite",
+          "enum": ["jsonl", "sqlite"],
+          "description": "History storage backend"
+        },
+        "just-ai.showHistoryOnFailure": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show history panel when a recipe fails"
+        }
+      }
+    },
+    "views": {
+      "just-ai": [
+        {
+          "id": "just-ai.history",
+          "name": "Recipe History",
+          "type": "tree"
+        }
+      ]
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "just-ai",
+          "title": "just-ai",
+          "icon": "icon.png"
+        }
+      ]
+    },
+    "languages": [
+      {
+        "id": "just",
+        "aliases": ["Just", "justfile"],
+        "extensions": [".just", "justfile", "Justfile"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "just",
+        "scopeName": "source.just",
+        "path": "./syntaxes/just.tmLanguage.json"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "just",
+        "path": "./snippets/just.json"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "just-ai.doctor",
+        "key": "ctrl+shift+j d",
+        "mac": "cmd+shift+j d",
+        "when": "editorTextFocus && resourceLangId == just"
+      },
+      {
+        "command": "just-ai.explain",
+        "key": "ctrl+shift+j e",
+        "mac": "cmd+shift+j e",
+        "when": "editorTextFocus && resourceLangId == just"
+      },
+      {
+        "command": "just-ai.suggest",
+        "key": "ctrl+shift+j s",
+        "mac": "cmd+shift+j s",
+        "when": "editorTextFocus && resourceLangId == just"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "lint": "eslint src --ext ts",
+    "test": "node ./out/test/runTest.js",
+    "package": "vsce package --no-dependencies"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.90.0",
+    "@vscode/test-cli": "^0.0.10",
+    "@vscode/test-electron": "^2.4.0",
+    "typescript": "^5.4.0",
+    "eslint": "^8.56.0",
+    "@typescript-eslint/eslint-plugin": "^7.0.0",
+    "@typescript-eslint/parser": "^7.0.0"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.0"
+  }
+}

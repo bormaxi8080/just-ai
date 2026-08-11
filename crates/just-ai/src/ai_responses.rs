@@ -1,6 +1,6 @@
 use {crate::domain::risk::RiskLevel, serde::Deserialize, serde_json::Value};
 
-pub(crate) trait ResponseContract {
+pub trait ResponseContract {
   fn schema() -> Value;
 }
 
@@ -69,10 +69,10 @@ impl ResponseContract for ExplainResponse {
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct AddRecipeResponse {
-  pub(crate) rationale: Vec<String>,
-  pub(crate) recipe: RecipeProposal,
-  pub(crate) summary: String,
+pub struct AddRecipeResponse {
+  pub rationale: Vec<String>,
+  pub recipe: RecipeProposal,
+  pub summary: String,
 }
 
 impl ResponseContract for AddRecipeResponse {
@@ -105,20 +105,68 @@ impl ResponseContract for AddRecipeResponse {
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct RecipeProposal {
-  pub(crate) body: Vec<String>,
+pub struct RecipeProposal {
+  pub body: Vec<String>,
   #[serde(default)]
-  pub(crate) dependencies: Vec<String>,
-  pub(crate) doc: Option<String>,
-  pub(crate) name: String,
+  pub dependencies: Vec<String>,
+  pub doc: Option<String>,
+  pub name: String,
   #[serde(default)]
-  pub(crate) parameters: Vec<RecipeParameterProposal>,
+  pub parameters: Vec<RecipeParameterProposal>,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct RecipeParameterProposal {
+pub struct RecipeParameterProposal {
   #[serde(default)]
-  pub(crate) default: Option<String>,
-  pub(crate) name: String,
+  pub default: Option<String>,
+  pub name: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FixResponse {
+  pub rationale: Vec<String>,
+  pub recipe: FixProposal,
+  pub summary: String,
+}
+
+impl ResponseContract for FixResponse {
+  fn schema() -> Value {
+    serde_json::json!({
+      "type": "object", "additionalProperties": false,
+      "required": ["summary", "recipe", "rationale"],
+      "properties": {
+        "summary": {"type": "string"},
+        "rationale": {"type": "array", "items": {"type": "string"}},
+        "recipe": {
+          "type": "object", "additionalProperties": false,
+          "required": ["name", "doc", "parameters", "dependencies", "body"],
+          "properties": {
+            "name": {"type": "string", "pattern": "^[A-Za-z0-9_-]+$"},
+            "doc": {"type": ["string", "null"]},
+            "parameters": {"type": "array", "items": {
+              "type": "object", "additionalProperties": false,
+              "required": ["name", "default"],
+              "properties": {"name": {"type": "string"}, "default": {"type": ["string", "null"]}}
+            }},
+            "dependencies": {"type": "array", "items": {"type": "string"}},
+            "body": {"type": "array", "minItems": 1, "items": {"type": "string"}}
+          }
+        }
+      }
+    })
+  }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FixProposal {
+  pub body: Vec<String>,
+  #[serde(default)]
+  pub dependencies: Vec<String>,
+  pub doc: Option<String>,
+  pub name: String,
+  #[serde(default)]
+  pub parameters: Vec<RecipeParameterProposal>,
 }

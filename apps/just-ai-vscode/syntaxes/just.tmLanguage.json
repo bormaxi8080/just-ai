@@ -1,0 +1,417 @@
+{
+  "name": "Just",
+  "scopeName": "source.just",
+  "fileTypes": ["justfile", "Justfile", ".just"],
+  "injectionSelector": "L:source.just",
+  "patterns": [
+    {
+      "include": "#recipe"
+    },
+    {
+      "include": "#assignment"
+    },
+    {
+      "include": "#comment"
+    },
+    {
+      "include": "#setting"
+    },
+    {
+      "include": "#import"
+    },
+    {
+      "include": "#module"
+    },
+    {
+      "include": "#export"
+    },
+    {
+      "include": "#unexport"
+    },
+    {
+      "include": "#alias"
+    }
+  ],
+  "repository": {
+    "recipe": {
+      "patterns": [
+        {
+          "name": "meta.recipe.just",
+          "begin": "^([a-zA-Z_][a-zA-Z0-9_-]*)(\\s*\\()?",
+          "end": ":",
+          "beginCaptures": {
+            "1": { "name": "entity.name.function.recipe.just" },
+            "2": { "name": "punctuation.definition.parameters.begin.just" }
+          },
+          "endCaptures": {
+            "0": { "name": "punctuation.definition.recipe.just" }
+          },
+          "patterns": [
+            {
+              "include": "#parameter"
+            },
+            {
+              "include": "#variadic-parameter"
+            },
+            {
+              "include": "#default-value"
+            }
+          ]
+        },
+        {
+          "name": "meta.recipe.body.just",
+          "begin": "^(\\t|    )",
+          "end": "(?=^[^\\t\\s])",
+          "patterns": [
+            {
+              "include": "#command-line"
+            },
+            {
+              "include": "#comment"
+            },
+            {
+              "include": "#string"
+            }
+          ]
+        }
+      ]
+    },
+    "parameter": {
+      "name": "variable.parameter.recipe.just",
+      "match": "[a-zA-Z_][a-zA-Z0-9_-]*"
+    },
+    "variadic-parameter": {
+      "name": "variable.parameter.variadic.just",
+      "match": "\\*[a-zA-Z_][a-zA-Z0-9_-]*"
+    },
+    "default-value": {
+      "patterns": [
+        {
+          "name": "keyword.operator.assignment.just",
+          "match": "="
+        },
+        {
+          "include": "#expression"
+        }
+      ]
+    },
+    "command-line": {
+      "patterns": [
+        {
+          "include": "#shebang"
+        },
+        {
+          "include": "#backslash-continuation"
+        },
+        {
+          "include": "#command"
+        }
+      ]
+    },
+    "shebang": {
+      "name": "keyword.other.shebang.just",
+      "match": "^#!.*$"
+    },
+    "backslash-continuation": {
+      "name": "punctuation.separator.continuation.just",
+      "match": "\\\\\\s*$"
+    },
+    "command": {
+      "patterns": [
+        {
+          "name": "keyword.control.at.just",
+          "match": "^@"
+        },
+        {
+          "name": "keyword.control.dash.just",
+          "match": "^-"
+        },
+        {
+          "name": "keyword.control.plus.just",
+          "match": "^\\+"
+        },
+        {
+          "include": "#string"
+        },
+        {
+          "include": "#backtick"
+        },
+        {
+          "include": "#variable"
+        },
+        {
+          "include": "#function-call"
+        },
+        {
+          "name": "support.function.shell.just",
+          "match": "\\b(cd|ls|cp|mv|rm|mkdir|rmdir|echo|cat|grep|sed|awk|find|xargs|curl|wget|git|cargo|npm|yarn|pnpm|make|docker|kubectl|terraform|ansible|python|python3|node|npm|npx|go|rustc|rustup|clang|gcc|g\\+\\+|javac|java|swift|swiftc|dotnet|msbuild|gradle|mvn|ant|bazel|buck|pants|rake|bundle|gem|pip|pip3|poetry|pipenv|conda|mamba|virtualenv|venv|tox|pytest|unittest|jest|mocha|vitest|cypress|playwright|karma|rspec|minitest|rspec|bundler|spring|rails|django|flask|fastapi|express|koa|fastify|next|nuxt|gatsby|vite|webpack|rollup|esbuild|parcel|snowpack|turbo|nx|lerna|yarn|pnpm|npm|npx)\b"
+        }
+      ]
+    },
+    "assignment": {
+      "name": "meta.assignment.just",
+      "begin": "^([a-zA-Z_][a-zA-Z0-9_-]*)\\s*(\\?=|\\+=|=)",
+      "end": "$",
+      "beginCaptures": {
+        "1": { "name": "entity.name.variable.just" },
+        "2": { "name": "keyword.operator.assignment.just" }
+      },
+      "patterns": [
+        {
+          "include": "#expression"
+        },
+        {
+          "include": "#comment"
+        }
+      ]
+    },
+    "expression": {
+      "patterns": [
+        {
+          "include": "#string"
+        },
+        {
+          "include": "#backtick"
+        },
+        {
+          "include": "#variable"
+        },
+        {
+          "include": "#function-call"
+        },
+        {
+          "include": "#number"
+        },
+        {
+          "include": "#boolean"
+        },
+        {
+          "name": "keyword.operator.logical.just",
+          "match": "\\b(and|or|not)\\b"
+        },
+        {
+          "name": "keyword.operator.comparison.just",
+          "match": "==|!=|<|>|<=|>="
+        },
+        {
+          "name": "keyword.operator.arithmetic.just",
+          "match": "\\+|-|\\*|/|%|\\*\\*"
+        },
+        {
+          "name": "punctuation.bracket.just",
+          "match": "[\\(\\)\\[\\]\\{\\}]"
+        }
+      ]
+    },
+    "variable": {
+      "name": "variable.other.just",
+      "match": "\\{\\{[a-zA-Z_][a-zA-Z0-9_-]*\\}\\}"
+    },
+    "function-call": {
+      "name": "meta.function-call.just",
+      "begin": "\\b([a-zA-Z_][a-zA-Z0-9_-]*)\\s*\\(",
+      "end": "\\)",
+      "beginCaptures": {
+        "1": { "name": "entity.name.function.builtin.just" }
+      },
+      "patterns": [
+        {
+          "include": "#expression"
+        }
+      ]
+    },
+    "string": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.just",
+          "begin": "\"",
+          "end": "\"",
+          "patterns": [
+            {
+              "name": "constant.character.escape.just",
+              "match": "\\\\."
+            },
+            {
+              "include": "#interpolation"
+            }
+          ]
+        },
+        {
+          "name": "string.quoted.single.just",
+          "begin": "'",
+          "end": "'",
+          "patterns": [
+            {
+              "name": "constant.character.escape.just",
+              "match": "\\\\."
+            }
+          ]
+        },
+        {
+          "name": "string.quoted.raw.just",
+          "begin": "`[^`]*`",
+          "patterns": [
+            {
+              "include": "#interpolation"
+            }
+          ]
+        },
+        {
+          "name": "string.quoted.indented.just",
+          "begin": "```",
+          "end": "```"
+        }
+      ]
+    },
+    "interpolation": {
+      "name": "meta.interpolation.just",
+      "begin": "\\{\\{",
+      "end": "\\}\\}",
+      "patterns": [
+        {
+          "name": "variable.other.just",
+          "match": "[a-zA-Z_][a-zA-Z0-9_-]*"
+        }
+      ]
+    },
+    "backtick": {
+      "name": "string.quoted.backtick.just",
+      "begin": "`",
+      "end": "`",
+      "patterns": [
+        {
+          "name": "constant.character.escape.just",
+          "match": "\\\\."
+        },
+        {
+          "include": "#interpolation"
+        }
+      ]
+    },
+    "comment": {
+      "name": "comment.line.number-sign.just",
+      "match": "#.*$"
+    },
+    "setting": {
+      "name": "meta.setting.just",
+      "begin": "^set\\s+(\\w+)(\\s*:=\\s*)?",
+      "end": "$",
+      "beginCaptures": {
+        "1": { "name": "keyword.other.setting.just" },
+        "2": { "name": "keyword.operator.assignment.just" }
+      },
+      "patterns": [
+        {
+          "include": "#expression"
+        },
+        {
+          "include": "#comment"
+        }
+      ]
+    },
+    "import": {
+      "name": "meta.import.just",
+      "begin": "^import\\s+",
+      "end": "$",
+      "beginCaptures": {
+        "0": { "name": "keyword.control.import.just" }
+      },
+      "patterns": [
+        {
+          "name": "string.quoted.double.just",
+          "begin": "\"",
+          "end": "\""
+        },
+        {
+          "name": "string.quoted.single.just",
+          "begin": "'",
+          "end": "'"
+        },
+        {
+          "name": "keyword.operator.just",
+          "match": "\\?"
+        },
+        {
+          "include": "#comment"
+        }
+      ]
+    },
+    "module": {
+      "name": "meta.module.just",
+      "begin": "^mod\\s+([a-zA-Z_][a-zA-Z0-9_-]*)\\s*\\{",
+      "end": "^\\}",
+      "beginCaptures": {
+        "1": { "name": "entity.name.module.just" },
+        "0": { "name": "keyword.control.module.just" }
+      },
+      "patterns": [
+        {
+          "include": "#recipe"
+        },
+        {
+          "include": "#assignment"
+        },
+        {
+          "include": "#comment"
+        },
+        {
+          "include": "#setting"
+        },
+        {
+          "include": "#import"
+        },
+        {
+          "include": "#export"
+        },
+        {
+          "include": "#unexport"
+        },
+        {
+          "include": "#alias"
+        }
+      ]
+    },
+    "export": {
+      "name": "meta.export.just",
+      "match": "^export\\s+([a-zA-Z_][a-zA-Z0-9_-]*)",
+      "captures": {
+        "0": { "name": "keyword.control.export.just" },
+        "1": { "name": "entity.name.variable.exported.just" }
+      }
+    },
+    "unexport": {
+      "name": "meta.unexport.just",
+      "match": "^unexport\\s+([a-zA-Z_][a-zA-Z0-9_-]*)",
+      "captures": {
+        "0": { "name": "keyword.control.unexport.just" },
+        "1": { "name": "entity.name.variable.unexported.just" }
+      }
+    },
+    "alias": {
+      "name": "meta.alias.just",
+      "begin": "^alias\\s+([a-zA-Z_][a-zA-Z0-9_-]*)\\s*:=",
+      "end": "$",
+      "beginCaptures": {
+        "1": { "name": "entity.name.function.alias.just" },
+        "0": { "name": "keyword.control.alias.just" },
+        "2": { "name": "keyword.operator.assignment.just" }
+      },
+      "patterns": [
+        {
+          "include": "#expression"
+        },
+        {
+          "include": "#comment"
+        }
+      ]
+    },
+    "number": {
+      "name": "constant.numeric.just",
+      "match": "\\b\\d+(\\.\\d+)?\\b"
+    },
+    "boolean": {
+      "name": "constant.language.boolean.just",
+      "match": "\\b(true|false)\\b"
+    }
+  }
+}

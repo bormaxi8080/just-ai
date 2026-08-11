@@ -5,6 +5,7 @@ use crate::{
     risk::{RiskFinding, RiskLevel},
   },
 };
+use dialoguer::{Input, Select};
 use serde::{Deserialize, Serialize};
 use std::{
   error::Error,
@@ -396,6 +397,63 @@ fn authorize(
   authorized
     .then_some(())
     .ok_or_else(|| ExecutionError("run does not have the required confirmation".into()))
+}
+
+/// Interactive authorization using TUI prompts.
+/// Returns the appropriate RunConfirmation based on user selection.
+pub fn interactive_authorize(decision: &PolicyDecision) -> Result<RunConfirmation, ExecutionError> {
+  match decision {
+    PolicyDecision::Allow => Ok(RunConfirmation::None),
+    PolicyDecision::Confirm => {
+      let selection = Select::new()
+        .with_prompt("This recipe requires confirmation. How would you like to proceed?")
+        .items(&["Allow (yes)", "Deny (no)"])
+        .default(0)
+        .interact()
+        .map_err(|e| ExecutionError(format!("interactive prompt failed: {e}")))?;
+      match selection {
+        0 => Ok(RunConfirmation::Confirmed),
+        _ => Err(ExecutionError("run denied by user".into())),
+      }
+    }
+    PolicyDecision::ConfirmTyped { phrase } => {
+      let selection = Select::new()
+        .with_prompt(format!(
+          "This recipe requires typed confirmation. Expected phrase: \"{phrase}\""
+        ))
+        .items(&["Type the phrase to confirm", "Cancel"])
+        .default(0)
+        .interact()
+        .map_err(|e| ExecutionError(format!("interactive prompt failed: {e}")))?;
+      match selection {
+        0 => {
+          let input: String = Input::new()
+            .with_prompt("Type the confirmation phrase")
+            .interact_text()
+            .map_err(|e| ExecutionError(format!("interactive prompt failed: {e}")))?;
+          if input == *phrase {
+            Ok(RunConfirmation::Typed { phrase: input })
+          } else {
+            Err(ExecutionError("confirmation phrase does not match".into()))
+          }
+        }
+        _ => Err(ExecutionError("run cancelled by user".into())),
+      }
+    }
+    PolicyDecision::Deny { reason } => {
+      eprintln!("Run denied by policy: {reason}");
+      let selection = Select::new()
+        .with_prompt("Policy denies this run. Override?")
+        .items(&["Override and run anyway", "Cancel"])
+        .default(1)
+        .interact()
+        .map_err(|e| ExecutionError(format!("interactive prompt failed: {e}")))?;
+      match selection {
+        0 => Ok(RunConfirmation::Confirmed),
+        _ => Err(ExecutionError("run denied by policy".into())),
+      }
+    }
+  }
 }
 
 fn validate_request(request: &RunRequest) -> Result<(), ExecutionError> {

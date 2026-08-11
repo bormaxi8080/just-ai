@@ -3,10 +3,11 @@ use {
     ContextRecipe, ProjectContext,
     ai_responses::*,
     application,
+    config::{HistoryBackend, HistoryConfig},
     domain::risk::{RiskFinding, RiskLevel},
     inspection::load_context,
     prompts,
-    proposal::handle_add,
+    proposal::{handle_add, handle_fix},
     provider,
   },
   clap::{Parser, Subcommand},
@@ -52,6 +53,13 @@ enum Commands {
     #[arg(long, help = "Apply the generated recipe after validation")]
     write: bool,
   },
+  #[command(about = "Ask an AI provider to propose a fix for a failed recipe")]
+  Fix {
+    #[arg(help = "Recipe name or namepath to fix")]
+    recipe: String,
+    #[arg(long, help = "Apply the generated fix after validation")]
+    write: bool,
+  },
   #[command(about = "Export a compact machine-readable context for AI tools")]
   ExportContext {
     #[arg(long, help = "Pretty-print JSON output")]
@@ -74,21 +82,39 @@ enum Commands {
       help = "Typed confirmation for a high-risk run"
     )]
     confirm: Option<String>,
+    #[arg(long, help = "Use interactive TUI prompts for confirmation")]
+    interactive: bool,
     #[arg(trailing_var_arg = true, help = "Recipe arguments")]
     arguments: Vec<String>,
   },
-  #[command(about = "Show recent local recipe runs")]
+  #[command(about = "Manage local recipe run history")]
   History {
-    #[arg(long, default_value_t = 20)]
-    limit: usize,
-    #[arg(long)]
-    json: bool,
+    #[command(subcommand)]
+    command: HistoryCommands,
   },
   #[command(about = "Print a versioned project-agent command prompt")]
   Agent {
     #[command(subcommand)]
     command: AgentCommands,
   },
+  #[command(about = "Validate or generate schema for just-ai configuration")]
+  Config {
+    #[command(subcommand)]
+    command: ConfigCommands,
+  },
+}
+
+#[derive(Debug, Subcommand)]
+enum HistoryCommands {
+  #[command(about = "Show recent local recipe runs")]
+  Recent {
+    #[arg(long, default_value_t = 20)]
+    limit: usize,
+    #[arg(long)]
+    json: bool,
+  },
+  #[command(about = "Migrate history from JSONL to SQLite")]
+  Migrate,
 }
 
 #[derive(Debug, Subcommand)]
@@ -103,6 +129,14 @@ enum AgentCommands {
   SystemPrompt,
   #[command(about = "Print the layered verification playbook")]
   Verify,
+}
+
+#[derive(Debug, Subcommand)]
+enum ConfigCommands {
+  #[command(about = "Validate the just-ai.toml configuration file")]
+  Validate,
+  #[command(about = "Output JSON Schema for just-ai.toml")]
+  Schema,
 }
 
 /// Run the `just-ai` command-line application using process arguments.
@@ -153,6 +187,22 @@ fn try_main() -> Result<(), Box<dyn Error>> {
       )?;
       handle_add(&cli.just_binary, &context, &request, response, write)?;
     }
+    Commands::Fix { recipe, write } => {
+      use crate::config::Config;
+      use application::history::create_history;
+      let project_root = env::current_dir()?;
+      let config = Config::load(&project_root)?;
+      let history = create_history(config.history)?;
+      // Query for failed runs of this recipe
+      let failed_runs = history.query(Some(&recipe), Some(false), 10)?;
+      let history_json = serde_json::to_string_pretty(&failed_runs)?;
+      let context_json = serde_json::to_string_pretty(&context)?;
+      let response = AiClient::from_env()?.complete_json::<FixResponse>(
+        "Generate a fix proposal for a failing just recipe as strict JSON.",
+        &prompts::fix(&context_json, &recipe, &history_json),
+      )?;
+      handle_fix(&cli.just_binary, &context, &recipe, response, write)?;
+    }
     Commands::ExportContext { pretty } => {
       if pretty {
         println!("{}", serde_json::to_string_pretty(&context)?);
@@ -177,11 +227,12 @@ fn try_main() -> Result<(), Box<dyn Error>> {
       recipe,
       yes,
       confirm,
+      interactive,
       arguments,
     } => {
       use crate::config::Config;
       use application::{
-        execution::{RecipeExecutor, RunConfirmation, RunRequest},
+        execution::{RecipeExecutor, RunConfirmation, RunRequest, interactive_authorize},
         history::{RunRecord, create_history},
       };
       use std::time::{Instant, SystemTime, UNIX_EPOCH};
@@ -197,10 +248,14 @@ fn try_main() -> Result<(), Box<dyn Error>> {
       for line in &prepared.preview {
         println!("> {line}");
       }
-      let confirmation = match confirm {
-        Some(phrase) => RunConfirmation::Typed { phrase },
-        None if yes => RunConfirmation::Confirmed,
-        None => RunConfirmation::None,
+      let confirmation = if interactive {
+        interactive_authorize(&prepared.policy)?
+      } else {
+        match confirm {
+          Some(phrase) => RunConfirmation::Typed { phrase },
+          None if yes => RunConfirmation::Confirmed,
+          None => RunConfirmation::None,
+        }
       };
       let started_at_ms = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis();
       let started = Instant::now();
@@ -220,29 +275,60 @@ fn try_main() -> Result<(), Box<dyn Error>> {
         return Err(format!("recipe exited with {}", completed.status).into());
       }
     }
-    Commands::History { limit, json } => {
-      use crate::config::Config;
-      use application::history::create_history;
-      let project_root = env::current_dir()?;
-      let config = Config::load(&project_root)?;
-      let history = create_history(config.history)?;
-      let records = history.recent(limit)?;
-      if json {
-        println!("{}", serde_json::to_string_pretty(&records)?);
-      } else if records.is_empty() {
-        println!("No recorded runs.");
-      } else {
-        for record in records {
-          println!(
-            "{} {} exit={:?} duration={}ms",
-            if record.success { "ok" } else { "failed" },
-            record.recipe,
-            record.exit_code,
-            record.duration_ms
-          );
+    Commands::History { command } => match command {
+      HistoryCommands::Recent { limit, json } => {
+        use crate::config::Config;
+        use application::history::create_history;
+        let project_root = env::current_dir()?;
+        let config = Config::load(&project_root)?;
+        let history = create_history(config.history)?;
+        let records = history.recent(limit)?;
+        if json {
+          println!("{}", serde_json::to_string_pretty(&records)?);
+        } else if records.is_empty() {
+          println!("No recorded runs.");
+        } else {
+          for record in records {
+            println!(
+              "{} {} exit={:?} duration={}ms",
+              if record.success { "ok" } else { "failed" },
+              record.recipe,
+              record.exit_code,
+              record.duration_ms
+            );
+          }
         }
       }
-    }
+      HistoryCommands::Migrate => {
+        use crate::application::history::migrate_jsonl_to_sqlite;
+        use crate::config::Config;
+        let project_root = env::current_dir()?;
+        let config = Config::load(&project_root)?;
+        let jsonl_config = HistoryConfig {
+          backend: HistoryBackend::Jsonl,
+          ..config.history.clone()
+        };
+        let sqlite_config = HistoryConfig {
+          backend: HistoryBackend::Sqlite,
+          ..config.history
+        };
+        migrate_jsonl_to_sqlite(jsonl_config, sqlite_config)?;
+      }
+    },
+    Commands::Config { command } => match command {
+      ConfigCommands::Validate => {
+        use crate::config::Config;
+        let project_root = env::current_dir()?;
+        Config::load(&project_root)?;
+        println!("Configuration is valid.");
+      }
+      ConfigCommands::Schema => {
+        use crate::config::Config;
+        use schemars::schema_for;
+        let schema = schema_for!(Config);
+        println!("{}", serde_json::to_string_pretty(&schema)?);
+      }
+    },
     Commands::Agent { .. } => unreachable!("agent commands return before project discovery"),
   }
 
@@ -346,12 +432,12 @@ fn print_doctor_report(report: &DoctorReport) {
   }
 }
 
-struct AiClient {
+pub struct AiClient {
   provider: Box<dyn provider::AiProvider>,
 }
 
 impl AiClient {
-  fn from_env() -> Result<Self, Box<dyn Error>> {
+  pub fn from_env() -> Result<Self, Box<dyn Error>> {
     let provider = env::var("JUST_AI_PROVIDER").unwrap_or_else(|_| "openai".to_owned());
     let base_url = env::var("JUST_AI_BASE_URL").unwrap_or_else(|_| match provider.as_str() {
       "ollama" => "http://localhost:11434".to_owned(),
@@ -377,12 +463,33 @@ impl AiClient {
       "openai-compatible" => Box::new(provider::OpenAiCompatibleProvider::new(
         base_url, model, api_key,
       )),
+      "anthropic" => Box::new(provider::AnthropicProvider::new(
+        base_url,
+        model,
+        api_key.expect("API key requirement checked above"),
+      )),
+      "azure" => {
+        let deployment = env::var("JUST_AI_AZURE_DEPLOYMENT").unwrap_or_else(|_| model.clone());
+        let api_version =
+          env::var("JUST_AI_API_VERSION").unwrap_or_else(|_| "2024-08-01-preview".to_owned());
+        Box::new(provider::AzureOpenAiProvider::new(
+          base_url,
+          deployment,
+          api_key.expect("API key requirement checked above"),
+          api_version,
+        ))
+      }
+      "gemini" => Box::new(provider::GeminiProvider::new(
+        base_url,
+        model,
+        api_key.expect("API key requirement checked above"),
+      )),
       other => return Err(format!("unsupported JUST_AI_PROVIDER `{other}`").into()),
     };
     Ok(Self { provider })
   }
 
-  fn complete_json<T>(&self, system: &str, user: &str) -> Result<T, Box<dyn Error>>
+  pub fn complete_json<T>(&self, system: &str, user: &str) -> Result<T, Box<dyn Error>>
   where
     T: for<'de> Deserialize<'de> + ResponseContract,
   {

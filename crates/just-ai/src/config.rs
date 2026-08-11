@@ -1,5 +1,6 @@
 use {
   crate::domain::risk::{RiskFinding, RiskLevel},
+  schemars::JsonSchema,
   serde::{Deserialize, Serialize},
   std::{
     collections::HashMap,
@@ -9,7 +10,7 @@ use {
 };
 
 /// Top-level configuration for just-ai.
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
 pub struct Config {
   #[serde(default)]
   pub history: HistoryConfig,
@@ -77,14 +78,14 @@ fn find_config(start: &Path) -> Option<PathBuf> {
   }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ConfigError {
   pub kind: ConfigErrorKind,
   pub path: PathBuf,
   pub source: String,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub enum ConfigErrorKind {
   IoError,
   ParseError,
@@ -112,7 +113,7 @@ impl std::fmt::Display for ConfigError {
 impl std::error::Error for ConfigError {}
 
 /// History configuration (JSONL or SQLite run history).
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum HistoryBackend {
   Jsonl,
@@ -121,7 +122,7 @@ pub enum HistoryBackend {
 }
 
 /// History configuration (JSONL or SQLite run history).
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct HistoryConfig {
   /// Storage backend: "jsonl" or "sqlite" (default: "sqlite")
   #[serde(default)]
@@ -191,7 +192,7 @@ impl HistoryConfig {
 }
 
 /// Execution configuration (recipe runtime).
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ExecutionConfig {
   /// Maximum captured output per stream (stdout/stderr) in bytes.
   #[serde(default = "default_max_capture_bytes")]
@@ -248,7 +249,7 @@ impl ExecutionConfig {
 }
 
 /// Risk analysis configuration.
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct RiskConfig {
   /// Custom blocked patterns: pattern -> reason
   #[serde(default)]
@@ -332,7 +333,7 @@ fn normalize_command(line: &str) -> String {
 }
 
 /// Policy configuration.
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct PolicyConfig {
   /// Custom policy decisions per risk level.
   /// If not set, defaults apply: Low=Allow, Medium=Confirm, High=ConfirmTyped, Blocked=Deny.
@@ -356,7 +357,7 @@ fn default_confirm_typed_phrase() -> String {
   "run {recipe}".to_string()
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum PolicyDecisionConfig {
   Allow,
@@ -411,7 +412,7 @@ impl PolicyDecisionConfig {
 }
 
 /// AI Provider configuration.
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct AiConfig {
   /// Provider name: openai, ollama, openai-compatible
   #[serde(default = "default_provider")]
@@ -466,6 +467,9 @@ impl AiConfig {
       .unwrap_or_else(|| match self.provider.as_str() {
         "ollama" => "llama3.1".to_string(),
         "openai" => "gpt-5.6-terra".to_string(),
+        "anthropic" => "claude-3-5-sonnet-20241022".to_string(),
+        "azure" => "gpt-4o".to_string(),
+        "gemini" => "gemini-1.5-pro".to_string(),
         _ => "gpt-5-mini".to_string(),
       })
   }
@@ -477,6 +481,8 @@ impl AiConfig {
       .clone()
       .unwrap_or_else(|| match self.provider.as_str() {
         "ollama" => "http://localhost:11434".to_string(),
+        "anthropic" => "https://api.anthropic.com".to_string(),
+        "gemini" => "https://generativelanguage.googleapis.com".to_string(),
         _ => "https://api.openai.com/v1".to_string(),
       })
   }
@@ -496,7 +502,7 @@ impl AiConfig {
 }
 
 /// Project scanner configuration.
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ScannerConfig {
   /// Per-file budget in bytes.
   #[serde(default = "default_file_budget")]
@@ -540,7 +546,7 @@ fn default_allowlist() -> Vec<String> {
 }
 
 /// Bounded file reading configuration.
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct BoundedFileConfig {
   /// Maximum size of an editable file in bytes.
   #[serde(default = "default_max_editable_file_bytes")]
@@ -567,7 +573,7 @@ fn default_prefix_limit() -> usize {
 }
 
 /// MCP server configuration.
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct McpConfig {
   /// Maximum JSON-RPC frame size in bytes.
   #[serde(default = "default_max_message_bytes")]

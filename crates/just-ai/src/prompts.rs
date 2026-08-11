@@ -76,6 +76,36 @@ Project context:
   )
 }
 
+#[must_use]
+pub fn fix(project_context: &str, recipe_name: &str, history_records: &str) -> String {
+  format!(
+    r#"Return strict JSON with this exact shape:
+{{
+  "summary": "short summary",
+  "recipe": {{
+    "name": "recipe-name",
+    "doc": "short doc comment or null",
+    "parameters": [{{"name": "PARAMETER", "default": null}}],
+    "dependencies": ["existing dependency recipe name"],
+    "body": ["command line"]
+  }},
+  "rationale": ["reason"]
+}}
+
+Propose a fix for the failing recipe by modifying its body, parameters, or dependencies.
+The fix should address the error patterns seen in the run history.
+Return JSON only. This is a proposal: do not execute anything.
+
+Recipe to fix: {recipe_name}
+
+Recent failed runs (with stderr tails):
+{history_records}
+
+Project context:
+{project_context}"#
+  )
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;

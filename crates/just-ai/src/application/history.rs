@@ -314,15 +314,13 @@ impl SqliteHistory {
 
 impl RunHistory for SqliteHistory {
   fn append(&self, record: &RunRecord) -> io::Result<()> {
-    // For synchronous interface, we block on the async operation
-    let rt =
-      tokio::runtime::Handle::try_current().map_err(|_| io::Error::other("no tokio runtime"))?;
+    // For synchronous interface, we block on the async operation in a new runtime
+    let rt = tokio::runtime::Runtime::new().map_err(io::Error::other)?;
     rt.block_on(self.append_async(record))
   }
 
   fn recent(&self, limit: usize) -> io::Result<Vec<RunRecord>> {
-    let rt =
-      tokio::runtime::Handle::try_current().map_err(|_| io::Error::other("no tokio runtime"))?;
+    let rt = tokio::runtime::Runtime::new().map_err(io::Error::other)?;
     rt.block_on(self.recent_async(limit))
   }
 
@@ -332,8 +330,7 @@ impl RunHistory for SqliteHistory {
     success: Option<bool>,
     limit: usize,
   ) -> io::Result<Vec<RunRecord>> {
-    let rt =
-      tokio::runtime::Handle::try_current().map_err(|_| io::Error::other("no tokio runtime"))?;
+    let rt = tokio::runtime::Runtime::new().map_err(io::Error::other)?;
     rt.block_on(self.query_async(recipe, success, limit))
   }
 }
@@ -472,6 +469,28 @@ pub fn create_history(config: HistoryConfig) -> io::Result<Box<dyn RunHistory>> 
       Ok(Box::new(history))
     }
   }
+}
+
+/// Migrate history from JSONL to SQLite.
+/// Reads all records from the JSONL file and writes them to SQLite.
+pub fn migrate_jsonl_to_sqlite(
+  jsonl_config: HistoryConfig,
+  sqlite_config: HistoryConfig,
+) -> io::Result<()> {
+  let jsonl_path = project_history_path(Path::new("."), &jsonl_config.file_name);
+  let jsonl_history = JsonLineHistory::new(jsonl_path, jsonl_config.clone());
+  let records = jsonl_history.read_all()?;
+  let count = records.len();
+
+  let rt = tokio::runtime::Runtime::new().map_err(io::Error::other)?;
+  let sqlite_history = rt.block_on(SqliteHistory::new(sqlite_config))?;
+
+  for record in records {
+    sqlite_history.append(&record)?;
+  }
+
+  println!("Migrated {count} records from JSONL to SQLite");
+  Ok(())
 }
 
 #[cfg(test)]

@@ -193,8 +193,121 @@ impl ProjectContext {
       .any(|recipe| recipe.name == name || recipe.namepath == name)
   }
 
-  pub(crate) fn root_source(&self) -> Option<&Path> {
+  pub fn root_source(&self) -> Option<&Path> {
     self.modules.first().map(|module| module.source.as_path())
+  }
+
+  /// Find the best line number to insert a new recipe based on dependencies and naming similarity.
+  /// Returns the line number (0-indexed) after which to insert, or None to append at end.
+  pub fn find_insertion_point(&self, recipe_name: &str, dependencies: &[String]) -> Option<usize> {
+    // First priority: insert after a dependency recipe
+    for dep in dependencies {
+      if let Some(dep_recipe) = self.find_recipe(dep) {
+        // Find the line number of the dependency recipe in the source file
+        if let Some(source) = &self.modules.first().map(|m| m.source.clone())
+          && let Ok(content) = std::fs::read_to_string(source)
+        {
+          let lines: Vec<&str> = content.lines().collect();
+          for (i, line) in lines.iter().enumerate() {
+            let trimmed = line.trim_start();
+            if trimmed.starts_with(&format!("{} ", dep_recipe.name))
+              || trimmed == dep_recipe.name
+              || trimmed.starts_with(&format!("{}:", dep_recipe.name))
+            {
+              // Find the end of this recipe (next non-indented line)
+              let mut end = i + 1;
+              while end < lines.len()
+                && (lines[end].starts_with(' ')
+                  || lines[end].starts_with('\t')
+                  || lines[end].trim().is_empty())
+              {
+                end += 1;
+              }
+              return Some(end);
+            }
+          }
+        }
+      }
+    }
+
+    // Second priority: insert after recipes with similar name prefixes
+    // e.g., "test-unit" goes near "test-integration", "deploy-staging" near "deploy-prod"
+    if let Some(prefix_end) = recipe_name.find('-') {
+      let prefix = &recipe_name[..=prefix_end];
+      let mut candidates = Vec::new();
+      for recipe in &self.recipes {
+        if recipe.name.starts_with(prefix) && recipe.name != recipe_name
+          && let Some(source) = &self.modules.first().map(|m| m.source.clone())
+          && let Ok(content) = std::fs::read_to_string(source)
+        {
+          let lines: Vec<&str> = content.lines().collect();
+          for (i, line) in lines.iter().enumerate() {
+            let trimmed = line.trim_start();
+            if trimmed.starts_with(&format!("{} ", recipe.name))
+              || trimmed == recipe.name
+              || trimmed.starts_with(&format!("{}:", recipe.name))
+            {
+              let mut end = i + 1;
+              while end < lines.len()
+                && (lines[end].starts_with(' ')
+                  || lines[end].starts_with('\t')
+                  || lines[end].trim().is_empty())
+              {
+                end += 1;
+              }
+              candidates.push(end);
+              break;
+            }
+          }
+        }
+      }
+      if !candidates.is_empty() {
+        // Use the last matching recipe's end as insertion point
+        return Some(*candidates.iter().max().unwrap());
+      }
+    }
+
+    // Third priority: insert after recipes in the same module with similar purpose
+    // Group by common prefixes (test, build, deploy, lint, fmt, clean, etc.)
+    let purpose_prefixes = [
+      "test", "build", "deploy", "lint", "fmt", "clean", "check", "ci", "dev", "docs",
+    ];
+    for prefix in &purpose_prefixes {
+      if recipe_name.starts_with(prefix) {
+        let mut candidates = Vec::new();
+        for recipe in &self.recipes {
+          if recipe.name.starts_with(prefix) && recipe.name != recipe_name
+            && let Some(source) = &self.modules.first().map(|m| m.source.clone())
+            && let Ok(content) = std::fs::read_to_string(source)
+          {
+            let lines: Vec<&str> = content.lines().collect();
+            for (i, line) in lines.iter().enumerate() {
+              let trimmed = line.trim_start();
+              if trimmed.starts_with(&format!("{} ", recipe.name))
+                || trimmed == recipe.name
+                || trimmed.starts_with(&format!("{}:", recipe.name))
+              {
+                let mut end = i + 1;
+                while end < lines.len()
+                  && (lines[end].starts_with(' ')
+                    || lines[end].starts_with('\t')
+                    || lines[end].trim().is_empty())
+                {
+                  end += 1;
+                }
+                candidates.push(end);
+                break;
+              }
+            }
+          }
+        }
+        if !candidates.is_empty() {
+          return Some(*candidates.iter().max().unwrap());
+        }
+      }
+    }
+
+    None
   }
 }
 

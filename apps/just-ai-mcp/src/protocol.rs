@@ -120,17 +120,26 @@ mod tests {
       .unwrap()
       .as_array()
       .unwrap();
-    assert_eq!(tools.len(), 3);
-    assert!(
-      tools
-        .iter()
-        .all(|tool| tool.pointer("/annotations/readOnlyHint") == Some(&Value::Bool(true)))
-    );
+    // Original 3 read-only tools + 4 new tools with write capabilities
+    assert_eq!(tools.len(), 7);
+    // Verify the original 3 are still read-only
+    let read_only_names = ["inspect_project", "doctor", "prepare_run"];
+    for tool in tools {
+      let name = tool.get("name").and_then(Value::as_str).unwrap_or("");
+      if read_only_names.contains(&name) {
+        assert_eq!(
+          tool.pointer("/annotations/readOnlyHint"),
+          Some(&Value::Bool(true)),
+          "tool {name} should be read-only"
+        );
+      }
+    }
     assert!(
       tools
         .iter()
         .all(|tool| tool.get("name").and_then(Value::as_str) != Some("execute_run"))
     );
+    // just_binary and project_root should not be in any tool's inputSchema
     assert!(tools.iter().all(|tool| {
       tool
         .pointer("/inputSchema/properties/just_binary")
