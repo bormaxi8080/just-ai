@@ -1,6 +1,6 @@
 use {
   crate::{
-    ContextRecipe, ProjectContext,
+    ContextParameter, ContextRecipe, ProjectContext,
     ai_responses::*,
     application,
     config::{HistoryBackend, HistoryConfig},
@@ -221,6 +221,8 @@ enum MigrateCommands {
     similarity_threshold: f64,
     #[arg(long, help = "Interactive mode - confirm each merge")]
     interactive: bool,
+    #[arg(long, help = "Smart merge similar recipes instead of removing one")]
+    merge: bool,
   },
 }
 
@@ -620,6 +622,7 @@ fn try_main() -> Result<(), Box<dyn Error>> {
         write,
         similarity_threshold,
         interactive,
+        merge,
       } => {
         deduplicate_project(
           &cli.just_binary,
@@ -627,6 +630,7 @@ fn try_main() -> Result<(), Box<dyn Error>> {
           write,
           similarity_threshold,
           interactive,
+          merge,
         )?;
       }
     },
@@ -931,6 +935,7 @@ fn deduplicate_project(
   write: bool,
   similarity_threshold: f64,
   interactive: bool,
+  merge: bool,
 ) -> Result<(), Box<dyn Error>> {
   use crate::bounded_file::{max_editable_file_bytes, read_utf8};
   use crate::proposal::{replace_recipe, unified_diff, validate_justfile};
@@ -960,8 +965,11 @@ fn deduplicate_project(
     println!("  1. {}", a);
     println!("  2. {}", b);
 
+    let recipe_a = context.find_recipe(a);
+    let recipe_b = context.find_recipe(b);
+
     if interactive {
-      print!("Merge? [1=keep first, 2=keep second, s=skip] ");
+      print!("Merge? [1=keep first, 2=keep second, m=smart merge, s=skip] ");
       std::io::stdout().flush()?;
       let mut input = String::new();
       std::io::stdin().read_line(&mut input)?;
@@ -969,16 +977,25 @@ fn deduplicate_project(
       match input.trim() {
         "1" => {
           // Keep a, remove b
-          if let Some(recipe_b) = context.find_recipe(b) {
+          if let Some(recipe_b) = recipe_b {
             proposed = replace_recipe(&proposed, &recipe_b.name, "");
             println!("  Marked '{}' for removal", b);
           }
         }
         "2" => {
           // Keep b, remove a
-          if let Some(recipe_a) = context.find_recipe(a) {
+          if let Some(recipe_a) = recipe_a {
             proposed = replace_recipe(&proposed, &recipe_a.name, "");
             println!("  Marked '{}' for removal", a);
+          }
+        }
+        "m" => {
+          // Smart merge - try to combine the best of both recipes
+          if let (Some(ra), Some(rb)) = (recipe_a, recipe_b) {
+            let merged = smart_merge_recipes(ra, rb);
+            proposed = replace_recipe(&proposed, &ra.name, "");
+            proposed = replace_recipe(&proposed, &rb.name, &merged);
+            println!("  Smart merged into '{}'", ra.name);
           }
         }
         _ => {
@@ -986,13 +1003,23 @@ fn deduplicate_project(
         }
       }
     } else if write {
-      // Non-interactive: keep the one with shorter namepath (more generic)
-      let keep = if a.len() <= b.len() { a } else { b };
-      let remove = if keep == a { b } else { a };
+      if merge {
+        // Smart auto-merge: combine similar recipes
+        if let (Some(ra), Some(rb)) = (recipe_a, recipe_b) {
+          let merged = smart_merge_recipes(ra, rb);
+          proposed = replace_recipe(&proposed, &ra.name, "");
+          proposed = replace_recipe(&proposed, &rb.name, &merged);
+          println!("  Smart auto-merged into '{}'", ra.name);
+        }
+      } else {
+        // Non-interactive: keep the one with shorter namepath (more generic)
+        let keep = if a.len() <= b.len() { a } else { b };
+        let remove = if keep == a { b } else { a };
 
-      if let Some(recipe) = context.find_recipe(remove) {
-        proposed = replace_recipe(&proposed, &recipe.name, "");
-        println!("  Auto-merged: kept '{}', removed '{}'", keep, remove);
+        if let Some(recipe) = context.find_recipe(remove) {
+          proposed = replace_recipe(&proposed, &recipe.name, "");
+          println!("  Auto-merged: kept '{}', removed '{}'", keep, remove);
+        }
       }
     }
     println!();
@@ -1013,6 +1040,110 @@ fn deduplicate_project(
   }
 
   Ok(())
+}
+
+/// Try to merge two similar recipes intelligently.
+/// Combines parameters, uses the more complete doc, merges dependencies,
+/// and for body lines, keeps unique lines from both.
+fn smart_merge_recipes(a: &ContextRecipe, b: &ContextRecipe) -> String {
+  // Use the shorter name (more generic)
+  let name = if a.name.len() <= b.name.len() {
+    &a.name
+  } else {
+    &b.name
+  };
+
+  // Use the doc from the recipe that has one (prefer longer)
+  let doc = if a.doc.as_deref().map(|d| d.len()).unwrap_or(0)
+    >= b.doc.as_deref().map(|d| d.len()).unwrap_or(0)
+  {
+    a.doc.clone()
+  } else {
+    b.doc.clone()
+  };
+
+  // Merge parameters (union by name, prefer one with default)
+  let mut param_map: std::collections::HashMap<String, ContextParameter> =
+    std::collections::HashMap::new();
+  for p in &a.parameters {
+    param_map.insert(p.name.clone(), p.clone());
+  }
+  for p in &b.parameters {
+    param_map
+      .entry(p.name.clone())
+      .and_modify(|existing| {
+        if existing.default.is_none() && p.default.is_some() {
+          *existing = p.clone();
+        }
+      })
+      .or_insert_with(|| p.clone());
+  }
+  let mut parameters: Vec<ContextParameter> = param_map.into_values().collect();
+  parameters.sort_by(|a, b| a.name.cmp(&b.name));
+
+  // Merge dependencies (union)
+  let mut deps: std::collections::HashSet<String> = a.dependencies.iter().cloned().collect();
+  deps.extend(b.dependencies.iter().cloned());
+  let mut dependencies: Vec<String> = deps.into_iter().collect();
+  dependencies.sort();
+
+  // Smart merge body lines - keep unique lines from both
+  let mut body_lines: Vec<String> = Vec::new();
+  let mut seen = std::collections::HashSet::new();
+
+  for line in &a.body {
+    let trimmed = line.trim();
+    if !trimmed.is_empty() && seen.insert(trimmed.to_string()) {
+      body_lines.push(line.clone());
+    }
+  }
+  for line in &b.body {
+    let trimmed = line.trim();
+    if !trimmed.is_empty() && seen.insert(trimmed.to_string()) {
+      body_lines.push(line.clone());
+    }
+  }
+
+  // Render the merged recipe
+  let mut rendered = String::new();
+  if let Some(doc) = doc {
+    rendered.push_str("# ");
+    rendered.push_str(doc.trim());
+    rendered.push('\n');
+  }
+
+  rendered.push_str(name);
+  for param in &parameters {
+    rendered.push(' ');
+    rendered.push_str(&param.name);
+    if let Some(default) = &param.default {
+      rendered.push_str("='");
+      rendered.push_str(&default.replace('\'', "\\'"));
+      rendered.push('\'');
+    }
+  }
+
+  if !dependencies.is_empty() {
+    rendered.push_str(": ");
+    rendered.push_str(
+      &dependencies
+        .iter()
+        .map(|d| format!("({d})"))
+        .collect::<Vec<_>>()
+        .join(" "),
+    );
+  } else {
+    rendered.push(':');
+  }
+  rendered.push('\n');
+
+  for line in body_lines {
+    rendered.push_str("  ");
+    rendered.push_str(&line);
+    rendered.push('\n');
+  }
+
+  rendered
 }
 
 fn print_agent_command(command: &AgentCommands) {

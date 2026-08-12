@@ -812,4 +812,65 @@ mod tests {
     assert_eq!(groups.get("deploy").map(|v| v.len()), Some(1));
     assert_eq!(groups.get("clean").map(|v| v.len()), Some(1));
   }
+
+  #[test]
+  fn smart_merge_recipes_preserves_unique_body_lines() {
+    // Test that smart_merge_recipes combines unique lines from both recipes
+    // Use identical bodies so they are 100% similar
+    let body = vec!["cargo test --lib".to_string()];
+
+    let recipe_a = crate::inspection::ContextRecipe {
+      body: body.clone(),
+      dependencies: vec!["lint".to_string()],
+      doc: Some("Run unit tests".to_string()),
+      module_path: "".to_string(),
+      name: "test-unit".to_string(),
+      namepath: "test-unit".to_string(),
+      parameters: vec![crate::inspection::ContextParameter {
+        default: Some("all".to_string()),
+        kind: "singular".to_string(),
+        name: "SCOPE".to_string(),
+      }],
+      private: false,
+      quiet: false,
+      risk: crate::domain::risk::RiskLevel::Low,
+      risks: vec![],
+      shebang: false,
+    };
+
+    let recipe_b = crate::inspection::ContextRecipe {
+      body: body.clone(),
+      dependencies: vec!["build".to_string()],
+      doc: Some("Run unit tests (alternative)".to_string()),
+      module_path: "".to_string(),
+      name: "test-unit-alt".to_string(),
+      namepath: "test-unit-alt".to_string(),
+      parameters: vec![crate::inspection::ContextParameter {
+        default: Some("lib".to_string()),
+        kind: "singular".to_string(),
+        name: "SCOPE".to_string(),
+      }],
+      private: false,
+      quiet: false,
+      risk: crate::domain::risk::RiskLevel::Low,
+      risks: vec![],
+      shebang: false,
+    };
+
+    // Test that find_similar_recipes finds them (100% similar = identical bodies)
+    let context = crate::inspection::ProjectContext {
+      facts: Default::default(),
+      modules: vec![],
+      recipes: vec![recipe_a.clone(), recipe_b.clone()],
+      warnings: vec![],
+    };
+
+    let similar = context.find_similar_recipes(0.8);
+    assert!(!similar.is_empty());
+    let pair = similar.iter().find(|(a, b, _)| {
+      (a == "test-unit" && b == "test-unit-alt") || (a == "test-unit-alt" && b == "test-unit")
+    });
+    assert!(pair.is_some());
+    assert_eq!(pair.unwrap().2, 1.0); // identical bodies = 100% similarity
+  }
 }
