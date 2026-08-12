@@ -16,7 +16,14 @@ use {
   clap::{Parser, Subcommand},
   serde::{Deserialize, Serialize},
   serde_json::Value,
-  std::{env, error::Error, io::Write, path::PathBuf, process::ExitCode},
+  std::{
+    collections::HashMap,
+    env,
+    error::Error,
+    io::Write,
+    path::{Path, PathBuf},
+    process::ExitCode,
+  },
 };
 
 #[cfg(test)]
@@ -139,6 +146,11 @@ enum Commands {
     #[command(subcommand)]
     command: ConfigCommands,
   },
+  #[command(about = "Analyze and refactor justfile structure")]
+  Migrate {
+    #[command(subcommand)]
+    command: MigrateCommands,
+  },
 }
 
 #[derive(Debug, Subcommand)]
@@ -174,6 +186,41 @@ enum ConfigCommands {
   Validate,
   #[command(about = "Output JSON Schema for just-ai.toml")]
   Schema,
+}
+
+#[derive(Debug, Subcommand)]
+enum MigrateCommands {
+  #[command(about = "Analyze project for dead code, cycles, and structural issues")]
+  Analyze {
+    #[arg(long, help = "Emit JSON instead of human-readable output")]
+    json: bool,
+    #[arg(
+      long,
+      help = "Similarity threshold for duplicate detection (0.0-1.0)",
+      default_value = "0.8"
+    )]
+    similarity_threshold: f64,
+  },
+  #[command(about = "Automatically organize recipes into modules based on dependencies")]
+  Modularize {
+    #[arg(long, help = "Apply changes to justfile")]
+    write: bool,
+    #[arg(long, help = "Dry run - show what would be changed")]
+    dry_run: bool,
+  },
+  #[command(about = "Find and optionally merge duplicate/similar recipes")]
+  Deduplicate {
+    #[arg(long, help = "Apply changes to justfile")]
+    write: bool,
+    #[arg(
+      long,
+      help = "Similarity threshold for duplicate detection (0.0-1.0)",
+      default_value = "0.8"
+    )]
+    similarity_threshold: f64,
+    #[arg(long, help = "Interactive mode - confirm each merge")]
+    interactive: bool,
+  },
 }
 
 /// Run the `just-ai` command-line application using process arguments.
@@ -558,7 +605,267 @@ fn try_main() -> Result<(), Box<dyn Error>> {
         println!("{}", serde_json::to_string_pretty(&schema)?);
       }
     },
+    Commands::Migrate { command } => match command {
+      MigrateCommands::Analyze {
+        json,
+        similarity_threshold,
+      } => {
+        analyze_project(&context, json, similarity_threshold)?;
+      }
+      MigrateCommands::Modularize { write, dry_run } => {
+        modularize_project(&cli.just_binary, &context, write, dry_run)?;
+      }
+      MigrateCommands::Deduplicate {
+        write,
+        similarity_threshold,
+        interactive,
+      } => {
+        deduplicate_project(
+          &cli.just_binary,
+          &context,
+          write,
+          similarity_threshold,
+          interactive,
+        )?;
+      }
+    },
     Commands::Agent { .. } => unreachable!("agent commands return before project discovery"),
+  }
+
+  Ok(())
+}
+
+fn analyze_project(
+  context: &ProjectContext,
+  json: bool,
+  similarity_threshold: f64,
+) -> Result<(), Box<dyn Error>> {
+  let unreferenced = context.find_unreferenced_recipes();
+  let isolated = context.find_isolated_recipes();
+  let cycles = context.detect_cycles();
+  let depths = context.calculate_dependency_depths();
+  let similar = context.find_similar_recipes(similarity_threshold);
+
+  if json {
+    let report = serde_json::json!({
+      "unreferenced_recipes": unreferenced.iter().map(|r| r.namepath.clone()).collect::<Vec<_>>(),
+      "isolated_recipes": isolated.iter().map(|r| r.namepath.clone()).collect::<Vec<_>>(),
+      "cycles": cycles,
+      "dependency_depths": depths,
+      "similar_recipes": similar.iter().map(|(a, b, s)| {
+        serde_json::json!({"recipe1": a, "recipe2": b, "similarity": s})
+      }).collect::<Vec<_>>(),
+    });
+    println!("{}", serde_json::to_string_pretty(&report)?);
+  } else {
+    println!("=== Project Analysis ===");
+    println!("Total recipes: {}", context.recipes.len());
+    println!("Modules: {}", context.modules.len());
+    println!();
+
+    if !unreferenced.is_empty() {
+      println!("Unreferenced recipes (no other recipe depends on them):");
+      for recipe in &unreferenced {
+        println!("  - {} [{}]", recipe.namepath, recipe.module_path);
+      }
+      println!();
+    } else {
+      println!("No unreferenced recipes found.");
+      println!();
+    }
+
+    if !isolated.is_empty() {
+      println!("Isolated recipes (no dependencies, no dependents):");
+      for recipe in &isolated {
+        println!("  - {} [{}]", recipe.namepath, recipe.module_path);
+      }
+      println!();
+    } else {
+      println!("No isolated recipes found.");
+      println!();
+    }
+
+    if !cycles.is_empty() {
+      println!("⚠️  Dependency cycles detected:");
+      for (i, cycle) in cycles.iter().enumerate() {
+        println!("  Cycle {}: {}", i + 1, cycle.join(" -> "));
+      }
+      println!();
+    } else {
+      println!("No dependency cycles detected.");
+      println!();
+    }
+
+    println!("Dependency depths:");
+    let mut depth_vec: Vec<_> = depths.iter().collect();
+    depth_vec.sort_by(|a, b| b.1.cmp(a.1));
+    for (recipe, depth) in depth_vec.iter().take(20) {
+      println!("  {}: depth {}", recipe, depth);
+    }
+    if depth_vec.len() > 20 {
+      println!("  ... and {} more", depth_vec.len() - 20);
+    }
+    println!();
+
+    if !similar.is_empty() {
+      println!(
+        "Similar recipes (potential duplicates, threshold {:.0}%):",
+        similarity_threshold * 100.0
+      );
+      for (a, b, sim) in &similar {
+        println!("  {:.1}%: {} ~ {}", sim * 100.0, a, b);
+      }
+      println!();
+    } else {
+      println!(
+        "No similar recipes found at threshold {:.0}%.",
+        similarity_threshold * 100.0
+      );
+      println!();
+    }
+  }
+
+  Ok(())
+}
+
+fn modularize_project(
+  _just_binary: &Path,
+  context: &ProjectContext,
+  _write: bool,
+  _dry_run: bool,
+) -> Result<(), Box<dyn Error>> {
+  use crate::bounded_file::{max_editable_file_bytes, read_utf8};
+
+  // Group recipes by common prefix (e.g., "test-", "build-", "deploy-")
+  let mut groups: HashMap<String, Vec<&ContextRecipe>> = HashMap::new();
+
+  for recipe in &context.recipes {
+    let prefix = recipe
+      .name
+      .split('-')
+      .next()
+      .unwrap_or(&recipe.name)
+      .to_owned();
+    groups.entry(prefix).or_default().push(recipe);
+  }
+
+  let source = context
+    .root_source()
+    .ok_or("project context does not contain a root justfile source")?;
+  let _original = read_utf8(source, max_editable_file_bytes())?;
+
+  println!("=== Modularization Plan ===");
+  for (prefix, recipes) in &groups {
+    if recipes.len() < 2 {
+      continue; // Skip single recipes
+    }
+    println!("Module '{}': {} recipes", prefix, recipes.len());
+    for recipe in recipes {
+      println!("  - {}", recipe.namepath);
+    }
+  }
+  println!();
+
+  // This is a simplified implementation - a full version would need to:
+  // 1. Create module files
+  // 2. Move recipes to those files
+  // 3. Update imports
+
+  println!("Note: Full modularization requires creating module files and updating imports.");
+  println!(
+    "Current implementation shows the grouping analysis. Use 'just-ai migrate analyze' for details."
+  );
+
+  println!("Modularize --write is not yet fully implemented (requires module file creation).");
+
+  Ok(())
+}
+
+fn deduplicate_project(
+  just_binary: &Path,
+  context: &ProjectContext,
+  write: bool,
+  similarity_threshold: f64,
+  interactive: bool,
+) -> Result<(), Box<dyn Error>> {
+  use crate::bounded_file::{max_editable_file_bytes, read_utf8};
+  use crate::proposal::{replace_recipe, unified_diff, validate_justfile};
+
+  let similar = context.find_similar_recipes(similarity_threshold);
+
+  if similar.is_empty() {
+    println!(
+      "No similar recipes found at threshold {:.0}%.",
+      similarity_threshold * 100.0
+    );
+    return Ok(());
+  }
+
+  println!("=== Duplicate Analysis ===");
+  println!("Found {} similar recipe pairs:", similar.len());
+  println!();
+
+  let source = context
+    .root_source()
+    .ok_or("project context does not contain a root justfile source")?;
+  let original = read_utf8(source, max_editable_file_bytes())?;
+  let mut proposed = original.clone();
+
+  for (a, b, sim) in &similar {
+    println!("{:.1}% similar:", sim * 100.0);
+    println!("  1. {}", a);
+    println!("  2. {}", b);
+
+    if interactive {
+      print!("Merge? [1=keep first, 2=keep second, s=skip] ");
+      std::io::stdout().flush()?;
+      let mut input = String::new();
+      std::io::stdin().read_line(&mut input)?;
+
+      match input.trim() {
+        "1" => {
+          // Keep a, remove b
+          if let Some(recipe_b) = context.find_recipe(b) {
+            proposed = replace_recipe(&proposed, &recipe_b.name, "");
+            println!("  Marked '{}' for removal", b);
+          }
+        }
+        "2" => {
+          // Keep b, remove a
+          if let Some(recipe_a) = context.find_recipe(a) {
+            proposed = replace_recipe(&proposed, &recipe_a.name, "");
+            println!("  Marked '{}' for removal", a);
+          }
+        }
+        _ => {
+          println!("  Skipped");
+        }
+      }
+    } else if write {
+      // Non-interactive: keep the one with shorter namepath (more generic)
+      let keep = if a.len() <= b.len() { a } else { b };
+      let remove = if keep == a { b } else { a };
+
+      if let Some(recipe) = context.find_recipe(remove) {
+        proposed = replace_recipe(&proposed, &recipe.name, "");
+        println!("  Auto-merged: kept '{}', removed '{}'", keep, remove);
+      }
+    }
+    println!();
+  }
+
+  if write || interactive {
+    validate_justfile(just_binary, source, &proposed)?;
+
+    println!("{}", unified_diff(source, &original, &proposed));
+
+    if write {
+      use crate::application::patches::apply_reviewed_change;
+      apply_reviewed_change(source, &original, &proposed)?;
+      println!("Wrote {}", source.display());
+    } else {
+      println!("Dry run only. Re-run with --write to apply changes.");
+    }
   }
 
   Ok(())

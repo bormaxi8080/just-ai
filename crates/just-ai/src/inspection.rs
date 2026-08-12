@@ -6,8 +6,9 @@ use {
   },
   serde::{Deserialize, Serialize},
   serde_json::Value,
+  similar,
   std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, HashMap, HashSet},
     error::Error,
     path::{Path, PathBuf},
   },
@@ -310,6 +311,212 @@ impl ProjectContext {
     }
 
     None
+  }
+}
+
+impl ProjectContext {
+  /// Find recipes that are never used as dependencies by other recipes.
+  /// These are "leaf" recipes that nothing depends on (excluding private recipes which may be called directly).
+  pub fn find_unreferenced_recipes(&self) -> Vec<&ContextRecipe> {
+    let mut referenced: std::collections::HashSet<&str> = std::collections::HashSet::new();
+
+    // Collect all recipes that are referenced as dependencies
+    for recipe in &self.recipes {
+      for dep in &recipe.dependencies {
+        referenced.insert(dep.as_str());
+      }
+    }
+
+    // Find recipes that are never referenced and are not private
+    self
+      .recipes
+      .iter()
+      .filter(|recipe| {
+        !referenced.contains(recipe.namepath.as_str())
+          && !referenced.contains(recipe.name.as_str())
+          && !recipe.private
+      })
+      .collect()
+  }
+
+  /// Find recipes that have no dependencies and are not depended upon (completely isolated).
+  pub fn find_isolated_recipes(&self) -> Vec<&ContextRecipe> {
+    let mut referenced: std::collections::HashSet<&str> = std::collections::HashSet::new();
+
+    for recipe in &self.recipes {
+      for dep in &recipe.dependencies {
+        referenced.insert(dep.as_str());
+      }
+    }
+
+    self
+      .recipes
+      .iter()
+      .filter(|recipe| {
+        recipe.dependencies.is_empty()
+          && !referenced.contains(recipe.namepath.as_str())
+          && !referenced.contains(recipe.name.as_str())
+      })
+      .collect()
+  }
+
+  /// Build a dependency graph and detect cycles.
+  pub fn detect_cycles(&self) -> Vec<Vec<String>> {
+    let mut graph: HashMap<String, Vec<String>> = HashMap::new();
+
+    for recipe in &self.recipes {
+      graph.insert(recipe.namepath.clone(), recipe.dependencies.clone());
+    }
+
+    let mut cycles = Vec::new();
+    let mut visited: HashSet<String> = HashSet::new();
+    let mut rec_stack: HashSet<String> = HashSet::new();
+    let mut path = Vec::new();
+
+    fn dfs(
+      node: &str,
+      graph: &HashMap<String, Vec<String>>,
+      visited: &mut HashSet<String>,
+      rec_stack: &mut HashSet<String>,
+      path: &mut Vec<String>,
+      cycles: &mut Vec<Vec<String>>,
+    ) {
+      visited.insert(node.to_owned());
+      rec_stack.insert(node.to_owned());
+      path.push(node.to_owned());
+
+      if let Some(neighbors) = graph.get(node) {
+        for neighbor in neighbors {
+          if !visited.contains(neighbor) {
+            dfs(neighbor, graph, visited, rec_stack, path, cycles);
+          } else if rec_stack.contains(neighbor) {
+            // Found a cycle - extract it from path
+            if let Some(idx) = path.iter().position(|n| n == neighbor) {
+              cycles.push(path[idx..].to_vec());
+            }
+          }
+        }
+      }
+
+      rec_stack.remove(node);
+      path.pop();
+    }
+
+    let graph_owned = graph;
+    for node in graph_owned.keys() {
+      if !visited.contains(node) {
+        dfs(
+          node,
+          &graph_owned,
+          &mut visited,
+          &mut rec_stack,
+          &mut path,
+          &mut cycles,
+        );
+      }
+    }
+
+    // Deduplicate cycles (same cycle detected from different starting points)
+    let mut unique_cycles = Vec::new();
+    for cycle in cycles {
+      let min_idx = cycle
+        .iter()
+        .enumerate()
+        .min_by_key(|(_, s)| *s)
+        .map(|(i, _)| i)
+        .unwrap_or(0);
+      let normalized: Vec<String> = (0..cycle.len())
+        .map(|i| cycle[(min_idx + i) % cycle.len()].clone())
+        .collect();
+      if !unique_cycles.iter().any(|c: &Vec<String>| c == &normalized) {
+        unique_cycles.push(normalized);
+      }
+    }
+
+    unique_cycles
+  }
+
+  /// Calculate dependency depth for each recipe (longest path from a root).
+  pub fn calculate_dependency_depths(&self) -> HashMap<String, usize> {
+    let mut graph: HashMap<String, Vec<String>> = HashMap::new();
+    for recipe in &self.recipes {
+      graph.insert(recipe.namepath.clone(), recipe.dependencies.clone());
+    }
+
+    let mut depths = HashMap::new();
+    let mut memo: HashMap<String, usize> = HashMap::new();
+
+    fn depth(
+      node: &str,
+      graph: &HashMap<String, Vec<String>>,
+      memo: &mut HashMap<String, usize>,
+    ) -> usize {
+      if let Some(&d) = memo.get(node) {
+        return d;
+      }
+      let d = graph
+        .get(node)
+        .map(|deps| {
+          deps
+            .iter()
+            .map(|d| depth(d, graph, memo))
+            .max()
+            .unwrap_or(0)
+            + 1
+        })
+        .unwrap_or(0);
+      memo.insert(node.to_owned(), d);
+      d
+    }
+
+    let graph_owned = graph;
+    for recipe in &self.recipes {
+      depths.insert(
+        recipe.namepath.clone(),
+        depth(&recipe.namepath, &graph_owned, &mut memo),
+      );
+    }
+
+    depths
+  }
+
+  /// Find recipes with similar bodies (potential duplicates).
+  pub fn find_similar_recipes(&self, threshold: f64) -> Vec<(String, String, f64)> {
+    use similar::TextDiff;
+
+    let mut similar = Vec::new();
+
+    for i in 0..self.recipes.len() {
+      for j in (i + 1)..self.recipes.len() {
+        let r1 = &self.recipes[i];
+        let r2 = &self.recipes[j];
+
+        // Skip if in same module and same name (shouldn't happen)
+        if r1.namepath == r2.namepath {
+          continue;
+        }
+
+        let body1 = r1.body.join("\n");
+        let body2 = r2.body.join("\n");
+
+        let diff = TextDiff::from_lines(&body1, &body2);
+        let total_changes = diff.iter_all_changes().count() as f64;
+        let equal_changes = diff
+          .iter_all_changes()
+          .filter(|c| c.tag() == similar::ChangeTag::Equal)
+          .count() as f64;
+
+        if total_changes > 0.0 {
+          let similarity = equal_changes / total_changes;
+          if similarity >= threshold {
+            similar.push((r1.namepath.clone(), r2.namepath.clone(), similarity));
+          }
+        }
+      }
+    }
+
+    similar.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap());
+    similar
   }
 }
 
