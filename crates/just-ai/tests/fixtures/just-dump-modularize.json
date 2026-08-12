@@ -1,0 +1,95 @@
+{
+  "source": "/workspace/justfile",
+  "warnings": [],
+  "recipes": {
+    "build": {
+      "name": "build",
+      "namepath": "build",
+      "doc": "Build the project",
+      "body": [["cargo build"]],
+      "dependencies": [{"recipe": "test-unit"}, {"recipe": "lint"}],
+      "parameters": [],
+      "private": false,
+      "quiet": false,
+      "shebang": false
+    },
+    "build-release": {
+      "name": "build-release",
+      "namepath": "build-release",
+      "doc": "Build for release",
+      "body": [["cargo build --release"]],
+      "dependencies": [{"recipe": "test-unit"}, {"recipe": "lint"}],
+      "parameters": [],
+      "private": false,
+      "quiet": false,
+      "shebang": false
+    },
+    "test-unit": {
+      "name": "test-unit",
+      "namepath": "test-unit",
+      "doc": "Run unit tests",
+      "body": [["cargo test --lib"]],
+      "dependencies": [],
+      "parameters": [],
+      "private": false,
+      "quiet": false,
+      "shebang": false
+    },
+    "test-integration": {
+      "name": "test-integration",
+      "namepath": "test-integration",
+      "doc": "Run integration tests",
+      "body": [["cargo test --test integration"]],
+      "dependencies": [],
+      "parameters": [],
+      "private": false,
+      "quiet": false,
+      "shebang": false
+    },
+    "lint": {
+      "name": "lint",
+      "namepath": "lint",
+      "doc": "Run linter",
+      "body": [["cargo clippy"]],
+      "dependencies": [],
+      "parameters": [],
+      "private": false,
+      "quiet": false,
+      "shebang": false
+    },
+    "fmt": {
+      "name": "fmt",
+      "namepath": "fmt",
+      "doc": "Format code",
+      "body": [["cargo fmt"]],
+      "dependencies": [],
+      "parameters": [],
+      "private": false,
+      "quiet": false,
+      "shebang": false
+    },
+    "deploy": {
+      "name": "deploy",
+      "namepath": "deploy",
+      "doc": "Deploy to production",
+      "body": [["echo deploy"]],
+      "dependencies": [{"recipe": "build"}],
+      "parameters": [],
+      "private": false,
+      "quiet": false,
+      "shebang": false
+    },
+    "clean": {
+      "name": "clean",
+      "namepath": "clean",
+      "doc": "Clean build artifacts",
+      "body": [["cargo clean"]],
+      "dependencies": [],
+      "parameters": [],
+      "private": false,
+      "quiet": false,
+      "shebang": false
+    }
+  },
+  "modules": {}
+}

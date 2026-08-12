@@ -20,6 +20,7 @@ use {
     collections::HashMap,
     env,
     error::Error,
+    fs,
     io::Write,
     path::{Path, PathBuf},
     process::ExitCode,
@@ -729,12 +730,13 @@ fn analyze_project(
 }
 
 fn modularize_project(
-  _just_binary: &Path,
+  just_binary: &Path,
   context: &ProjectContext,
-  _write: bool,
-  _dry_run: bool,
+  write: bool,
+  dry_run: bool,
 ) -> Result<(), Box<dyn Error>> {
   use crate::bounded_file::{max_editable_file_bytes, read_utf8};
+  use crate::proposal::{unified_diff, validate_justfile};
 
   // Group recipes by common prefix (e.g., "test-", "build-", "deploy-")
   let mut groups: HashMap<String, Vec<&ContextRecipe>> = HashMap::new();
@@ -752,7 +754,11 @@ fn modularize_project(
   let source = context
     .root_source()
     .ok_or("project context does not contain a root justfile source")?;
-  let _original = read_utf8(source, max_editable_file_bytes())?;
+  let original = read_utf8(source, max_editable_file_bytes())?;
+  let mut proposed = original.clone();
+
+  let source_dir = source.parent().unwrap_or_else(|| Path::new("."));
+  let mut import_statements = Vec::new();
 
   println!("=== Modularization Plan ===");
   for (prefix, recipes) in &groups {
@@ -766,19 +772,157 @@ fn modularize_project(
   }
   println!();
 
-  // This is a simplified implementation - a full version would need to:
-  // 1. Create module files
-  // 2. Move recipes to those files
-  // 3. Update imports
+  // For each group, create a module file and move recipes
+  for (prefix, recipes) in &groups {
+    if recipes.len() < 2 {
+      continue;
+    }
 
-  println!("Note: Full modularization requires creating module files and updating imports.");
-  println!(
-    "Current implementation shows the grouping analysis. Use 'just-ai migrate analyze' for details."
-  );
+    let module_filename = format!("{prefix}.just");
+    let _module_path = source_dir.join(&module_filename);
 
-  println!("Modularize --write is not yet fully implemented (requires module file creation).");
+    // Extract recipes for this module
+    let mut module_content = String::new();
+    for recipe in recipes {
+      // Find the recipe in the original content
+      let recipe_text = extract_recipe(&original, &recipe.name);
+      if !recipe_text.is_empty() {
+        if !module_content.is_empty() {
+          module_content.push('\n');
+        }
+        module_content.push_str(&recipe_text);
+      }
+    }
+
+    if module_content.is_empty() {
+      continue;
+    }
+
+    // Remove recipes from proposed content
+    for recipe in recipes {
+      proposed = crate::proposal::replace_recipe(&proposed, &recipe.name, "");
+    }
+
+    // Add import statement
+    import_statements.push(format!("import '{}'", module_filename));
+  }
+
+  // Add import statements at the top of the file (after any existing imports)
+  if !import_statements.is_empty() {
+    proposed = add_imports_at_top(&proposed, &import_statements);
+  }
+
+  // Final validation
+  validate_justfile(just_binary, source, &proposed)?;
+
+  println!("{}", unified_diff(source, &original, &proposed));
+
+  if dry_run || !write {
+    println!("Dry run only. Re-run with --write to apply changes.");
+    return Ok(());
+  }
+
+  // Write module files
+  for (prefix, recipes) in &groups {
+    if recipes.len() < 2 {
+      continue;
+    }
+    let module_filename = format!("{prefix}.just");
+    let module_path = source_dir.join(&module_filename);
+    let mut module_content = String::new();
+    for recipe in recipes {
+      let recipe_text = extract_recipe(&original, &recipe.name);
+      if !recipe_text.is_empty() {
+        if !module_content.is_empty() {
+          module_content.push('\n');
+        }
+        module_content.push_str(&recipe_text);
+      }
+    }
+    if !module_content.is_empty() {
+      fs::write(&module_path, module_content)?;
+      println!("Created {}", module_path.display());
+    }
+  }
+
+  // Write modified root justfile
+  application::patches::apply_reviewed_change(source, &original, &proposed)?;
+  println!("Wrote {}", source.display());
 
   Ok(())
+}
+
+fn extract_recipe(content: &str, recipe_name: &str) -> String {
+  let lines: Vec<&str> = content.lines().collect();
+  let mut result = Vec::new();
+  let mut i = 0;
+  let mut found = false;
+
+  while i < lines.len() {
+    let line = lines[i];
+    let trimmed = line.trim_start();
+    let is_recipe_def = trimmed.starts_with(&format!("{recipe_name} "))
+      || trimmed == recipe_name
+      || trimmed.starts_with(&format!("{recipe_name}:"));
+    if !found && is_recipe_def {
+      found = true;
+      // Include the recipe definition and its body (indented lines)
+      result.push(line);
+      i += 1;
+      while i < lines.len()
+        && (lines[i].starts_with(' ') || lines[i].starts_with('\t') || lines[i].trim().is_empty())
+      {
+        result.push(lines[i]);
+        i += 1;
+      }
+      continue;
+    }
+    i += 1;
+  }
+
+  result.join("\n").trim_end().to_string()
+}
+
+fn add_imports_at_top(content: &str, imports: &[String]) -> String {
+  let lines: Vec<&str> = content.lines().collect();
+  let mut result: Vec<String> = Vec::new();
+  let mut import_added = false;
+  let mut last_import_idx = None;
+
+  // First pass: find the last import line
+  for (i, line) in lines.iter().enumerate() {
+    let trimmed = line.trim_start();
+    if trimmed.starts_with("import ") {
+      last_import_idx = Some(i);
+    }
+  }
+
+  for (i, line) in lines.iter().enumerate() {
+    result.push(line.to_string());
+    // If this is the last import line, add our imports after it
+    if last_import_idx == Some(i) && !import_added {
+      if !result.last().unwrap().trim().is_empty() {
+        result.push(String::new());
+      }
+      for import in imports {
+        result.push(import.clone());
+      }
+      import_added = true;
+    }
+  }
+
+  // If no imports were found, add at the very beginning
+  if !import_added {
+    let mut new_result = Vec::new();
+    for import in imports {
+      new_result.push(import.clone());
+    }
+    new_result.push(String::new());
+    new_result.extend(result);
+    return new_result.join("\n");
+  }
+
+  result.join("\n")
 }
 
 fn deduplicate_project(

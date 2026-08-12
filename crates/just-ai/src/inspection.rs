@@ -780,4 +780,36 @@ mod tests {
       assert!(pair.2 < 0.8);
     }
   }
+
+  #[test]
+  fn parses_versioned_modularize_fixture() {
+    let dump: DumpModule =
+      serde_json::from_str(include_str!("../tests/fixtures/just-dump-modularize.json")).unwrap();
+    let context = ProjectContext::from_dump(dump);
+
+    assert_eq!(context.recipes.len(), 8);
+    assert_eq!(context.modules.len(), 1);
+
+    // Group recipes by prefix
+    let mut groups: HashMap<String, Vec<&ContextRecipe>> = HashMap::new();
+    for recipe in &context.recipes {
+      let prefix = recipe
+        .name
+        .split('-')
+        .next()
+        .unwrap_or(&recipe.name)
+        .to_owned();
+      groups.entry(prefix).or_default().push(recipe);
+    }
+
+    // build recipes: build, build-release (2)
+    assert_eq!(groups.get("build").map(|v| v.len()), Some(2));
+    // test recipes: test-unit, test-integration (2)
+    assert_eq!(groups.get("test").map(|v| v.len()), Some(2));
+    // Other singles: lint, fmt, deploy, clean (1 each)
+    assert_eq!(groups.get("lint").map(|v| v.len()), Some(1));
+    assert_eq!(groups.get("fmt").map(|v| v.len()), Some(1));
+    assert_eq!(groups.get("deploy").map(|v| v.len()), Some(1));
+    assert_eq!(groups.get("clean").map(|v| v.len()), Some(1));
+  }
 }
