@@ -54,6 +54,26 @@
         "category": "just-ai"
       },
       {
+        "command": "just-ai.runRecipe",
+        "title": "just-ai: Run Recipe",
+        "category": "just-ai"
+      },
+      {
+        "command": "just-ai.workflow",
+        "title": "just-ai: Create Workflow",
+        "category": "just-ai"
+      },
+      {
+        "command": "just-ai.fixBatch",
+        "title": "just-ai: Fix All Failed Recipes",
+        "category": "just-ai"
+      },
+      {
+        "command": "just-ai.explainBatch",
+        "title": "just-ai: Explain All Recipes",
+        "category": "just-ai"
+      },
+      {
         "command": "just-ai.exportContext",
         "title": "just-ai: Export Context for AI",
         "category": "just-ai"
@@ -80,6 +100,21 @@
           "when": "resourceLangId == just",
           "command": "just-ai.add",
           "group": "just-ai@2"
+        },
+        {
+          "when": "resourceLangId == just",
+          "command": "just-ai.workflow",
+          "group": "just-ai@3"
+        },
+        {
+          "when": "resourceLangId == just",
+          "command": "just-ai.fixBatch",
+          "group": "just-ai@4"
+        },
+        {
+          "when": "resourceLangId == just",
+          "command": "just-ai.explainBatch",
+          "group": "just-ai@5"
         }
       ],
       "explorer/context": [
@@ -108,6 +143,22 @@
         },
         {
           "command": "just-ai.fix",
+          "when": "resourceLangId == just"
+        },
+        {
+          "command": "just-ai.runRecipe",
+          "when": "resourceLangId == just"
+        },
+        {
+          "command": "just-ai.workflow",
+          "when": "resourceLangId == just"
+        },
+        {
+          "command": "just-ai.fixBatch",
+          "when": "resourceLangId == just"
+        },
+        {
+          "command": "just-ai.explainBatch",
           "when": "resourceLangId == just"
         },
         {

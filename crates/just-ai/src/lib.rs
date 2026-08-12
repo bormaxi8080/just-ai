@@ -12,13 +12,16 @@ pub mod provider;
 mod bounded_output;
 mod just_dump;
 
-pub use ai_responses::{AddRecipeResponse, FixResponse};
+pub use ai_responses::{
+  AddRecipeResponse, ExplainResponse, FixResponse, SuggestResponse, WorkflowResponse,
+};
 pub use bounded_file::{ensure_text_limit, max_editable_file_bytes};
 pub use cli::AiClient;
 pub use inspection::{
   ContextModule, ContextParameter, ContextRecipe, ProjectContext, inspect_project,
   inspect_project_at,
 };
+pub use just_dump::dump_json;
 pub use proposal::{
   append_recipe, handle_add, handle_fix, insert_recipe_at, insert_recipe_grouped,
   render_fix_recipe, render_recipe, replace_recipe, unified_diff, validate_justfile,

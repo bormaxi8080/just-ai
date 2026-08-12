@@ -38,3 +38,24 @@ pre, .risk-card { background: #0d0f0e; border: 1px solid #292e2a; border-radius:
 .history-row .success { color: #87e8a5; }
 .history-row .failure { color: #ff7b72; }
 @media (max-width: 760px) { header { align-items: stretch; flex-direction: column; gap: 18px; } .layout { grid-template-columns: 1fr; } }
+
+/* AI Panel Styles */
+.ai-panel { border-top: 1px solid #303531; margin-top: 24px; padding-top: 16px; }
+.ai-panel h3 { color: #87e8a5; font-size: 13px; text-transform: uppercase; letter-spacing: 1.6px; margin-bottom: 16px; }
+.ai-buttons { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+.ai-buttons > * { flex: 1; min-width: 100px; }
+.ai-buttons input { flex: 2; min-width: 200px; }
+.ai-results { border: 1px solid #394039; border-radius: 14px; background: #151816; padding: 20px; margin-bottom: 20px; display: grid; gap: 16px; }
+.ai-results-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #303531; padding-bottom: 12px; }
+.ai-results-header h3 { color: #87e8a5; font-size: 13px; text-transform: uppercase; letter-spacing: 1.6px; margin: 0; }
+.ai-result { display: grid; gap: 12px; }
+.ai-result h4 { color: #e8e8e3; margin: 0; }
+.ai-result h5 { color: #aeb8b1; font-size: 13px; text-transform: uppercase; margin: 8px 0 4px; }
+.ai-recommendation { background: #0d0f0e; border: 1px solid #292e2a; border-radius: 9px; padding: 16px; }
+.ai-recommendation summary { cursor: pointer; display: flex; justify-content: space-between; align-items: center; }
+.ai-recommendation[open] { display: grid; gap: 8px; }
+.ai-recommendation pre { margin: 8px 0 0; font-size: 12px; }
+.risk-badge { font: 700 10px ui-monospace; text-transform: uppercase; padding: 2px 6px; border-radius: 4px; }
+.risk-badge[data-risk="low"] { background: #1a3d27; color: #87e8a5; }
+.risk-badge[data-risk="medium"] { background: #3d341a; color: #f1c86b; }
+.risk-badge[data-risk="high"], .risk-badge[data-risk="blocked"] { background: #3d1a1a; color: #ff7b72; }

@@ -1,0 +1,20 @@
+[package]
+name = "just-ai-lsp"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/bormaxi8080/just-ai"
+description = "Language Server Protocol implementation for justfiles"
+
+[dependencies]
+just-ai = { path = "../just-ai" }
+tower-lsp = "0.20"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "io-std"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
+lsp-types = "0.94"
+url = "2"
+regex = "1"

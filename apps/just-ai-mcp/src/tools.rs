@@ -6,8 +6,7 @@ use {
     },
     cli::AiClient,
     config::Config,
-    inspection::{inspect_project_at, ProjectContext},
-    proposal::{handle_add, handle_fix},
+    inspection::inspect_project_at,
     prompts,
   },
   serde_json::{Map, Value, json},
@@ -60,6 +59,42 @@ pub(super) fn tool_definitions() -> Value {
       "name": "fix_recipe",
       "description": "Ask an AI provider to propose a fix for a failed recipe and optionally write it to the justfile.",
       "inputSchema": fix_recipe_schema(),
+      "annotations": { "readOnlyHint": false, "destructiveHint": true }
+    },
+    {
+      "name": "add_workflow",
+      "description": "Ask an AI provider to propose a multi-recipe workflow and optionally write it to the justfile.",
+      "inputSchema": add_workflow_schema(),
+      "annotations": { "readOnlyHint": false, "destructiveHint": true }
+    },
+    {
+      "name": "fix_batch",
+      "description": "Ask an AI provider to propose fixes for all failed recipes and optionally write them to the justfile.",
+      "inputSchema": fix_batch_schema(),
+      "annotations": { "readOnlyHint": false, "destructiveHint": true }
+    },
+    {
+      "name": "explain_batch",
+      "description": "Ask an AI provider to explain multiple recipes (all or filtered by module).",
+      "inputSchema": explain_batch_schema(),
+      "annotations": { "readOnlyHint": true, "destructiveHint": false }
+    },
+    {
+      "name": "create_template",
+      "description": "Ask an AI provider to create a reusable recipe template with placeholders.",
+      "inputSchema": create_template_schema(),
+      "annotations": { "readOnlyHint": false, "destructiveHint": true }
+    },
+    {
+      "name": "instantiate_template",
+      "description": "Instantiate a recipe template with provided parameter values.",
+      "inputSchema": instantiate_template_schema(),
+      "annotations": { "readOnlyHint": false, "destructiveHint": true }
+    },
+    {
+      "name": "compose_workflow",
+      "description": "Ask an AI provider to compose a workflow by reusing and adapting existing recipes.",
+      "inputSchema": compose_workflow_schema(),
       "annotations": { "readOnlyHint": false, "destructiveHint": true }
     }
   ])
@@ -133,6 +168,76 @@ fn fix_recipe_schema() -> Value {
   })
 }
 
+fn add_workflow_schema() -> Value {
+  json!({
+    "type": "object",
+    "properties": {
+      "request": { "type": "string" },
+      "write": { "type": "boolean", "default": false }
+    },
+    "required": ["request"],
+    "additionalProperties": false
+  })
+}
+
+fn fix_batch_schema() -> Value {
+  json!({
+    "type": "object",
+    "properties": {
+      "write": { "type": "boolean", "default": false }
+    },
+    "additionalProperties": false
+  })
+}
+
+fn explain_batch_schema() -> Value {
+  json!({
+    "type": "object",
+    "properties": {
+      "recipes": { "type": "array", "items": { "type": "string" } },
+      "module": { "type": "string" }
+    },
+    "additionalProperties": false
+  })
+}
+
+fn create_template_schema() -> Value {
+  json!({
+    "type": "object",
+    "properties": {
+      "request": { "type": "string" },
+      "write": { "type": "boolean", "default": false }
+    },
+    "required": ["request"],
+    "additionalProperties": false
+  })
+}
+
+fn instantiate_template_schema() -> Value {
+  json!({
+    "type": "object",
+    "properties": {
+      "template": { "type": "string" },
+      "values": { "type": "object", "additionalProperties": { "type": "string" } },
+      "write": { "type": "boolean", "default": false }
+    },
+    "required": ["template", "values"],
+    "additionalProperties": false
+  })
+}
+
+fn compose_workflow_schema() -> Value {
+  json!({
+    "type": "object",
+    "properties": {
+      "request": { "type": "string" },
+      "write": { "type": "boolean", "default": false }
+    },
+    "required": ["request"],
+    "additionalProperties": false
+  })
+}
+
 pub(super) fn call_tool(params: &Value) -> Result<Value, String> {
   let project_root = env::current_dir().map_err(|error| error.to_string())?;
   call_tool_at(params, OsStr::new("just"), &project_root)
@@ -150,6 +255,12 @@ fn call_tool_at(params: &Value, just_binary: &OsStr, project_root: &Path) -> Res
     "get_history" => &["recipe", "success", "limit"],
     "add_recipe" => &["request", "write"],
     "fix_recipe" => &["recipe", "write"],
+    "add_workflow" => &["request", "write"],
+    "fix_batch" => &["write"],
+    "explain_batch" => &["recipes", "module"],
+    "create_template" => &["request", "write"],
+    "instantiate_template" => &["template", "values", "write"],
+    "compose_workflow" => &["request", "write"],
     _ => return Err(format!("unknown tool `{name}`")),
   };
   let empty_arguments = Map::new();
@@ -226,12 +337,12 @@ fn call_tool_at(params: &Value, just_binary: &OsStr, project_root: &Path) -> Res
     "get_history" => {
       let config = Config::load(project_root).map_err(|error| error.to_string())?;
       let history = create_history(config.history).map_err(|error| error.to_string())?;
-      let recipe_filter = arguments.get("recipe").and_then(Value::as_str).map(str::to_owned);
+      let recipe_filter = arguments
+        .get("recipe")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
       let success_filter = arguments.get("success").and_then(Value::as_bool);
-      let limit = arguments
-        .get("limit")
-        .and_then(Value::as_u64)
-        .unwrap_or(20) as usize;
+      let limit = arguments.get("limit").and_then(Value::as_u64).unwrap_or(20) as usize;
       let records = history
         .query(recipe_filter.as_deref(), success_filter, limit)
         .map_err(|error| error.to_string())?;
@@ -243,20 +354,24 @@ fn call_tool_at(params: &Value, just_binary: &OsStr, project_root: &Path) -> Res
         .get("write")
         .and_then(Value::as_bool)
         .unwrap_or(false);
-      let context = inspect_project_at(just_binary, project_root)
-        .map_err(|error| error.to_string())?;
+      let context =
+        inspect_project_at(just_binary, project_root).map_err(|error| error.to_string())?;
       let client = AiClient::from_env().map_err(|error| error.to_string())?;
       let response = client
         .complete_json::<just_ai::ai_responses::AddRecipeResponse>(
           "Generate a safe just recipe proposal as strict JSON.",
-          &prompts::add(&serde_json::to_string_pretty(&context).map_err(|e| e.to_string())?, &request),
+          &prompts::add(
+            &serde_json::to_string_pretty(&context).map_err(|e| e.to_string())?,
+            &request,
+          ),
         )
         .map_err(|error| error.to_string())?;
       let source = context
         .root_source()
         .ok_or("project context does not contain a root justfile source")?;
-      let original = just_ai::bounded_file::read_utf8(source, just_ai::bounded_file::max_editable_file_bytes())
-        .map_err(|error| error.to_string())?;
+      let original =
+        just_ai::bounded_file::read_utf8(source, just_ai::bounded_file::max_editable_file_bytes())
+          .map_err(|error| error.to_string())?;
       let recipe = just_ai::proposal::render_recipe(&response.recipe);
       let proposed = just_ai::proposal::insert_recipe_grouped(
         &original,
@@ -265,8 +380,12 @@ fn call_tool_at(params: &Value, just_binary: &OsStr, project_root: &Path) -> Res
         &response.recipe.dependencies,
         &response.recipe.name,
       );
-      just_ai::bounded_file::ensure_text_limit(&proposed, "proposed justfile", just_ai::bounded_file::max_editable_file_bytes())
-        .map_err(|error| error.to_string())?;
+      just_ai::bounded_file::ensure_text_limit(
+        &proposed,
+        "proposed justfile",
+        just_ai::bounded_file::max_editable_file_bytes(),
+      )
+      .map_err(|error| error.to_string())?;
       let just_binary_path = Path::new(just_binary);
       just_ai::proposal::validate_justfile(just_binary_path, source, &proposed)
         .map_err(|error| error.to_string())?;
@@ -297,8 +416,8 @@ fn call_tool_at(params: &Value, just_binary: &OsStr, project_root: &Path) -> Res
       let failed_runs = history
         .query(Some(&recipe_name), Some(false), 10)
         .map_err(|error| error.to_string())?;
-      let context = inspect_project_at(just_binary, project_root)
-        .map_err(|error| error.to_string())?;
+      let context =
+        inspect_project_at(just_binary, project_root).map_err(|error| error.to_string())?;
       let client = AiClient::from_env().map_err(|error| error.to_string())?;
       let response = client
         .complete_json::<just_ai::ai_responses::FixResponse>(
@@ -313,12 +432,17 @@ fn call_tool_at(params: &Value, just_binary: &OsStr, project_root: &Path) -> Res
       let source = context
         .root_source()
         .ok_or("project context does not contain a root justfile source")?;
-      let original = just_ai::bounded_file::read_utf8(source, just_ai::bounded_file::max_editable_file_bytes())
-        .map_err(|error| error.to_string())?;
+      let original =
+        just_ai::bounded_file::read_utf8(source, just_ai::bounded_file::max_editable_file_bytes())
+          .map_err(|error| error.to_string())?;
       let recipe = just_ai::proposal::render_fix_recipe(&response.recipe);
       let proposed = just_ai::proposal::replace_recipe(&original, &recipe_name, &recipe);
-      just_ai::bounded_file::ensure_text_limit(&proposed, "proposed justfile", just_ai::bounded_file::max_editable_file_bytes())
-        .map_err(|error| error.to_string())?;
+      just_ai::bounded_file::ensure_text_limit(
+        &proposed,
+        "proposed justfile",
+        just_ai::bounded_file::max_editable_file_bytes(),
+      )
+      .map_err(|error| error.to_string())?;
       let just_binary_path = Path::new(just_binary);
       just_ai::proposal::validate_justfile(just_binary_path, source, &proposed)
         .map_err(|error| error.to_string())?;
@@ -338,6 +462,554 @@ fn call_tool_at(params: &Value, just_binary: &OsStr, project_root: &Path) -> Res
         "written": write,
       })
     }
+    "add_workflow" => {
+      let request = string_argument(arguments, "request")?;
+      let write = arguments
+        .get("write")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+      let context =
+        inspect_project_at(just_binary, project_root).map_err(|error| error.to_string())?;
+      let client = AiClient::from_env().map_err(|error| error.to_string())?;
+      let response = client
+        .complete_json::<just_ai::ai_responses::WorkflowResponse>(
+          "Generate a multi-recipe workflow as strict JSON.",
+          &prompts::workflow(
+            &serde_json::to_string_pretty(&context).map_err(|e| e.to_string())?,
+            &request,
+          ),
+        )
+        .map_err(|error| error.to_string())?;
+      let source = context
+        .root_source()
+        .ok_or("project context does not contain a root justfile source")?;
+      let original =
+        just_ai::bounded_file::read_utf8(source, just_ai::bounded_file::max_editable_file_bytes())
+          .map_err(|error| error.to_string())?;
+
+      let mut proposed = original.clone();
+      let rendered_recipes: std::collections::HashMap<String, String> = response
+        .recipes
+        .iter()
+        .map(|r| (r.name.clone(), just_ai::proposal::render_recipe(r)))
+        .collect();
+
+      for recipe_name in &response.execution_order {
+        let recipe = rendered_recipes
+          .get(recipe_name)
+          .ok_or_else(|| format!("recipe `{recipe_name}` not found in workflow"))?;
+        let recipe_proposal = response
+          .recipes
+          .iter()
+          .find(|r| r.name == *recipe_name)
+          .ok_or_else(|| format!("recipe proposal for `{recipe_name}` not found"))?;
+
+        proposed = just_ai::proposal::insert_recipe_grouped(
+          &proposed,
+          recipe,
+          &context,
+          &recipe_proposal.dependencies,
+          recipe_name,
+        );
+      }
+
+      just_ai::bounded_file::ensure_text_limit(
+        &proposed,
+        "proposed justfile",
+        just_ai::bounded_file::max_editable_file_bytes(),
+      )
+      .map_err(|error| error.to_string())?;
+      let just_binary_path = Path::new(just_binary);
+      just_ai::proposal::validate_justfile(just_binary_path, source, &proposed)
+        .map_err(|error| error.to_string())?;
+      if write {
+        just_ai::application::patches::apply_reviewed_change(source, &original, &proposed)
+          .map_err(|error| error.to_string())?;
+      }
+      json!({
+        "summary": response.summary,
+        "rationale": response.rationale,
+        "recipes": response.recipes.iter().map(|r| json!({
+          "name": r.name,
+          "body": r.body,
+          "dependencies": r.dependencies,
+        })).collect::<Vec<_>>(),
+        "execution_order": response.execution_order,
+        "diff": just_ai::proposal::unified_diff(source, &original, &proposed),
+        "written": write,
+      })
+    }
+    "fix_batch" => {
+      let write = arguments
+        .get("write")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+      let config = Config::load(project_root).map_err(|error| error.to_string())?;
+      let history = create_history(config.history).map_err(|error| error.to_string())?;
+      let failed_runs = history
+        .query(None, Some(false), 100)
+        .map_err(|error| error.to_string())?;
+
+      let mut failed_recipes: Vec<String> = failed_runs
+        .iter()
+        .map(|r| r.recipe.clone())
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect();
+      failed_recipes.sort();
+
+      if failed_recipes.is_empty() {
+        json!({
+          "summary": "No failed recipes found in history.",
+          "fixes": [],
+          "diff": "",
+          "written": false,
+        })
+      } else {
+        let context =
+          inspect_project_at(just_binary, project_root).map_err(|error| error.to_string())?;
+        let client = AiClient::from_env().map_err(|error| error.to_string())?;
+        let source = context
+          .root_source()
+          .ok_or("project context does not contain a root justfile source")?;
+        let original = just_ai::bounded_file::read_utf8(
+          source,
+          just_ai::bounded_file::max_editable_file_bytes(),
+        )
+        .map_err(|e| e.to_string())?;
+        let mut proposed = original.clone();
+        let mut fixes = Vec::new();
+
+        for recipe_name in &failed_recipes {
+          let recipe_history = history
+            .query(Some(recipe_name), Some(false), 10)
+            .map_err(|error| error.to_string())?;
+          let history_json =
+            serde_json::to_string_pretty(&recipe_history).map_err(|e| e.to_string())?;
+          let context_json = serde_json::to_string_pretty(&context).map_err(|e| e.to_string())?;
+
+          let response = client
+            .complete_json::<just_ai::ai_responses::FixResponse>(
+              "Generate a fix proposal for a failing just recipe as strict JSON.",
+              &prompts::fix(&context_json, recipe_name, &history_json),
+            )
+            .map_err(|error| error.to_string())?;
+
+          just_ai::proposal::validate_fix_proposal(&context, &response.recipe, recipe_name)
+            .map_err(|error| error.to_string())?;
+
+          let recipe_rendered = just_ai::proposal::render_fix_recipe(&response.recipe);
+          proposed = just_ai::proposal::replace_recipe(&proposed, recipe_name, &recipe_rendered);
+
+          just_ai::bounded_file::ensure_text_limit(
+            &proposed,
+            "proposed justfile",
+            just_ai::bounded_file::max_editable_file_bytes(),
+          )
+          .map_err(|error| error.to_string())?;
+
+          let risks = just_ai::domain::risk::RiskFinding::scan_lines(&response.recipe.body);
+          let risk = just_ai::domain::risk::RiskLevel::highest(&risks);
+          if risk == just_ai::domain::risk::RiskLevel::Blocked {
+            return Err(format!(
+              "generated fix for `{}` has blocked risk and will not be written",
+              recipe_name
+            ));
+          }
+
+          fixes.push(json!({
+            "name": response.recipe.name,
+            "risk": risk.to_string(),
+            "rationale": response.rationale,
+          }));
+        }
+
+        let just_binary_path = Path::new(just_binary);
+        let source = context.root_source().unwrap();
+        just_ai::proposal::validate_justfile(just_binary_path, source, &proposed)
+          .map_err(|error| error.to_string())?;
+
+        let diff = just_ai::proposal::unified_diff(source, &original, &proposed);
+
+        if write {
+          just_ai::application::patches::apply_reviewed_change(source, &original, &proposed)
+            .map_err(|error| error.to_string())?;
+        }
+
+        json!({
+          "summary": format!("Fixed {} failed recipes", fixes.len()),
+          "fixes": fixes,
+          "diff": diff,
+          "written": write,
+        })
+      }
+    }
+    "explain_batch" => {
+      let recipes_filter: Option<Vec<String>> = arguments
+        .get("recipes")
+        .and_then(|v| serde_json::from_value(v.clone()).ok());
+      let module_filter = arguments
+        .get("module")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+
+      let context =
+        inspect_project_at(just_binary, project_root).map_err(|error| error.to_string())?;
+      let client = AiClient::from_env().map_err(|error| error.to_string())?;
+
+      let mut explanations = Vec::new();
+
+      for recipe_ctx in &context.recipes {
+        if let Some(ref filter) = recipes_filter
+          && !filter.contains(&recipe_ctx.namepath)
+        {
+          continue;
+        }
+        if let Some(ref module) = module_filter
+          && !recipe_ctx.namepath.starts_with(module)
+        {
+          continue;
+        }
+
+        let response = client
+          .complete_json::<just_ai::ai_responses::ExplainResponse>(
+            "Explain a just recipe using the supplied project context.",
+            &prompts::explain(
+              &serde_json::to_string_pretty(&context).map_err(|e| e.to_string())?,
+              &serde_json::to_string_pretty(recipe_ctx).map_err(|e| e.to_string())?,
+            ),
+          )
+          .map_err(|error| error.to_string())?;
+
+        explanations.push(json!({
+          "recipe": recipe_ctx.namepath,
+          "summary": response.summary,
+          "explanation": response.explanation,
+          "parameters": response.parameters,
+          "dependencies": response.dependencies,
+          "risks": response.risks,
+        }));
+      }
+
+      json!({
+        "explanations": explanations,
+      })
+    }
+    "create_template" => {
+      let request = string_argument(arguments, "request")?;
+      let write = arguments
+        .get("write")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+      let context =
+        inspect_project_at(just_binary, project_root).map_err(|error| error.to_string())?;
+      let client = AiClient::from_env().map_err(|error| error.to_string())?;
+      let response = client
+        .complete_json::<just_ai::ai_responses::TemplateResponse>(
+          "Generate a reusable just recipe template as strict JSON.",
+          &prompts::template(
+            &serde_json::to_string_pretty(&context).map_err(|e| e.to_string())?,
+            &request,
+          ),
+        )
+        .map_err(|error| error.to_string())?;
+
+      let _source = context
+        .root_source()
+        .ok_or("project context does not contain a root justfile source")?;
+
+      let _template_name = response.template.name.clone();
+      let template_json =
+        serde_json::to_string_pretty(&response.template).map_err(|e| e.to_string())?;
+
+      if write {
+        // Store template as a comment in the justfile or a separate file
+        // For now, we just return the template info
+      }
+
+      json!({
+        "summary": response.summary,
+        "template": {
+          "name": response.template.name,
+          "description": response.template.description,
+          "category": response.template.category,
+          "parameters": response.template.parameters.iter().map(|p| json!({
+            "name": p.name,
+            "description": p.description,
+            "required": p.required,
+            "default": p.default,
+          })).collect::<Vec<_>>(),
+          "body": response.template.body,
+        },
+        "template_json": template_json,
+        "written": write,
+      })
+    }
+    "instantiate_template" => {
+      let template_name = string_argument(arguments, "template")?;
+      let values_map: std::collections::HashMap<String, String> = arguments
+        .get("values")
+        .and_then(|v| serde_json::from_value(v.clone()).ok())
+        .unwrap_or_default();
+      let write = arguments
+        .get("write")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+
+      let context =
+        inspect_project_at(just_binary, project_root).map_err(|error| error.to_string())?;
+      let client = AiClient::from_env().map_err(|error| error.to_string())?;
+
+      // Generate template from request
+      let template_prompt = format!(
+        "Find or create a template named '{}' for this project.",
+        template_name
+      );
+      let template_response = client
+        .complete_json::<just_ai::ai_responses::TemplateResponse>(
+          "Generate a reusable just recipe template as strict JSON.",
+          &prompts::template(
+            &serde_json::to_string_pretty(&context).map_err(|e| e.to_string())?,
+            &template_prompt,
+          ),
+        )
+        .map_err(|error| error.to_string())?;
+
+      // Check required parameters
+      for param in &template_response.template.parameters {
+        if param.required && !values_map.contains_key(&param.name) {
+          if param.default.is_some() {
+            // Use default
+          } else {
+            return Err(format!("required parameter '{}' not provided", param.name));
+          }
+        }
+      }
+
+      // Substitute template parameters
+      let mut recipe_body = Vec::new();
+      for line in &template_response.template.body {
+        let mut substituted = line.clone();
+        for (key, value) in &values_map {
+          substituted = substituted.replace(&format!("{{{{{key}}}}}"), value);
+        }
+        recipe_body.push(substituted);
+      }
+
+      let recipe = just_ai::ai_responses::RecipeProposal {
+        name: template_response.template.name.clone(),
+        doc: Some(template_response.template.description.clone()),
+        parameters: template_response
+          .template
+          .parameters
+          .iter()
+          .map(|p| just_ai::ai_responses::RecipeParameterProposal {
+            name: p.name.clone(),
+            default: values_map.get(&p.name).cloned().or(p.default.clone()),
+          })
+          .collect(),
+        dependencies: vec![],
+        body: recipe_body,
+      };
+
+      let source = context
+        .root_source()
+        .ok_or("project context does not contain a root justfile source")?;
+      let original =
+        just_ai::bounded_file::read_utf8(source, just_ai::bounded_file::max_editable_file_bytes())
+          .map_err(|error| error.to_string())?;
+      let rendered = just_ai::proposal::render_recipe(&recipe);
+      let proposed = just_ai::proposal::insert_recipe_grouped(
+        &original,
+        &rendered,
+        &context,
+        &recipe.dependencies,
+        &recipe.name,
+      );
+      just_ai::bounded_file::ensure_text_limit(
+        &proposed,
+        "proposed justfile",
+        just_ai::bounded_file::max_editable_file_bytes(),
+      )
+      .map_err(|error| error.to_string())?;
+      let just_binary_path = Path::new(just_binary);
+      just_ai::proposal::validate_justfile(just_binary_path, source, &proposed)
+        .map_err(|error| error.to_string())?;
+
+      let risks = just_ai::domain::risk::RiskFinding::scan_lines(&recipe.body);
+      let risk = just_ai::domain::risk::RiskLevel::highest(&risks);
+      if risk == just_ai::domain::risk::RiskLevel::Blocked {
+        return Err("instantiated template has blocked risk and will not be written".into());
+      }
+
+      let diff = just_ai::proposal::unified_diff(source, &original, &proposed);
+
+      if write {
+        just_ai::application::patches::apply_reviewed_change(source, &original, &proposed)
+          .map_err(|error| error.to_string())?;
+      }
+
+      json!({
+        "summary": format!("Template '{}' instantiated", template_name),
+        "recipe": {
+          "name": recipe.name,
+          "body": recipe.body,
+          "dependencies": recipe.dependencies,
+        },
+        "diff": diff,
+        "written": write,
+      })
+    }
+    "compose_workflow" => {
+      let request = string_argument(arguments, "request")?;
+      let write = arguments
+        .get("write")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+      let context =
+        inspect_project_at(just_binary, project_root).map_err(|error| error.to_string())?;
+      let client = AiClient::from_env().map_err(|error| error.to_string())?;
+      let response = client
+        .complete_json::<just_ai::ai_responses::ComposeWorkflowResponse>(
+          "Compose a multi-recipe workflow by reusing existing recipes as strict JSON.",
+          &prompts::compose_workflow(
+            &serde_json::to_string_pretty(&context).map_err(|e| e.to_string())?,
+            &request,
+          ),
+        )
+        .map_err(|error| error.to_string())?;
+
+      let source = context
+        .root_source()
+        .ok_or("project context does not contain a root justfile source")?;
+      let original =
+        just_ai::bounded_file::read_utf8(source, just_ai::bounded_file::max_editable_file_bytes())
+          .map_err(|error| error.to_string())?;
+
+      // Validate all recipes
+      let existing_recipe_names: std::collections::HashSet<_> =
+        context.recipes.iter().map(|r| r.namepath.clone()).collect();
+      for recipe in &response.recipes {
+        let exists = existing_recipe_names.contains(&recipe.name);
+        match recipe.source.as_str() {
+          "existing" => {
+            if !exists {
+              return Err(format!(
+                "recipe `{}` marked as existing but not found in project",
+                recipe.name
+              ));
+            }
+          }
+          "modified" => {
+            if !exists {
+              return Err(format!(
+                "recipe `{}` marked as modified but not found in project",
+                recipe.name
+              ));
+            }
+          }
+          "new" => {
+            if exists {
+              return Err(format!(
+                "recipe `{}` marked as new but already exists in project",
+                recipe.name
+              ));
+            }
+          }
+          _ => {
+            return Err(format!(
+              "invalid source type `{}`, must be existing|new|modified",
+              recipe.source
+            ));
+          }
+        }
+        for dependency in &recipe.dependencies {
+          let in_workflow = response.recipes.iter().any(|r| r.name == *dependency);
+          if !context.has_recipe(dependency) && !in_workflow {
+            return Err(format!("dependency recipe `{dependency}` does not exist"));
+          }
+        }
+      }
+
+      // Build rendered recipes map
+      let mut rendered_recipes: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
+      for recipe in &response.recipes {
+        let proposal = just_ai::ai_responses::RecipeProposal {
+          name: recipe.name.clone(),
+          doc: recipe.doc.clone(),
+          parameters: recipe.parameters.clone(),
+          dependencies: recipe.dependencies.clone(),
+          body: recipe.body.clone(),
+        };
+        rendered_recipes.insert(
+          recipe.name.clone(),
+          just_ai::proposal::render_recipe(&proposal),
+        );
+      }
+
+      let mut proposed = original.clone();
+      for recipe_name in &response.execution_order {
+        let recipe = rendered_recipes
+          .get(recipe_name)
+          .ok_or_else(|| format!("recipe `{recipe_name}` not found in workflow"))?;
+        let recipe_proposal = response
+          .recipes
+          .iter()
+          .find(|r| r.name == *recipe_name)
+          .ok_or_else(|| format!("recipe proposal for `{recipe_name}` not found"))?;
+
+        if recipe_proposal.source != "existing" {
+          proposed = just_ai::proposal::insert_recipe_grouped(
+            &proposed,
+            recipe,
+            &context,
+            &recipe_proposal.dependencies,
+            recipe_name,
+          );
+        }
+      }
+
+      just_ai::bounded_file::ensure_text_limit(
+        &proposed,
+        "proposed justfile",
+        just_ai::bounded_file::max_editable_file_bytes(),
+      )
+      .map_err(|error| error.to_string())?;
+      let just_binary_path = Path::new(just_binary);
+      just_ai::proposal::validate_justfile(just_binary_path, source, &proposed)
+        .map_err(|error| error.to_string())?;
+
+      let all_risks: Vec<_> = response
+        .recipes
+        .iter()
+        .flat_map(|r| just_ai::domain::risk::RiskFinding::scan_lines(&r.body))
+        .collect();
+      let risk = just_ai::domain::risk::RiskLevel::highest(&all_risks);
+      if risk == just_ai::domain::risk::RiskLevel::Blocked {
+        return Err("composed workflow has blocked risk and will not be written".into());
+      }
+
+      let diff = just_ai::proposal::unified_diff(source, &original, &proposed);
+
+      if write {
+        just_ai::application::patches::apply_reviewed_change(source, &original, &proposed)
+          .map_err(|error| error.to_string())?;
+      }
+
+      json!({
+        "summary": response.summary,
+        "recipes": response.recipes.iter().map(|r| json!({
+          "name": r.name,
+          "source": r.source,
+          "body": r.body,
+          "dependencies": r.dependencies,
+        })).collect::<Vec<_>>(),
+        "execution_order": response.execution_order,
+        "diff": diff,
+        "written": write,
+      })
+    }
     _ => unreachable!("tool name validated before argument parsing"),
   };
   let text = serde_json::to_string(&value).map_err(|error| error.to_string())?;
@@ -347,13 +1019,15 @@ fn call_tool_at(params: &Value, just_binary: &OsStr, project_root: &Path) -> Res
 }
 
 fn parse_confirmation(confirmation_value: Option<&Value>) -> Result<RunConfirmation, String> {
-  let confirmation = confirmation_value.cloned().unwrap_or_else(|| json!({ "type": "none" }));
-  let conf_type = string_argument(&confirmation.as_object().unwrap_or(&Map::new()), "type")?;
+  let confirmation = confirmation_value
+    .cloned()
+    .unwrap_or_else(|| json!({ "type": "none" }));
+  let conf_type = string_argument(confirmation.as_object().unwrap_or(&Map::new()), "type")?;
   match conf_type.as_str() {
     "none" => Ok(RunConfirmation::None),
     "confirmed" => Ok(RunConfirmation::Confirmed),
     "typed" => {
-      let phrase = string_argument(&confirmation.as_object().unwrap_or(&Map::new()), "phrase")?;
+      let phrase = string_argument(confirmation.as_object().unwrap_or(&Map::new()), "phrase")?;
       Ok(RunConfirmation::Typed { phrase })
     }
     _ => Err(format!("unknown confirmation type `{conf_type}`")),

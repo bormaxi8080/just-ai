@@ -1,5 +1,6 @@
 use {
   crate::bounded_output,
+  anyhow::{Result, anyhow},
   serde_json::Value,
   std::{
     error::Error,
@@ -8,6 +9,23 @@ use {
     process::Command,
   },
 };
+
+/// Dump justfile project as JSON at a given project root
+pub async fn dump_json(project_root: &Path) -> Result<String> {
+  let just_binary = std::env::var("JUST_BINARY").unwrap_or_else(|_| "just".to_string());
+  let mut command = Command::new(&just_binary);
+  command.args(["--dump", "--dump-format", "json"]);
+  command.current_dir(project_root);
+  let output = bounded_output::capture(&mut command)?;
+  if !output.status.success() {
+    return Err(anyhow!(
+      "just dump failed with {}: {}",
+      output.status,
+      String::from_utf8_lossy(&output.stderr).trim()
+    ));
+  }
+  Ok(String::from_utf8(output.stdout)?)
+}
 
 pub(crate) fn load_at(
   just_binary: &Path,

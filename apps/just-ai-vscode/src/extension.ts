@@ -130,6 +130,27 @@ function registerCommands(context: vscode.ExtensionContext): void {
     })
   );
 
+  // Workflow command
+  context.subscriptions.push(
+    vscode.commands.registerCommand('just-ai.workflow', async () => {
+      await runWorkflow();
+    })
+  );
+
+  // Fix Batch command
+  context.subscriptions.push(
+    vscode.commands.registerCommand('just-ai.fixBatch', async () => {
+      await runFixBatch();
+    })
+  );
+
+  // Explain Batch command
+  context.subscriptions.push(
+    vscode.commands.registerCommand('just-ai.explainBatch', async () => {
+      await runExplainBatch();
+    })
+  );
+
   // Export context command
   context.subscriptions.push(
     vscode.commands.registerCommand('just-ai.exportContext', async () => {
@@ -391,6 +412,120 @@ async function runRecipeCommand(): Promise<void> {
     terminal.sendText(`just ${recipe}`);
   } catch (error) {
     vscode.window.showErrorMessage(`Failed to run recipe: ${error}`);
+  }
+}
+
+async function runWorkflow(): Promise<void> {
+  const request = await vscode.window.showInputBox({
+    placeHolder: 'Describe the workflow you want to create (e.g., "CI/CD pipeline with build, test, and deploy")',
+    prompt: 'Enter a natural-language description of the multi-recipe workflow',
+    validateInput: value => value.trim().length < 10 ? 'Please provide a more detailed description' : null
+  });
+
+  if (!request) { return; }
+
+  const write = await vscode.window.showQuickPick(['Preview only', 'Write to justfile'], {
+    placeHolder: 'Apply the generated workflow?'
+  });
+
+  if (!write) { return; }
+
+  outputChannel.clear();
+  outputChannel.show();
+  outputChannel.appendLine(`Generating workflow for: ${request}...`);
+
+  try {
+    const result = await justAiClient.workflow(request, write === 'Write to justfile');
+    outputChannel.appendLine(result);
+
+    if (write === 'Write to justfile') {
+      vscode.window.showInformationMessage('Workflow added to justfile!');
+    } else {
+      const doc = await vscode.workspace.openTextDocument({
+        content: result,
+        language: 'markdown'
+      });
+      await vscode.window.showTextDocument(doc);
+    }
+  } catch (error) {
+    const msg = `Workflow failed: ${error}`;
+    outputChannel.appendLine(msg);
+    vscode.window.showErrorMessage(msg);
+  }
+}
+
+async function runFixBatch(): Promise<void> {
+  const write = await vscode.window.showQuickPick(['Preview only', 'Write fixes to justfile'], {
+    placeHolder: 'Apply fixes to all failed recipes?'
+  });
+
+  if (!write) { return; }
+
+  outputChannel.clear();
+  outputChannel.show();
+  outputChannel.appendLine('Generating fixes for all failed recipes...');
+
+  try {
+    const result = await justAiClient.fixBatch(write === 'Write fixes to justfile');
+    outputChannel.appendLine(result);
+
+    if (write === 'Write fixes to justfile') {
+      vscode.window.showInformationMessage('Fixes applied to justfile!');
+    } else {
+      const doc = await vscode.workspace.openTextDocument({
+        content: result,
+        language: 'markdown'
+      });
+      await vscode.window.showTextDocument(doc);
+    }
+  } catch (error) {
+    const msg = `Fix batch failed: ${error}`;
+    outputChannel.appendLine(msg);
+    vscode.window.showErrorMessage(msg);
+  }
+}
+
+async function runExplainBatch(): Promise<void> {
+  // First try to get modules from project context for filtering
+  let module: string | undefined;
+
+  try {
+    const context = await justAiClient.getProjectContext();
+    const modules = context.modules.map(m => m.name);
+
+    const moduleChoice = await vscode.window.showQuickPick(
+      ['All recipes', ...modules],
+      { placeHolder: 'Select module to explain (or all recipes)' }
+    );
+
+    if (!moduleChoice) { return; }
+    if (moduleChoice !== 'All recipes') {
+      module = moduleChoice;
+    }
+  } catch (error) {
+    // If we can't get modules, just run without filter
+  }
+
+  outputChannel.clear();
+  outputChannel.show();
+  outputChannel.appendLine(module
+    ? `Explaining all recipes in module: ${module}...`
+    : 'Explaining all recipes...'
+  );
+
+  try {
+    const result = await justAiClient.explainBatch(module);
+    outputChannel.appendLine(result);
+
+    const doc = await vscode.workspace.openTextDocument({
+      content: result,
+      language: 'markdown'
+    });
+    await vscode.window.showTextDocument(doc);
+  } catch (error) {
+    const msg = `Explain batch failed: ${error}`;
+    outputChannel.appendLine(msg);
+    vscode.window.showErrorMessage(msg);
   }
 }
 

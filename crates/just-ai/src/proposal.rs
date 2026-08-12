@@ -1,7 +1,11 @@
 use {
   crate::{
     ProjectContext,
-    ai_responses::{AddRecipeResponse, FixProposal as AiFixProposal, FixResponse, RecipeProposal},
+    ai_responses::{
+      AddRecipeResponse, ComposeWorkflowResponse, FixProposal, FixResponse,
+      RecipeParameterProposal, RecipeProposal, TemplateProposal, TemplateResponse,
+      WorkflowResponse,
+    },
     application,
     bounded_file::{self, max_editable_file_bytes},
     bounded_output,
@@ -12,6 +16,7 @@ use {
   },
   similar::{ChangeTag, TextDiff},
   std::{
+    collections::HashMap,
     error::Error,
     fs,
     path::{Path, PathBuf},
@@ -130,9 +135,165 @@ pub fn handle_fix(
   Ok(())
 }
 
-fn validate_fix_proposal(
+/// Handle workflow proposal - validates and inserts multiple recipes
+pub fn handle_workflow(
+  just_binary: &Path,
   context: &ProjectContext,
-  proposal: &AiFixProposal,
+  request: &str,
+  response: WorkflowResponse,
+  write: bool,
+) -> Result<(), Box<dyn Error>> {
+  // Validate all recipes in the workflow
+  for recipe in &response.recipes {
+    validate_workflow_recipe(context, recipe, &response.recipes)?;
+  }
+
+  let source = context
+    .root_source()
+    .ok_or("project context does not contain a root justfile source")?;
+  let original = bounded_file::read_utf8(source, max_editable_file_bytes())?;
+
+  // Build a map of recipe name to rendered recipe
+  let mut rendered_recipes: HashMap<String, String> = HashMap::new();
+  for recipe in &response.recipes {
+    rendered_recipes.insert(recipe.name.clone(), render_recipe(recipe));
+  }
+
+  // Insert recipes in execution order
+  let mut proposed = original.clone();
+  for recipe_name in &response.execution_order {
+    let recipe = rendered_recipes
+      .get(recipe_name)
+      .ok_or_else(|| format!("recipe `{recipe_name}` not found in workflow"))?;
+
+    // Find the recipe proposal to get dependencies
+    let recipe_proposal = response
+      .recipes
+      .iter()
+      .find(|r| r.name == *recipe_name)
+      .ok_or_else(|| format!("recipe proposal for `{recipe_name}` not found"))?;
+
+    proposed = insert_recipe_grouped(
+      &proposed,
+      recipe,
+      context,
+      &recipe_proposal.dependencies,
+      recipe_name,
+    );
+  }
+
+  bounded_file::ensure_text_limit(&proposed, "proposed justfile", max_editable_file_bytes())?;
+  validate_justfile(just_binary, source, &proposed)?;
+
+  // Check risk for all recipes
+  let mut all_risks = Vec::new();
+  for recipe in &response.recipes {
+    let risks = RiskFinding::scan_lines(&recipe.body);
+    all_risks.extend(risks);
+  }
+  let risk = RiskLevel::highest(&all_risks);
+  if risk == RiskLevel::Blocked {
+    return Err("generated workflow has blocked risk and will not be written".into());
+  }
+
+  println!("{}", response.summary);
+  println!();
+  println!("Workflow request: {request}");
+  println!(
+    "Recipes: {}",
+    response
+      .recipes
+      .iter()
+      .map(|r| r.name.as_str())
+      .collect::<Vec<_>>()
+      .join(", ")
+  );
+  println!("Execution order: {}", response.execution_order.join(" -> "));
+
+  print_section("Rationale", &response.rationale);
+
+  if !all_risks.is_empty() {
+    println!();
+    println!("Risk findings:");
+    for finding in &all_risks {
+      println!("  - {}: `{}`", finding.reason, finding.line);
+    }
+  }
+
+  println!();
+  println!("{}", unified_diff(source, &original, &proposed));
+
+  if write {
+    application::patches::apply_reviewed_change(source, &original, &proposed)?;
+    println!("Wrote {}", source.display());
+  } else {
+    println!("Dry run only. Re-run with --write to apply this workflow.");
+  }
+
+  Ok(())
+}
+
+fn validate_workflow_recipe(
+  context: &ProjectContext,
+  proposal: &RecipeProposal,
+  all_recipes: &[RecipeProposal],
+) -> Result<(), Box<dyn Error>> {
+  if proposal.name.is_empty() {
+    return Err("generated recipe name is empty".into());
+  }
+
+  if proposal.body.is_empty() {
+    return Err("generated recipe body is empty".into());
+  }
+
+  if !proposal
+    .name
+    .chars()
+    .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+  {
+    return Err(
+      format!(
+        "recipe name `{}` contains unsupported characters",
+        proposal.name
+      )
+      .into(),
+    );
+  }
+
+  // Check for duplicate names within the workflow
+  let name_count = all_recipes
+    .iter()
+    .filter(|r| r.name == proposal.name)
+    .count();
+  if name_count > 1 {
+    return Err(format!("duplicate recipe name `{}` in workflow", proposal.name).into());
+  }
+
+  // Check if recipe already exists in project (but allow if it's being replaced by this workflow)
+  if context.has_recipe(&proposal.name) {
+    // Check if this recipe is being replaced by another recipe in the workflow
+    let is_replaced = all_recipes
+      .iter()
+      .any(|r| r.name == proposal.name && r.body != proposal.body);
+    if !is_replaced {
+      return Err(format!("recipe `{}` already exists", proposal.name).into());
+    }
+  }
+
+  for dependency in &proposal.dependencies {
+    // Check if dependency exists in project or in this workflow
+    let in_workflow = all_recipes.iter().any(|r| r.name == *dependency);
+    if !context.has_recipe(dependency) && !in_workflow {
+      return Err(format!("dependency recipe `{dependency}` does not exist").into());
+    }
+  }
+
+  Ok(())
+}
+
+pub fn validate_fix_proposal(
+  context: &ProjectContext,
+  proposal: &FixProposal,
   original_recipe_name: &str,
 ) -> Result<(), Box<dyn Error>> {
   if proposal.name.is_empty() {
@@ -171,7 +332,7 @@ fn validate_fix_proposal(
   Ok(())
 }
 
-pub fn render_fix_recipe(proposal: &AiFixProposal) -> String {
+pub fn render_fix_recipe(proposal: &FixProposal) -> String {
   let mut rendered = String::new();
 
   if let Some(doc) = &proposal.doc {
@@ -462,4 +623,311 @@ pub fn unified_diff(path: &Path, original: &str, proposed: &str) -> String {
   }
 
   rendered
+}
+
+/// Handle template proposal - stores the template for later instantiation
+pub fn handle_template(
+  context: &ProjectContext,
+  request: &str,
+  response: TemplateResponse,
+) -> Result<(), Box<dyn Error>> {
+  let source = context
+    .root_source()
+    .ok_or("project context does not contain a root justfile source")?;
+  let _original = bounded_file::read_utf8(source, max_editable_file_bytes())?;
+
+  // Templates are stored as comments in the justfile for now
+  // In the future, we could store them in a separate .just-ai-templates file
+  let template_name = &response.template.name;
+  let _template_json = serde_json::to_string_pretty(&response.template)?;
+
+  println!("{}", response.summary);
+  println!();
+  println!("Template request: {request}");
+  println!("Template name: {template_name}");
+  println!("Category: {}", response.template.category);
+  println!("Parameters:");
+  for param in &response.template.parameters {
+    let req = if param.required { " (required)" } else { "" };
+    let def = param.default.as_deref().unwrap_or("none");
+    println!(
+      "  - {}: {}{} [default: {def}]",
+      param.name, param.description, req
+    );
+  }
+
+  print_section("Rationale", &[format!("Template created for: {request}")]);
+
+  println!();
+  println!("Template body:");
+  for line in &response.template.body {
+    println!("  {line}");
+  }
+
+  println!();
+  println!(
+    "To instantiate this template, run: just-ai instantiate-template {template_name} <param=value>..."
+  );
+
+  Ok(())
+}
+
+/// Handle template instantiation - creates a recipe from a template with provided values
+pub fn handle_instantiate_template(
+  just_binary: &Path,
+  context: &ProjectContext,
+  template: &TemplateProposal,
+  values: &std::collections::HashMap<String, String>,
+  write: bool,
+) -> Result<(), Box<dyn Error>> {
+  // Substitute template parameters in the body
+  let mut recipe_body = Vec::new();
+  for line in &template.body {
+    let mut substituted = line.clone();
+    for (key, value) in values {
+      substituted = substituted.replace(&format!("{{{{{key}}}}}"), value);
+    }
+    recipe_body.push(substituted);
+  }
+
+  // Build the recipe proposal from the template
+  let recipe = RecipeProposal {
+    name: template.name.clone(),
+    doc: Some(template.description.clone()),
+    parameters: template
+      .parameters
+      .iter()
+      .map(|p| RecipeParameterProposal {
+        name: p.name.clone(),
+        default: p.default.clone(),
+      })
+      .collect(),
+    dependencies: vec![],
+    body: recipe_body,
+  };
+
+  validate_proposal(context, &recipe)?;
+
+  let source = context
+    .root_source()
+    .ok_or("project context does not contain a root justfile source")?;
+  let original = bounded_file::read_utf8(source, max_editable_file_bytes())?;
+  let rendered = render_recipe(&recipe);
+  let proposed = insert_recipe_grouped(
+    &original,
+    &rendered,
+    context,
+    &recipe.dependencies,
+    &recipe.name,
+  );
+  bounded_file::ensure_text_limit(&proposed, "proposed justfile", max_editable_file_bytes())?;
+  validate_justfile(just_binary, source, &proposed)?;
+
+  let risks = RiskFinding::scan_lines(&recipe.body);
+  let risk = RiskLevel::highest(&risks);
+  if risk == RiskLevel::Blocked {
+    return Err("instantiated template has blocked risk and will not be written".into());
+  }
+
+  println!("Template instantiated: {}", template.name);
+  println!();
+  println!("Recipe: {} [{}]", recipe.name, risk);
+
+  println!();
+  println!("{}", unified_diff(source, &original, &proposed));
+
+  if write {
+    application::patches::apply_reviewed_change(source, &original, &proposed)?;
+    println!("Wrote {}", source.display());
+  } else {
+    println!("Dry run only. Re-run with --write to apply this recipe.");
+  }
+
+  Ok(())
+}
+
+/// Handle compose workflow proposal - validates and inserts/modifies recipes based on composition
+pub fn handle_compose_workflow(
+  just_binary: &Path,
+  context: &ProjectContext,
+  request: &str,
+  response: ComposeWorkflowResponse,
+  write: bool,
+) -> Result<(), Box<dyn Error>> {
+  // Validate all recipes in the workflow
+  let existing_recipe_names: std::collections::HashSet<_> =
+    context.recipes.iter().map(|r| r.namepath.clone()).collect();
+
+  for recipe in &response.recipes {
+    if recipe.name.is_empty() {
+      return Err("generated recipe name is empty".into());
+    }
+
+    if recipe.body.is_empty() {
+      return Err("generated recipe body is empty".into());
+    }
+
+    if !recipe
+      .name
+      .chars()
+      .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+    {
+      return Err(
+        format!(
+          "recipe name `{}` contains unsupported characters",
+          recipe.name
+        )
+        .into(),
+      );
+    }
+
+    // Check source type matches reality
+    let exists = existing_recipe_names.contains(&recipe.name);
+    match recipe.source.as_str() {
+      "existing" => {
+        if !exists {
+          return Err(
+            format!(
+              "recipe `{}` marked as existing but not found in project",
+              recipe.name
+            )
+            .into(),
+          );
+        }
+      }
+      "modified" => {
+        if !exists {
+          return Err(
+            format!(
+              "recipe `{}` marked as modified but not found in project",
+              recipe.name
+            )
+            .into(),
+          );
+        }
+      }
+      "new" => {
+        if exists {
+          return Err(
+            format!(
+              "recipe `{}` marked as new but already exists in project",
+              recipe.name
+            )
+            .into(),
+          );
+        }
+      }
+      _ => {
+        return Err(
+          format!(
+            "invalid source type `{}`, must be existing|new|modified",
+            recipe.source
+          )
+          .into(),
+        );
+      }
+    }
+
+    for dependency in &recipe.dependencies {
+      let in_workflow = response.recipes.iter().any(|r| r.name == *dependency);
+      if !context.has_recipe(dependency) && !in_workflow {
+        return Err(format!("dependency recipe `{dependency}` does not exist").into());
+      }
+    }
+  }
+
+  let source = context
+    .root_source()
+    .ok_or("project context does not contain a root justfile source")?;
+  let original = bounded_file::read_utf8(source, max_editable_file_bytes())?;
+
+  // Build a map of recipe name to rendered recipe
+  let mut rendered_recipes: HashMap<String, String> = HashMap::new();
+  for recipe in &response.recipes {
+    let proposal = RecipeProposal {
+      name: recipe.name.clone(),
+      doc: recipe.doc.clone(),
+      parameters: recipe.parameters.clone(),
+      dependencies: recipe.dependencies.clone(),
+      body: recipe.body.clone(),
+    };
+    rendered_recipes.insert(recipe.name.clone(), render_recipe(&proposal));
+  }
+
+  // Apply recipes in execution order
+  let mut proposed = original.clone();
+  for recipe_name in &response.execution_order {
+    let recipe = rendered_recipes
+      .get(recipe_name)
+      .ok_or_else(|| format!("recipe `{recipe_name}` not found in workflow"))?;
+
+    let recipe_proposal = response
+      .recipes
+      .iter()
+      .find(|r| r.name == *recipe_name)
+      .ok_or_else(|| format!("recipe proposal for `{recipe_name}` not found"))?;
+
+    if recipe_proposal.source == "existing" {
+      // Skip existing recipes - they're already in the justfile
+      continue;
+    }
+
+    proposed = insert_recipe_grouped(
+      &proposed,
+      recipe,
+      context,
+      &recipe_proposal.dependencies,
+      recipe_name,
+    );
+  }
+
+  bounded_file::ensure_text_limit(&proposed, "proposed justfile", max_editable_file_bytes())?;
+  validate_justfile(just_binary, source, &proposed)?;
+
+  // Check risk for all recipes
+  let mut all_risks = Vec::new();
+  for recipe in &response.recipes {
+    let risks = RiskFinding::scan_lines(&recipe.body);
+    all_risks.extend(risks);
+  }
+  let risk = RiskLevel::highest(&all_risks);
+  if risk == RiskLevel::Blocked {
+    return Err("composed workflow has blocked risk and will not be written".into());
+  }
+
+  println!("{}", response.summary);
+  println!();
+  println!("Workflow request: {request}");
+  println!(
+    "Recipes: {}",
+    response
+      .recipes
+      .iter()
+      .map(|r| format!("{} ({})", r.name, r.source))
+      .collect::<Vec<_>>()
+      .join(", ")
+  );
+  println!("Execution order: {}", response.execution_order.join(" -> "));
+
+  print_section("Rationale", &response.rationale);
+
+  if !all_risks.is_empty() {
+    println!();
+    println!("Risk findings:");
+    for finding in &all_risks {
+      println!("  - {}: `{}`", finding.reason, finding.line);
+    }
+  }
+
+  println!();
+  println!("{}", unified_diff(source, &original, &proposed));
+
+  if write {
+    application::patches::apply_reviewed_change(source, &original, &proposed)?;
+    println!("Wrote {}", source.display());
+  } else {
+    println!("Dry run only. Re-run with --write to apply this workflow.");
+  }
+
+  Ok(())
 }

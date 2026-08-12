@@ -129,6 +129,22 @@ export class JustAiClient {
     return this.runJustAiCommand('fix', recipe, write ? '--write' : '');
   }
 
+  async workflow(request: string, write: boolean = false): Promise<string> {
+    return this.runJustAiCommand('workflow', request, write ? '--write' : '');
+  }
+
+  async fixBatch(write: boolean = false): Promise<string> {
+    return this.runJustAiCommand('fix', '--all-failed', write ? '--write' : '');
+  }
+
+  async explainBatch(module?: string): Promise<string> {
+    const args = ['explain', '--all'];
+    if (module) {
+      args.push('--module', module);
+    }
+    return this.runJustAiCommandWithArgs(args);
+  }
+
   async exportContext(pretty: boolean = false): Promise<string> {
     return this.runJustAiCommand('export-context', pretty ? '--pretty' : '');
   }

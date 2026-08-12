@@ -7,7 +7,10 @@ use {
     domain::risk::{RiskFinding, RiskLevel},
     inspection::load_context,
     prompts,
-    proposal::{handle_add, handle_fix},
+    proposal::{
+      handle_add, handle_compose_workflow, handle_fix, handle_instantiate_template,
+      handle_template, handle_workflow, validate_fix_proposal,
+    },
     provider,
   },
   clap::{Parser, Subcommand},
@@ -41,10 +44,12 @@ struct Cli {
 enum Commands {
   #[command(about = "Ask an AI provider to suggest useful missing recipes")]
   Suggest,
-  #[command(about = "Ask an AI provider to explain a recipe")]
+  #[command(about = "Ask an AI provider to explain a recipe, or all recipes with --all")]
   Explain {
-    #[arg(help = "Recipe name or namepath to explain")]
-    recipe: String,
+    #[arg(help = "Recipe name or namepath to explain (optional with --all)")]
+    recipe: Option<String>,
+    #[arg(long, help = "Explain all recipes in the project")]
+    all: bool,
   },
   #[command(about = "Ask an AI provider to propose a new recipe")]
   Add {
@@ -53,11 +58,43 @@ enum Commands {
     #[arg(long, help = "Apply the generated recipe after validation")]
     write: bool,
   },
-  #[command(about = "Ask an AI provider to propose a fix for a failed recipe")]
+  #[command(
+    about = "Ask an AI provider to propose a fix for a failed recipe, or all failed with --all-failed"
+  )]
   Fix {
-    #[arg(help = "Recipe name or namepath to fix")]
-    recipe: String,
+    #[arg(help = "Recipe name or namepath to fix (optional with --all-failed)")]
+    recipe: Option<String>,
     #[arg(long, help = "Apply the generated fix after validation")]
+    write: bool,
+    #[arg(long, help = "Fix all recipes that have failed runs in history")]
+    all_failed: bool,
+  },
+  #[command(about = "Ask an AI provider to propose a multi-recipe workflow")]
+  Workflow {
+    #[arg(help = "Natural-language workflow description")]
+    request: String,
+    #[arg(long, help = "Apply the generated workflow after validation")]
+    write: bool,
+  },
+  #[command(about = "Ask an AI provider to create a reusable recipe template")]
+  Template {
+    #[arg(help = "Natural-language template description")]
+    request: String,
+  },
+  #[command(about = "Instantiate a template with provided parameter values")]
+  InstantiateTemplate {
+    #[arg(help = "Template name to instantiate")]
+    template: String,
+    #[arg(help = "Parameter values as KEY=VALUE pairs")]
+    values: Vec<String>,
+    #[arg(long, help = "Apply the instantiated recipe after validation")]
+    write: bool,
+  },
+  #[command(about = "Compose a workflow by reusing and adapting existing recipes")]
+  ComposeWorkflow {
+    #[arg(help = "Natural-language workflow description")]
+    request: String,
+    #[arg(long, help = "Apply the generated workflow after validation")]
     write: bool,
   },
   #[command(about = "Export a compact machine-readable context for AI tools")]
@@ -170,15 +207,34 @@ fn try_main() -> Result<(), Box<dyn Error>> {
       )?;
       print_suggestions(&response);
     }
-    Commands::Explain { recipe } => {
-      let selected = context
-        .find_recipe(&recipe)
-        .ok_or_else(|| format!("recipe `{recipe}` not found"))?;
-      let response = AiClient::from_env()?.complete_json::<ExplainResponse>(
-        "Explain a just recipe using the supplied project context.",
-        &explain_prompt(&context, selected)?,
-      )?;
-      print_explanation(&response);
+    Commands::Explain { recipe, all } => {
+      if all {
+        // Batch explain all recipes
+        let recipes = &context.recipes;
+        if recipes.is_empty() {
+          println!("No recipes to explain.");
+        } else {
+          for recipe_ctx in recipes {
+            let response = AiClient::from_env()?.complete_json::<ExplainResponse>(
+              "Explain a just recipe using the supplied project context.",
+              &explain_prompt(&context, recipe_ctx)?,
+            )?;
+            println!();
+            println!("=== {} ===", recipe_ctx.namepath);
+            print_explanation(&response);
+          }
+        }
+      } else {
+        let recipe = recipe.ok_or("recipe name required (or use --all)")?;
+        let selected = context
+          .find_recipe(&recipe)
+          .ok_or_else(|| format!("recipe `{recipe}` not found"))?;
+        let response = AiClient::from_env()?.complete_json::<ExplainResponse>(
+          "Explain a just recipe using the supplied project context.",
+          &explain_prompt(&context, selected)?,
+        )?;
+        print_explanation(&response);
+      }
     }
     Commands::Add { request, write } => {
       let response = AiClient::from_env()?.complete_json::<AddRecipeResponse>(
@@ -187,21 +243,194 @@ fn try_main() -> Result<(), Box<dyn Error>> {
       )?;
       handle_add(&cli.just_binary, &context, &request, response, write)?;
     }
-    Commands::Fix { recipe, write } => {
-      use crate::config::Config;
-      use application::history::create_history;
-      let project_root = env::current_dir()?;
-      let config = Config::load(&project_root)?;
-      let history = create_history(config.history)?;
-      // Query for failed runs of this recipe
-      let failed_runs = history.query(Some(&recipe), Some(false), 10)?;
-      let history_json = serde_json::to_string_pretty(&failed_runs)?;
-      let context_json = serde_json::to_string_pretty(&context)?;
-      let response = AiClient::from_env()?.complete_json::<FixResponse>(
-        "Generate a fix proposal for a failing just recipe as strict JSON.",
-        &prompts::fix(&context_json, &recipe, &history_json),
+    Commands::Fix {
+      recipe,
+      write,
+      all_failed,
+    } => {
+      if all_failed {
+        // Batch fix all failed recipes
+        use crate::config::Config;
+        use application::history::create_history;
+        let project_root = env::current_dir()?;
+        let config = Config::load(&project_root)?;
+        let history = create_history(config.history)?;
+        // Query for ALL failed runs
+        let failed_runs = history.query(None, Some(false), 100)?;
+
+        // Group by recipe name to get unique failed recipes
+        let mut failed_recipes: Vec<&String> = failed_runs
+          .iter()
+          .map(|r| &r.recipe)
+          .collect::<std::collections::HashSet<_>>()
+          .into_iter()
+          .collect();
+        failed_recipes.sort();
+
+        if failed_recipes.is_empty() {
+          println!("No failed recipes found in history.");
+          return Ok(());
+        }
+
+        println!("Found {} unique failed recipes:", failed_recipes.len());
+        for r in &failed_recipes {
+          println!("  - {}", r);
+        }
+        println!();
+
+        let source = context
+          .root_source()
+          .ok_or("project context does not contain a root justfile source")?;
+        let original =
+          crate::bounded_file::read_utf8(source, crate::bounded_file::max_editable_file_bytes())?;
+
+        // We'll collect all fixes and apply them at once
+        let mut proposed = original.clone();
+        let mut any_written = false;
+
+        for recipe_name in &failed_recipes {
+          // Get history for this specific recipe
+          let recipe_history = history.query(Some(recipe_name), Some(false), 10)?;
+          let history_json = serde_json::to_string_pretty(&recipe_history)?;
+          let context_json = serde_json::to_string_pretty(&context)?;
+
+          let response = AiClient::from_env()?.complete_json::<FixResponse>(
+            "Generate a fix proposal for a failing just recipe as strict JSON.",
+            &prompts::fix(&context_json, recipe_name, &history_json),
+          )?;
+
+          // Apply the fix to the proposed content
+          validate_fix_proposal(&context, &response.recipe, recipe_name)?;
+
+          let recipe_rendered = crate::proposal::render_fix_recipe(&response.recipe);
+          proposed = crate::proposal::replace_recipe(&proposed, recipe_name, &recipe_rendered);
+
+          crate::bounded_file::ensure_text_limit(
+            &proposed,
+            "proposed justfile",
+            crate::bounded_file::max_editable_file_bytes(),
+          )?;
+
+          let risks = crate::domain::risk::RiskFinding::scan_lines(&response.recipe.body);
+          let risk = crate::domain::risk::RiskLevel::highest(&risks);
+          if risk == crate::domain::risk::RiskLevel::Blocked {
+            return Err(
+              format!(
+                "generated fix for `{}` has blocked risk and will not be written",
+                recipe_name
+              )
+              .into(),
+            );
+          }
+
+          println!("Fixed: {} [{}]", response.recipe.name, risk);
+          print_section("Rationale", &response.rationale);
+          println!();
+        }
+
+        // Final validation
+        crate::proposal::validate_justfile(&cli.just_binary, source, &proposed)?;
+
+        println!(
+          "{}",
+          crate::proposal::unified_diff(source, &original, &proposed)
+        );
+
+        if write {
+          crate::application::patches::apply_reviewed_change(source, &original, &proposed)?;
+          println!("Wrote {}", source.display());
+          any_written = true;
+        } else {
+          println!("Dry run only. Re-run with --write to apply all fixes.");
+        }
+
+        if !any_written {
+          println!("No changes applied (dry run).");
+        }
+      } else {
+        let recipe = recipe.ok_or("recipe name required (or use --all-failed)")?;
+        use crate::config::Config;
+        use application::history::create_history;
+        let project_root = env::current_dir()?;
+        let config = Config::load(&project_root)?;
+        let history = create_history(config.history)?;
+        // Query for failed runs of this recipe
+        let failed_runs = history.query(Some(&recipe), Some(false), 10)?;
+        let history_json = serde_json::to_string_pretty(&failed_runs)?;
+        let context_json = serde_json::to_string_pretty(&context)?;
+        let response = AiClient::from_env()?.complete_json::<FixResponse>(
+          "Generate a fix proposal for a failing just recipe as strict JSON.",
+          &prompts::fix(&context_json, &recipe, &history_json),
+        )?;
+        handle_fix(&cli.just_binary, &context, &recipe, response, write)?;
+      }
+    }
+    Commands::Workflow { request, write } => {
+      let response = AiClient::from_env()?.complete_json::<WorkflowResponse>(
+        "Generate a multi-recipe workflow as strict JSON.",
+        &prompts::workflow(&serde_json::to_string_pretty(&context)?, &request),
       )?;
-      handle_fix(&cli.just_binary, &context, &recipe, response, write)?;
+      handle_workflow(&cli.just_binary, &context, &request, response, write)?;
+    }
+    Commands::ComposeWorkflow { request, write } => {
+      let response = AiClient::from_env()?.complete_json::<ComposeWorkflowResponse>(
+        "Compose a multi-recipe workflow by reusing existing recipes as strict JSON.",
+        &prompts::compose_workflow(&serde_json::to_string_pretty(&context)?, &request),
+      )?;
+      handle_compose_workflow(&cli.just_binary, &context, &request, response, write)?;
+    }
+    Commands::Template { request } => {
+      let response = AiClient::from_env()?.complete_json::<TemplateResponse>(
+        "Generate a reusable just recipe template as strict JSON.",
+        &prompts::template(&serde_json::to_string_pretty(&context)?, &request),
+      )?;
+      handle_template(&context, &request, response)?;
+    }
+    Commands::InstantiateTemplate {
+      template,
+      values,
+      write,
+    } => {
+      // Get the template from the user (in practice this would be stored)
+      // For now, we ask AI to generate the template and then instantiate it
+      let template_prompt = format!(
+        "Find or create a template named '{}' for this project.",
+        template
+      );
+      let template_response = AiClient::from_env()?.complete_json::<TemplateResponse>(
+        "Generate a reusable just recipe template as strict JSON.",
+        &prompts::template(&serde_json::to_string_pretty(&context)?, &template_prompt),
+      )?;
+
+      // Parse the provided values
+      let mut values_map = std::collections::HashMap::new();
+      for value in &values {
+        let parts: Vec<&str> = value.splitn(2, '=').collect();
+        if parts.len() != 2 {
+          return Err(format!("invalid parameter format: '{}', expected KEY=VALUE", value).into());
+        }
+        values_map.insert(parts[0].to_string(), parts[1].to_string());
+      }
+
+      // Check required parameters
+      for param in &template_response.template.parameters {
+        if param.required && !values_map.contains_key(&param.name) {
+          if let Some(default) = &param.default {
+            values_map.insert(param.name.clone(), default.clone());
+          } else {
+            return Err(format!("required parameter '{}' not provided", param.name).into());
+          }
+        }
+      }
+
+      // Instantiate the template
+      handle_instantiate_template(
+        &cli.just_binary,
+        &context,
+        &template_response.template,
+        &values_map,
+        write,
+      )?;
     }
     Commands::ExportContext { pretty } => {
       if pretty {

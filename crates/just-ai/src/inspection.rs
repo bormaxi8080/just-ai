@@ -102,7 +102,7 @@ struct DumpParameter {
   default: Option<Value>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct ProjectContext {
   #[serde(default)]
   pub facts: application::project_context::ProjectFacts,
@@ -179,14 +179,14 @@ impl ProjectContext {
     }
   }
 
-  pub(crate) fn find_recipe(&self, needle: &str) -> Option<&ContextRecipe> {
+  pub fn find_recipe(&self, needle: &str) -> Option<&ContextRecipe> {
     self
       .recipes
       .iter()
       .find(|recipe| recipe.namepath == needle || recipe.name == needle)
   }
 
-  pub(crate) fn has_recipe(&self, name: &str) -> bool {
+  pub fn has_recipe(&self, name: &str) -> bool {
     self
       .recipes
       .iter()
@@ -236,7 +236,8 @@ impl ProjectContext {
       let prefix = &recipe_name[..=prefix_end];
       let mut candidates = Vec::new();
       for recipe in &self.recipes {
-        if recipe.name.starts_with(prefix) && recipe.name != recipe_name
+        if recipe.name.starts_with(prefix)
+          && recipe.name != recipe_name
           && let Some(source) = &self.modules.first().map(|m| m.source.clone())
           && let Ok(content) = std::fs::read_to_string(source)
         {
@@ -276,7 +277,8 @@ impl ProjectContext {
       if recipe_name.starts_with(prefix) {
         let mut candidates = Vec::new();
         for recipe in &self.recipes {
-          if recipe.name.starts_with(prefix) && recipe.name != recipe_name
+          if recipe.name.starts_with(prefix)
+            && recipe.name != recipe_name
             && let Some(source) = &self.modules.first().map(|m| m.source.clone())
             && let Ok(content) = std::fs::read_to_string(source)
           {
@@ -311,14 +313,14 @@ impl ProjectContext {
   }
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct ContextModule {
   pub module_path: String,
   pub recipe_count: usize,
   pub source: PathBuf,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct ContextRecipe {
   pub body: Vec<String>,
   pub dependencies: Vec<String>,
@@ -334,7 +336,7 @@ pub struct ContextRecipe {
   pub shebang: bool,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct ContextParameter {
   pub default: Option<String>,
   pub kind: String,
