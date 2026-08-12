@@ -437,44 +437,59 @@ impl ProjectContext {
   }
 
   /// Calculate dependency depth for each recipe (longest path from a root).
+  /// Roots (recipes with no dependencies) have depth 0.
   pub fn calculate_dependency_depths(&self) -> HashMap<String, usize> {
     let mut graph: HashMap<String, Vec<String>> = HashMap::new();
+    let mut reverse_graph: HashMap<String, Vec<String>> = HashMap::new();
+
     for recipe in &self.recipes {
       graph.insert(recipe.namepath.clone(), recipe.dependencies.clone());
+      // Build reverse graph for finding roots
+      for dep in &recipe.dependencies {
+        reverse_graph
+          .entry(dep.clone())
+          .or_default()
+          .push(recipe.namepath.clone());
+      }
+      // Ensure all nodes are in reverse_graph
+      reverse_graph.entry(recipe.namepath.clone()).or_default();
     }
 
     let mut depths = HashMap::new();
-    let mut memo: HashMap<String, usize> = HashMap::new();
 
-    fn depth(
-      node: &str,
-      graph: &HashMap<String, Vec<String>>,
-      memo: &mut HashMap<String, usize>,
-    ) -> usize {
-      if let Some(&d) = memo.get(node) {
-        return d;
-      }
-      let d = graph
-        .get(node)
-        .map(|deps| {
-          deps
-            .iter()
-            .map(|d| depth(d, graph, memo))
-            .max()
-            .unwrap_or(0)
-            + 1
-        })
-        .unwrap_or(0);
-      memo.insert(node.to_owned(), d);
-      d
+    // Find roots (nodes with no outgoing edges = no dependencies)
+    let roots: Vec<&String> = graph
+      .iter()
+      .filter(|(_, deps)| deps.is_empty())
+      .map(|(name, _)| name)
+      .collect();
+
+    // BFS from roots to compute depths
+    use std::collections::VecDeque;
+    let mut queue = VecDeque::new();
+
+    // Initialize roots with depth 0
+    for root in roots {
+      depths.insert(root.clone(), 0);
+      queue.push_back((root.clone(), 0));
     }
 
-    let graph_owned = graph;
+    while let Some((node, depth)) = queue.pop_front() {
+      if let Some(dependents) = reverse_graph.get(&node) {
+        for dependent in dependents {
+          let new_depth = depth + 1;
+          // Only update if this path gives a greater depth
+          if depths.get(dependent).is_none_or(|&d| new_depth > d) {
+            depths.insert(dependent.clone(), new_depth);
+            queue.push_back((dependent.clone(), new_depth));
+          }
+        }
+      }
+    }
+
+    // Ensure all recipes have an entry (isolated nodes not reachable from roots)
     for recipe in &self.recipes {
-      depths.insert(
-        recipe.namepath.clone(),
-        depth(&recipe.namepath, &graph_owned, &mut memo),
-      );
+      depths.entry(recipe.namepath.clone()).or_insert(0);
     }
 
     depths
@@ -669,5 +684,100 @@ mod tests {
 
     #[cfg(windows)]
     assert!(context.root_source().unwrap().is_absolute());
+  }
+
+  #[test]
+  fn parses_versioned_migrate_fixture() {
+    let dump: DumpModule =
+      serde_json::from_str(include_str!("../tests/fixtures/just-dump-migrate.json")).unwrap();
+    let context = ProjectContext::from_dump(dump);
+
+    assert_eq!(context.recipes.len(), 7);
+    assert_eq!(context.modules.len(), 1);
+
+    // test-unit and test-integration are unreferenced (nothing depends on them)
+    // but build depends on test-unit, so test-unit is referenced
+    let unreferenced = context.find_unreferenced_recipes();
+    assert_eq!(unreferenced.len(), 4); // test-integration, fmt, clean, deploy are unreferenced
+    // build depends on test-unit, lint. deploy depends on build.
+    // So referenced: test-unit, lint, build
+    // Unreferenced: test-integration, fmt, clean, deploy (private recipes filtered out)
+    let unreferenced_names: Vec<_> = unreferenced.iter().map(|r| r.namepath.clone()).collect();
+    assert!(unreferenced_names.contains(&"test-integration".to_string()));
+    assert!(unreferenced_names.contains(&"fmt".to_string()));
+    assert!(unreferenced_names.contains(&"clean".to_string()));
+    assert!(unreferenced_names.contains(&"deploy".to_string()));
+    assert!(!unreferenced_names.contains(&"test-unit".to_string()));
+    assert!(!unreferenced_names.contains(&"lint".to_string()));
+    assert!(!unreferenced_names.contains(&"build".to_string()));
+
+    // Isolated recipes: no deps, no dependents
+    // test-integration, fmt, clean have no deps and no one depends on them
+    // deploy has a dependency on build, so it's NOT isolated
+    // test-unit has no deps but build depends on it
+    // lint has no deps but build depends on it
+    let isolated = context.find_isolated_recipes();
+    let isolated_names: Vec<_> = isolated.iter().map(|r| r.namepath.clone()).collect();
+    assert!(isolated_names.contains(&"test-integration".to_string()));
+    assert!(isolated_names.contains(&"fmt".to_string()));
+    assert!(isolated_names.contains(&"clean".to_string()));
+    assert!(!isolated_names.contains(&"deploy".to_string())); // deploy depends on build
+    assert_eq!(isolated.len(), 3);
+
+    // No cycles
+    let cycles = context.detect_cycles();
+    assert!(cycles.is_empty());
+
+    // Dependency depths: build depends on test-unit, lint (depth 1 each). deploy depends on build (depth 2).
+    // test-unit: 0, test-integration: 0, lint: 0, fmt: 0, clean: 0, build: 1, deploy: 2
+    let depths = context.calculate_dependency_depths();
+    assert_eq!(depths.get("test-unit").copied(), Some(0));
+    assert_eq!(depths.get("test-integration").copied(), Some(0));
+    assert_eq!(depths.get("lint").copied(), Some(0));
+    assert_eq!(depths.get("fmt").copied(), Some(0));
+    assert_eq!(depths.get("clean").copied(), Some(0));
+    assert_eq!(depths.get("build").copied(), Some(1));
+    assert_eq!(depths.get("deploy").copied(), Some(2));
+  }
+
+  #[test]
+  fn detects_cycles() {
+    let dump: DumpModule =
+      serde_json::from_str(include_str!("../tests/fixtures/just-dump-cycle.json")).unwrap();
+    let context = ProjectContext::from_dump(dump);
+
+    let cycles = context.detect_cycles();
+    assert_eq!(cycles.len(), 1);
+    assert_eq!(cycles[0].len(), 3);
+    // Cycle should be normalized to start with lexicographically smallest
+    assert!(cycles[0].contains(&"a".to_string()));
+    assert!(cycles[0].contains(&"b".to_string()));
+    assert!(cycles[0].contains(&"c".to_string()));
+  }
+
+  #[test]
+  fn finds_similar_recipes() {
+    let dump: DumpModule =
+      serde_json::from_str(include_str!("../tests/fixtures/just-dump-similar.json")).unwrap();
+    let context = ProjectContext::from_dump(dump);
+
+    // test-unit and test-unit-alt have identical bodies (100% similar)
+    let similar = context.find_similar_recipes(0.8);
+    assert!(!similar.is_empty());
+
+    let test_unit_pair = similar.iter().find(|(a, b, _)| {
+      (a == "test-unit" && b == "test-unit-alt") || (a == "test-unit-alt" && b == "test-unit")
+    });
+    assert!(test_unit_pair.is_some());
+    assert_eq!(test_unit_pair.unwrap().2, 1.0); // identical = 100% similarity
+
+    // build-release and build-debug are different (cargo build --release vs cargo build)
+    let build_pair = similar.iter().find(|(a, b, _)| {
+      (a == "build-release" && b == "build-debug") || (a == "build-debug" && b == "build-release")
+    });
+    // They might have some similarity but less than 0.8
+    if let Some(pair) = build_pair {
+      assert!(pair.2 < 0.8);
+    }
   }
 }

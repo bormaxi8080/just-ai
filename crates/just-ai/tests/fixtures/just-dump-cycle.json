@@ -1,0 +1,40 @@
+{
+  "source": "/workspace/justfile",
+  "warnings": [],
+  "recipes": {
+    "a": {
+      "name": "a",
+      "namepath": "a",
+      "doc": "Recipe A",
+      "body": [["echo a"]],
+      "dependencies": [{"recipe": "b"}],
+      "parameters": [],
+      "private": false,
+      "quiet": false,
+      "shebang": false
+    },
+    "b": {
+      "name": "b",
+      "namepath": "b",
+      "doc": "Recipe B",
+      "body": [["echo b"]],
+      "dependencies": [{"recipe": "c"}],
+      "parameters": [],
+      "private": false,
+      "quiet": false,
+      "shebang": false
+    },
+    "c": {
+      "name": "c",
+      "namepath": "c",
+      "doc": "Recipe C",
+      "body": [["echo c"]],
+      "dependencies": [{"recipe": "a"}],
+      "parameters": [],
+      "private": false,
+      "quiet": false,
+      "shebang": false
+    }
+  },
+  "modules": {}
+}

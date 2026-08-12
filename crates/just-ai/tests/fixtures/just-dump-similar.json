@@ -1,0 +1,62 @@
+{
+  "source": "/workspace/justfile",
+  "warnings": [],
+  "recipes": {
+    "test-unit": {
+      "name": "test-unit",
+      "namepath": "test-unit",
+      "doc": "Run unit tests",
+      "body": [["cargo test --lib"]],
+      "dependencies": [],
+      "parameters": [],
+      "private": false,
+      "quiet": false,
+      "shebang": false
+    },
+    "test-unit-alt": {
+      "name": "test-unit-alt",
+      "namepath": "test-unit-alt",
+      "doc": "Run unit tests (alternative)",
+      "body": [["cargo test --lib"]],
+      "dependencies": [],
+      "parameters": [],
+      "private": false,
+      "quiet": false,
+      "shebang": false
+    },
+    "build-release": {
+      "name": "build-release",
+      "namepath": "build-release",
+      "doc": "Build for release",
+      "body": [["cargo build --release"]],
+      "dependencies": [],
+      "parameters": [],
+      "private": false,
+      "quiet": false,
+      "shebang": false
+    },
+    "build-debug": {
+      "name": "build-debug",
+      "namepath": "build-debug",
+      "doc": "Build for debug",
+      "body": [["cargo build"]],
+      "dependencies": [],
+      "parameters": [],
+      "private": false,
+      "quiet": false,
+      "shebang": false
+    },
+    "lint": {
+      "name": "lint",
+      "namepath": "lint",
+      "doc": "Run linter",
+      "body": [["cargo clippy"]],
+      "dependencies": [],
+      "parameters": [],
+      "private": false,
+      "quiet": false,
+      "shebang": false
+    }
+  },
+  "modules": {}
+}
