@@ -21,6 +21,7 @@ use just_ai::{
   bounded_file::{max_editable_file_bytes, read_utf8},
   cli::AiClient,
   config::{Config, HistoryConfig},
+  domain::risk::{RiskFinding, RiskLevel},
   inspection::{ContextRecipe, ProjectContext, inspect_project_at},
   prompts,
   proposal::{
@@ -1359,6 +1360,96 @@ async fn ai_migrate_deduplicate(
   }
 }
 
+// ========================================================================
+// Export Context and Doctor Commands
+// ========================================================================
+
+#[derive(Serialize)]
+struct GuiExportContextResult {
+  success: bool,
+  context: serde_json::Value,
+}
+
+#[tauri::command]
+async fn ai_export_context(project_root: PathBuf) -> Result<GuiExportContextResult, String> {
+  if !project_root.is_dir() {
+    return Err(format!(
+      "project root is not a directory: {}",
+      project_root.display()
+    ));
+  }
+  let context =
+    inspect_project_at("just", project_root.clone()).map_err(|error| error.to_string())?;
+
+  Ok(GuiExportContextResult {
+    success: true,
+    context: serde_json::to_value(&context).map_err(|error| error.to_string())?,
+  })
+}
+
+#[derive(Serialize)]
+struct DoctorRecipeGui {
+  namepath: String,
+  risk: RiskLevel,
+  risks: Vec<RiskFinding>,
+}
+
+#[derive(Serialize)]
+struct GuiDoctorResult {
+  success: bool,
+  total_recipes: usize,
+  low: usize,
+  medium: usize,
+  high: usize,
+  blocked: usize,
+  highest_risk: RiskLevel,
+  recipes: Vec<DoctorRecipeGui>,
+}
+
+#[tauri::command]
+async fn ai_doctor(project_root: PathBuf) -> Result<GuiDoctorResult, String> {
+  if !project_root.is_dir() {
+    return Err(format!(
+      "project root is not a directory: {}",
+      project_root.display()
+    ));
+  }
+  let context =
+    inspect_project_at("just", project_root.clone()).map_err(|error| error.to_string())?;
+
+  let recipes = context
+    .recipes
+    .iter()
+    .map(|recipe| DoctorRecipeGui {
+      namepath: recipe.namepath.clone(),
+      risk: recipe.risk,
+      risks: recipe.risks.clone(),
+    })
+    .collect::<Vec<_>>();
+
+  let total_recipes = recipes.len();
+  let low = recipes.iter().filter(|r| r.risk == RiskLevel::Low).count();
+  let medium = recipes.iter().filter(|r| r.risk == RiskLevel::Medium).count();
+  let high = recipes.iter().filter(|r| r.risk == RiskLevel::High).count();
+  let blocked = recipes.iter().filter(|r| r.risk == RiskLevel::Blocked).count();
+  let highest_risk = recipes
+    .iter()
+    .map(|r| r.risk)
+    .max()
+    .unwrap_or(RiskLevel::Low);
+
+  Ok(GuiDoctorResult {
+    success: true,
+    total_recipes,
+    low,
+    medium,
+    high,
+    blocked,
+    highest_risk,
+    recipes,
+  })
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   tauri::Builder::default()
@@ -1382,6 +1473,8 @@ pub fn run() {
       ai_template,
       ai_instantiate_template,
       ai_compose_workflow,
+      ai_export_context,
+      ai_doctor,
     ])
     .run(tauri::generate_context!())
     .expect("failed to run just-ai desktop application");

@@ -297,6 +297,38 @@ export function aiComposeWorkflow(projectRoot: string, request: string, write: b
   return invoke("ai_compose_workflow", { projectRoot, request: { request, write } });
 }
 
+// Export Context types
+export interface ExportContextResult {
+  success: boolean;
+  context: ProjectContext;
+}
+
+export function aiExportContext(projectRoot: string): Promise<ExportContextResult> {
+  return invoke("ai_export_context", { projectRoot });
+}
+
+// Doctor types
+export interface DoctorRecipeGui {
+  namepath: string;
+  risk: RiskLevel;
+  risks: RiskFinding[];
+}
+
+export interface DoctorResult {
+  success: boolean;
+  total_recipes: number;
+  low: number;
+  medium: number;
+  high: number;
+  blocked: number;
+  highest_risk: RiskLevel;
+  recipes: DoctorRecipeGui[];
+}
+
+export function aiDoctor(projectRoot: string): Promise<DoctorResult> {
+  return invoke("ai_doctor", { projectRoot });
+}
+
 // Migrate types
 export interface MigrateAnalyzeResult {
   success: boolean;
