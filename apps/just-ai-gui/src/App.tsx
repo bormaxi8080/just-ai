@@ -13,6 +13,8 @@ import {
   aiComposeWorkflow,
   aiExportContext,
   aiDoctor,
+  aiConfigValidate,
+  aiConfigSchema,
   cancelRun,
   executeRun,
   inspectProject,
@@ -36,6 +38,8 @@ import {
   type AiComposeWorkflowResult,
   type ExportContextResult,
   type DoctorResult,
+  type ConfigValidationResult,
+  type ConfigSchemaResult,
   type TemplateParameterInfo,
 } from "./api";
 
@@ -85,6 +89,10 @@ export function App() {
   const [exportContextResult, setExportContextResult] = useState<ExportContextResult | null>(null);
   const [doctorLoading, setDoctorLoading] = useState(false);
   const [doctorResult, setDoctorResult] = useState<DoctorResult | null>(null);
+  const [configValidateLoading, setConfigValidateLoading] = useState(false);
+  const [configValidateResult, setConfigValidateResult] = useState<ConfigValidationResult | null>(null);
+  const [configSchemaLoading, setConfigSchemaLoading] = useState(false);
+  const [configSchemaResult, setConfigSchemaResult] = useState<ConfigSchemaResult | null>(null);
 
   const recipe = useMemo(
     () => project?.recipes.find((item) => item.namepath === selected) ?? null,
@@ -306,6 +314,37 @@ export function App() {
     }
   }
 
+  // Config handlers
+  async function handleConfigValidate() {
+    setError(null);
+    setConfigValidateLoading(true);
+    setConfigValidateResult(null);
+    try {
+      const result = await aiConfigValidate(root);
+      setConfigValidateResult(result);
+      setShowAiPanel(true);
+    } catch (reason) {
+      setError(String(reason));
+    } finally {
+      setConfigValidateLoading(false);
+    }
+  }
+
+  async function handleConfigSchema() {
+    setError(null);
+    setConfigSchemaLoading(true);
+    setConfigSchemaResult(null);
+    try {
+      const result = await aiConfigSchema();
+      setConfigSchemaResult(result);
+      setShowAiPanel(true);
+    } catch (reason) {
+      setError(String(reason));
+    } finally {
+      setConfigSchemaLoading(false);
+    }
+  }
+
   // Template handlers
   async function handleTemplate() {
     if (!templateRequest.trim()) return;
@@ -509,6 +548,12 @@ export function App() {
               <button onClick={handleDoctor} disabled={running || doctorLoading}>
                 {doctorLoading ? "Analyzing..." : "Doctor Dashboard"}
               </button>
+              <button onClick={handleConfigValidate} disabled={running || configValidateLoading}>
+                {configValidateLoading ? "Validating..." : "Validate Config"}
+              </button>
+              <button onClick={handleConfigSchema} disabled={running || configSchemaLoading}>
+                {configSchemaLoading ? "Loading..." : "Config Schema"}
+              </button>
             </div>
           </div>
 
@@ -645,6 +690,12 @@ export function App() {
             )}
             {doctorResult && (
               <DoctorResult result={doctorResult} onClose={() => setShowAiPanel(false)} />
+            )}
+            {configValidateResult && (
+              <ConfigValidationResult result={configValidateResult} onClose={() => setShowAiPanel(false)} />
+            )}
+            {configSchemaResult && (
+              <ConfigSchemaResult result={configSchemaResult} onClose={() => setShowAiPanel(false)} />
             )}
           </aside>
         )}
@@ -1026,6 +1077,43 @@ function DoctorResult({ result, onClose }: { result: DoctorResult; onClose: () =
             ))}
         </section>
       )}
+      <button onClick={onClose}>Close</button>
+    </div>
+  );
+}
+
+function ConfigValidationResult({ result, onClose }: { result: ConfigValidationResult; onClose: () => void }) {
+  return (
+    <div className="ai-result">
+      <h4>{result.valid ? "Config Valid" : "Config Invalid"}</h4>
+      {result.path && <p>Config file: <code>{result.path}</code></p>}
+      {result.errors.length > 0 && (
+        <section>
+          <h5>Errors</h5>
+          <ul>
+            {result.errors.map((err, i) => (
+              <li key={i} className="error">{err}</li>
+            ))}
+          </ul>
+        </section>
+      )}
+      {result.valid && result.errors.length === 0 && (
+        <p className="success">Configuration is valid!</p>
+      )}
+      <button onClick={onClose}>Close</button>
+    </div>
+  );
+}
+
+function ConfigSchemaResult({ result, onClose }: { result: ConfigSchemaResult; onClose: () => void }) {
+  return (
+    <div className="ai-result">
+      <h4>Config JSON Schema</h4>
+      <p>Schema for just-ai.toml configuration file</p>
+      <section>
+        <h5>Schema (JSON)</h5>
+        <pre>{JSON.stringify(result.schema, null, 2)}</pre>
+      </section>
       <button onClick={onClose}>Close</button>
     </div>
   );

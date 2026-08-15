@@ -329,6 +329,27 @@ export function aiDoctor(projectRoot: string): Promise<DoctorResult> {
   return invoke("ai_doctor", { projectRoot });
 }
 
+// Config types
+export interface ConfigValidationResult {
+  success: boolean;
+  valid: boolean;
+  path: string | null;
+  errors: string[];
+}
+
+export interface ConfigSchemaResult {
+  success: boolean;
+  schema: object;
+}
+
+export function aiConfigValidate(projectRoot: string): Promise<ConfigValidationResult> {
+  return invoke("ai_config_validate", { projectRoot });
+}
+
+export function aiConfigSchema(): Promise<ConfigSchemaResult> {
+  return invoke("ai_config_schema", {});
+}
+
 // Migrate types
 export interface MigrateAnalyzeResult {
   success: boolean;

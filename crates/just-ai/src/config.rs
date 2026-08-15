@@ -65,7 +65,7 @@ impl Config {
   }
 }
 
-fn find_config(start: &Path) -> Option<PathBuf> {
+pub fn find_config(start: &Path) -> Option<PathBuf> {
   let mut dir = start.to_path_buf();
   loop {
     let candidate = dir.join("just-ai.toml");

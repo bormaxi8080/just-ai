@@ -8,7 +8,7 @@ use std::{
 use just_ai::{
   ContextParameter,
   ai_responses::{
-    AddRecipeResponse, AddRecipeResponse as AiAddRecipeResponse,
+    AddRecipeResponse as AiAddRecipeResponse,
     ComposeWorkflowResponse as AiComposeWorkflowResponse, ExplainResponse, FixResponse,
     RecipeProposal, SuggestResponse, TemplateResponse as AiTemplateResponse,
     WorkflowResponse as AiWorkflowResponse,
@@ -925,7 +925,7 @@ async fn ai_explain_batch(
 
 #[derive(Deserialize)]
 struct MigrateAnalyzeRequest {
-  json: Option<bool>,
+  _json: Option<bool>,
 }
 
 #[derive(Serialize)]
@@ -1429,9 +1429,15 @@ async fn ai_doctor(project_root: PathBuf) -> Result<GuiDoctorResult, String> {
 
   let total_recipes = recipes.len();
   let low = recipes.iter().filter(|r| r.risk == RiskLevel::Low).count();
-  let medium = recipes.iter().filter(|r| r.risk == RiskLevel::Medium).count();
+  let medium = recipes
+    .iter()
+    .filter(|r| r.risk == RiskLevel::Medium)
+    .count();
   let high = recipes.iter().filter(|r| r.risk == RiskLevel::High).count();
-  let blocked = recipes.iter().filter(|r| r.risk == RiskLevel::Blocked).count();
+  let blocked = recipes
+    .iter()
+    .filter(|r| r.risk == RiskLevel::Blocked)
+    .count();
   let highest_risk = recipes
     .iter()
     .map(|r| r.risk)
@@ -1447,6 +1453,63 @@ async fn ai_doctor(project_root: PathBuf) -> Result<GuiDoctorResult, String> {
     blocked,
     highest_risk,
     recipes,
+  })
+}
+
+// ========================================================================
+// Config Validation Commands
+// ========================================================================
+
+#[derive(Serialize)]
+struct ConfigValidationResult {
+  success: bool,
+  valid: bool,
+  path: Option<String>,
+  errors: Vec<String>,
+}
+
+#[tauri::command]
+async fn ai_config_validate(project_root: PathBuf) -> Result<ConfigValidationResult, String> {
+  if !project_root.is_dir() {
+    return Err(format!(
+      "project root is not a directory: {}",
+      project_root.display()
+    ));
+  }
+  match just_ai::config::Config::load(&project_root) {
+    Ok(_) => {
+      let config_path = just_ai::config::find_config(&project_root);
+      Ok(ConfigValidationResult {
+        success: true,
+        valid: true,
+        path: config_path.map(|p| p.to_string_lossy().to_string()),
+        errors: vec![],
+      })
+    }
+    Err(e) => {
+      let config_path = just_ai::config::find_config(&project_root);
+      Ok(ConfigValidationResult {
+        success: true,
+        valid: false,
+        path: config_path.map(|p| p.to_string_lossy().to_string()),
+        errors: vec![e.to_string()],
+      })
+    }
+  }
+}
+
+#[derive(Serialize)]
+struct ConfigSchemaResult {
+  success: bool,
+  schema: serde_json::Value,
+}
+
+#[tauri::command]
+async fn ai_config_schema() -> Result<ConfigSchemaResult, String> {
+  let schema = schemars::schema_for!(just_ai::config::Config);
+  Ok(ConfigSchemaResult {
+    success: true,
+    schema: serde_json::to_value(schema).map_err(|error| error.to_string())?,
   })
 }
 
@@ -1475,6 +1538,8 @@ pub fn run() {
       ai_compose_workflow,
       ai_export_context,
       ai_doctor,
+      ai_config_validate,
+      ai_config_schema,
     ])
     .run(tauri::generate_context!())
     .expect("failed to run just-ai desktop application");
