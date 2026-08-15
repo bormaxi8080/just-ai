@@ -25,6 +25,138 @@ use {
   },
 };
 
+/// Directory name for storing templates
+const TEMPLATE_DIR: &str = ".just-ai/templates";
+
+/// Get the template directory path for a project
+fn get_template_dir(project_root: &Path) -> PathBuf {
+  project_root.join(TEMPLATE_DIR)
+}
+
+/// Get a template file path
+fn get_template_path(project_root: &Path, template_name: &str) -> PathBuf {
+  get_template_dir(project_root).join(format!("{template_name}.json"))
+}
+
+/// Template metadata stored on disk
+#[derive(Debug, serde::Deserialize, serde::Serialize)]
+struct StoredTemplate {
+  name: String,
+  description: String,
+  category: String,
+  parameters: Vec<TemplateParameter>,
+  body: Vec<String>,
+  created_at: u64,
+  updated_at: u64,
+}
+
+#[derive(Debug, serde::Deserialize, serde::Serialize)]
+struct TemplateParameter {
+  name: String,
+  description: String,
+  required: bool,
+  default: Option<String>,
+}
+
+/// Save a template to disk
+pub fn save_template(
+  project_root: &Path,
+  template: &TemplateProposal,
+) -> Result<(), Box<dyn Error>> {
+  let dir = get_template_dir(project_root);
+  fs::create_dir_all(&dir)?;
+
+  let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
+
+  let stored = StoredTemplate {
+    name: template.name.clone(),
+    description: template.description.clone(),
+    category: template.category.clone(),
+    parameters: template
+      .parameters
+      .iter()
+      .map(|p| TemplateParameter {
+        name: p.name.clone(),
+        description: p.description.clone(),
+        required: p.required,
+        default: p.default.clone(),
+      })
+      .collect(),
+    body: template.body.clone(),
+    created_at: now,
+    updated_at: now,
+  };
+
+  let path = get_template_path(project_root, &template.name);
+  let json = serde_json::to_string_pretty(&stored)?;
+  fs::write(path, json)?;
+
+  Ok(())
+}
+
+/// Load a template from disk
+pub fn load_template(
+  project_root: &Path,
+  template_name: &str,
+) -> Result<Option<TemplateProposal>, Box<dyn Error>> {
+  let path = get_template_path(project_root, template_name);
+  if !path.exists() {
+    return Ok(None);
+  }
+
+  let content = fs::read_to_string(path)?;
+  let stored: StoredTemplate = serde_json::from_str(&content)?;
+
+  Ok(Some(TemplateProposal {
+    name: stored.name,
+    description: stored.description,
+    category: stored.category,
+    parameters: stored
+      .parameters
+      .into_iter()
+      .map(|p| crate::ai_responses::TemplateParameter {
+        name: p.name,
+        description: p.description,
+        required: p.required,
+        default: p.default,
+      })
+      .collect(),
+    body: stored.body,
+  }))
+}
+
+/// List all stored templates
+pub fn list_templates(project_root: &Path) -> Result<Vec<String>, Box<dyn Error>> {
+  let dir = get_template_dir(project_root);
+  if !dir.exists() {
+    return Ok(Vec::new());
+  }
+
+  let mut templates = Vec::new();
+  for entry in fs::read_dir(dir)? {
+    let entry = entry?;
+    let path = entry.path();
+    if path.extension().and_then(|s| s.to_str()) == Some("json")
+      && let Some(name) = path.file_stem().and_then(|s| s.to_str())
+    {
+      templates.push(name.to_string());
+    }
+  }
+  templates.sort();
+  Ok(templates)
+}
+
+/// Delete a template
+pub fn delete_template(project_root: &Path, template_name: &str) -> Result<bool, Box<dyn Error>> {
+  let path = get_template_path(project_root, template_name);
+  if path.exists() {
+    fs::remove_file(path)?;
+    Ok(true)
+  } else {
+    Ok(false)
+  }
+}
+
 pub fn handle_add(
   just_binary: &Path,
   context: &ProjectContext,
@@ -636,15 +768,14 @@ pub fn handle_template(
     .ok_or("project context does not contain a root justfile source")?;
   let _original = bounded_file::read_utf8(source, max_editable_file_bytes())?;
 
-  // Templates are stored as comments in the justfile for now
-  // In the future, we could store them in a separate .just-ai-templates file
-  let template_name = &response.template.name;
-  let _template_json = serde_json::to_string_pretty(&response.template)?;
+  // Save template to disk for persistence
+  let project_root = source.parent().unwrap_or_else(|| Path::new("."));
+  save_template(project_root, &response.template)?;
 
   println!("{}", response.summary);
   println!();
   println!("Template request: {request}");
-  println!("Template name: {template_name}");
+  println!("Template name: {}", response.template.name);
   println!("Category: {}", response.template.category);
   println!("Parameters:");
   for param in &response.template.parameters {
@@ -666,7 +797,12 @@ pub fn handle_template(
 
   println!();
   println!(
-    "To instantiate this template, run: just-ai instantiate-template {template_name} <param=value>..."
+    "Template saved to .just-ai/templates/{}.json",
+    response.template.name
+  );
+  println!(
+    "To instantiate this template, run: just-ai instantiate-template {} <param=value>...",
+    response.template.name
   );
 
   Ok(())

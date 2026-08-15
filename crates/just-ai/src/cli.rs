@@ -89,6 +89,13 @@ enum Commands {
     #[arg(help = "Natural-language template description")]
     request: String,
   },
+  #[command(about = "List all stored templates")]
+  TemplateList,
+  #[command(about = "Delete a stored template")]
+  TemplateDelete {
+    #[arg(help = "Template name to delete")]
+    template: String,
+  },
   #[command(about = "Instantiate a template with provided parameter values")]
   InstantiateTemplate {
     #[arg(help = "Template name to instantiate")]
@@ -436,21 +443,41 @@ fn try_main() -> Result<(), Box<dyn Error>> {
       )?;
       handle_template(&context, &request, response)?;
     }
+    Commands::TemplateList => {
+      let project_root = env::current_dir()?;
+      let templates = crate::proposal::list_templates(&project_root)?;
+      if templates.is_empty() {
+        println!("No templates found. Create one with 'just-ai template <description>'.");
+      } else {
+        println!("{} template(s) found:", templates.len());
+        for name in templates {
+          println!("  - {}", name);
+        }
+      }
+    }
+    Commands::TemplateDelete { template } => {
+      let project_root = env::current_dir()?;
+      let deleted = crate::proposal::delete_template(&project_root, &template)?;
+      if deleted {
+        println!("Template '{}' deleted.", template);
+      } else {
+        println!("Template '{}' not found.", template);
+      }
+    }
     Commands::InstantiateTemplate {
       template,
       values,
       write,
     } => {
-      // Get the template from the user (in practice this would be stored)
-      // For now, we ask AI to generate the template and then instantiate it
-      let template_prompt = format!(
-        "Find or create a template named '{}' for this project.",
-        template
-      );
-      let template_response = AiClient::from_env()?.complete_json::<TemplateResponse>(
-        "Generate a reusable just recipe template as strict JSON.",
-        &prompts::template(&serde_json::to_string_pretty(&context)?, &template_prompt),
-      )?;
+      // Load template from disk
+      let project_root = env::current_dir()?;
+      let stored_template =
+        crate::proposal::load_template(&project_root, &template)?.ok_or_else(|| {
+          format!(
+            "template '{}' not found. Run 'just-ai template' to create it.",
+            template
+          )
+        })?;
 
       // Parse the provided values
       let mut values_map = std::collections::HashMap::new();
@@ -463,7 +490,7 @@ fn try_main() -> Result<(), Box<dyn Error>> {
       }
 
       // Check required parameters
-      for param in &template_response.template.parameters {
+      for param in &stored_template.parameters {
         if param.required && !values_map.contains_key(&param.name) {
           if let Some(default) = &param.default {
             values_map.insert(param.name.clone(), default.clone());
@@ -477,7 +504,7 @@ fn try_main() -> Result<(), Box<dyn Error>> {
       handle_instantiate_template(
         &cli.just_binary,
         &context,
-        &template_response.template,
+        &stored_template,
         &values_map,
         write,
       )?;
