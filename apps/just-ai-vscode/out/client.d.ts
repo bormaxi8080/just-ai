@@ -63,6 +63,12 @@ export declare class JustAiClient {
     fixBatch(write?: boolean): Promise<string>;
     explainBatch(module?: string): Promise<string>;
     exportContext(pretty?: boolean): Promise<string>;
+    migrateAnalyze(json?: boolean, similarityThreshold?: number): Promise<string>;
+    migrateModularize(write?: boolean, dryRun?: boolean): Promise<string>;
+    migrateDeduplicate(write?: boolean, similarityThreshold?: number, interactive?: boolean, merge?: boolean): Promise<string>;
+    template(request: string): Promise<string>;
+    instantiateTemplate(template: string, values: Record<string, string>, write?: boolean): Promise<string>;
+    composeWorkflow(request: string, write?: boolean): Promise<string>;
     getHistory(limit?: number, recipe?: string, success?: boolean): Promise<HistoryRecord[]>;
     private runJustAiCommand;
     private runJustAiCommandWithArgs;

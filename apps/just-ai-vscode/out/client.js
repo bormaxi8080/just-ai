@@ -130,6 +130,55 @@ class JustAiClient {
     async exportContext(pretty = false) {
         return this.runJustAiCommand('export-context', pretty ? '--pretty' : '');
     }
+    // Migrate commands
+    async migrateAnalyze(json = false, similarityThreshold = 0.8) {
+        const args = ['migrate', 'analyze'];
+        if (json) {
+            args.push('--json');
+        }
+        args.push('--similarity-threshold', similarityThreshold.toString());
+        return this.runJustAiCommandWithArgs(args);
+    }
+    async migrateModularize(write = false, dryRun = false) {
+        const args = ['migrate', 'modularize'];
+        if (write) {
+            args.push('--write');
+        }
+        if (dryRun) {
+            args.push('--dry-run');
+        }
+        return this.runJustAiCommandWithArgs(args);
+    }
+    async migrateDeduplicate(write = false, similarityThreshold = 0.8, interactive = false, merge = false) {
+        const args = ['migrate', 'deduplicate'];
+        if (write) {
+            args.push('--write');
+        }
+        args.push('--similarity-threshold', similarityThreshold.toString());
+        if (interactive) {
+            args.push('--interactive');
+        }
+        if (merge) {
+            args.push('--merge');
+        }
+        return this.runJustAiCommandWithArgs(args);
+    }
+    async template(request) {
+        return this.runJustAiCommand('template', request);
+    }
+    async instantiateTemplate(template, values, write = false) {
+        const args = ['instantiate-template', template];
+        for (const [key, value] of Object.entries(values)) {
+            args.push(`${key}=${value}`);
+        }
+        if (write) {
+            args.push('--write');
+        }
+        return this.runJustAiCommandWithArgs(args);
+    }
+    async composeWorkflow(request, write = false) {
+        return this.runJustAiCommand('compose-workflow', request, write ? '--write' : '');
+    }
     async getHistory(limit = 20, recipe, success) {
         const args = ['history', 'recent', '--limit', limit.toString()];
         if (recipe) {

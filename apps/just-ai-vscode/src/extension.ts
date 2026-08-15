@@ -172,6 +172,27 @@ function registerCommands(context: vscode.ExtensionContext): void {
     })
   );
 
+  // Template command
+  context.subscriptions.push(
+    vscode.commands.registerCommand('just-ai.template', async () => {
+      await runTemplate();
+    })
+  );
+
+  // Instantiate Template command
+  context.subscriptions.push(
+    vscode.commands.registerCommand('just-ai.instantiateTemplate', async () => {
+      await runInstantiateTemplate();
+    })
+  );
+
+  // Compose Workflow command
+  context.subscriptions.push(
+    vscode.commands.registerCommand('just-ai.composeWorkflow', async () => {
+      await runComposeWorkflow();
+    })
+  );
+
   // Export context command
   context.subscriptions.push(
     vscode.commands.registerCommand('just-ai.exportContext', async () => {
@@ -667,6 +688,136 @@ async function runMigrateDeduplicate(): Promise<void> {
     }
   } catch (error) {
     const msg = `Migrate deduplicate failed: ${error}`;
+    outputChannel.appendLine(msg);
+    vscode.window.showErrorMessage(msg);
+  }
+}
+
+async function runTemplate(): Promise<void> {
+  const request = await vscode.window.showInputBox({
+    placeHolder: 'Describe the template you want to create (e.g., "reusable test template with coverage options")',
+    prompt: 'Enter a natural-language description of the reusable template',
+    validateInput: value => value.trim().length < 10 ? 'Please provide a more detailed description' : null
+  });
+
+  if (!request) { return; }
+
+  outputChannel.clear();
+  outputChannel.show();
+  outputChannel.appendLine(`Generating template for: ${request}...`);
+
+  try {
+    const result = await justAiClient.template(request);
+    outputChannel.appendLine(result);
+
+    const doc = await vscode.workspace.openTextDocument({
+      content: result,
+      language: 'markdown'
+    });
+    await vscode.window.showTextDocument(doc);
+  } catch (error) {
+    const msg = `Template failed: ${error}`;
+    outputChannel.appendLine(msg);
+    vscode.window.showErrorMessage(msg);
+  }
+}
+
+async function runInstantiateTemplate(): Promise<void> {
+  // First, ask for template name
+  const template = await vscode.window.showInputBox({
+    placeHolder: 'Template name (e.g., test-template)',
+    prompt: 'Enter the template name to instantiate',
+    validateInput: value => value.trim().length === 0 ? 'Template name is required' : null
+  });
+
+  if (!template) { return; }
+
+  // Ask for parameter values
+  const values: Record<string, string> = {};
+  let addingParams = true;
+  while (addingParams) {
+    const param = await vscode.window.showInputBox({
+      placeHolder: 'Parameter as KEY=VALUE (empty to finish)',
+      prompt: 'Enter parameter values for the template (one at a time)',
+      validateInput: value => {
+        if (value.trim() === '') return null;
+        if (!value.includes('=')) return 'Format must be KEY=VALUE';
+        return null;
+      }
+    });
+
+    if (!param || param.trim() === '') {
+      addingParams = false;
+    } else {
+      const [key, ...rest] = param.split('=');
+      values[key] = rest.join('=');
+    }
+  }
+
+  const write = await vscode.window.showQuickPick(['Preview only', 'Write to justfile'], {
+    placeHolder: 'Apply the instantiated template?'
+  });
+
+  if (!write) { return; }
+
+  outputChannel.clear();
+  outputChannel.show();
+  outputChannel.appendLine(`Instantiating template: ${template}...`);
+
+  try {
+    const result = await justAiClient.instantiateTemplate(template, values, write === 'Write to justfile');
+    outputChannel.appendLine(result);
+
+    if (write === 'Write to justfile') {
+      vscode.window.showInformationMessage('Template instantiated and written to justfile!');
+    } else {
+      const doc = await vscode.workspace.openTextDocument({
+        content: result,
+        language: 'markdown'
+      });
+      await vscode.window.showTextDocument(doc);
+    }
+  } catch (error) {
+    const msg = `Instantiate template failed: ${error}`;
+    outputChannel.appendLine(msg);
+    vscode.window.showErrorMessage(msg);
+  }
+}
+
+async function runComposeWorkflow(): Promise<void> {
+  const request = await vscode.window.showInputBox({
+    placeHolder: 'Describe the workflow to compose (e.g., "release workflow using build, test, and deploy recipes")',
+    prompt: 'Enter a natural-language description of the workflow to compose from existing recipes',
+    validateInput: value => value.trim().length < 10 ? 'Please provide a more detailed description' : null
+  });
+
+  if (!request) { return; }
+
+  const write = await vscode.window.showQuickPick(['Preview only', 'Write to justfile'], {
+    placeHolder: 'Apply the composed workflow?'
+  });
+
+  if (!write) { return; }
+
+  outputChannel.clear();
+  outputChannel.show();
+  outputChannel.appendLine(`Composing workflow for: ${request}...`);
+
+  try {
+    const result = await justAiClient.composeWorkflow(request, write === 'Write to justfile');
+    outputChannel.appendLine(result);
+
+    if (write === 'Write to justfile') {
+      vscode.window.showInformationMessage('Workflow composed and written to justfile!');
+    } else {
+      const doc = await vscode.workspace.openTextDocument({
+        content: result,
+        language: 'markdown'
+      });
+      await vscode.window.showTextDocument(doc);
+    }
+  } catch (error) {
+    const msg = `Compose workflow failed: ${error}`;
     outputChannel.appendLine(msg);
     vscode.window.showErrorMessage(msg);
   }

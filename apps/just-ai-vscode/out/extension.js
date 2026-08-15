@@ -141,6 +141,30 @@ function registerCommands(context) {
     context.subscriptions.push(vscode.commands.registerCommand('just-ai.explainBatch', async () => {
         await runExplainBatch();
     }));
+    // Migrate Analyze command
+    context.subscriptions.push(vscode.commands.registerCommand('just-ai.migrateAnalyze', async () => {
+        await runMigrateAnalyze();
+    }));
+    // Migrate Modularize command
+    context.subscriptions.push(vscode.commands.registerCommand('just-ai.migrateModularize', async () => {
+        await runMigrateModularize();
+    }));
+    // Migrate Deduplicate command
+    context.subscriptions.push(vscode.commands.registerCommand('just-ai.migrateDeduplicate', async () => {
+        await runMigrateDeduplicate();
+    }));
+    // Template command
+    context.subscriptions.push(vscode.commands.registerCommand('just-ai.template', async () => {
+        await runTemplate();
+    }));
+    // Instantiate Template command
+    context.subscriptions.push(vscode.commands.registerCommand('just-ai.instantiateTemplate', async () => {
+        await runInstantiateTemplate();
+    }));
+    // Compose Workflow command
+    context.subscriptions.push(vscode.commands.registerCommand('just-ai.composeWorkflow', async () => {
+        await runComposeWorkflow();
+    }));
     // Export context command
     context.subscriptions.push(vscode.commands.registerCommand('just-ai.exportContext', async () => {
         await runExportContext();
@@ -477,6 +501,242 @@ async function runExplainBatch() {
     }
     catch (error) {
         const msg = `Explain batch failed: ${error}`;
+        outputChannel.appendLine(msg);
+        vscode.window.showErrorMessage(msg);
+    }
+}
+async function runMigrateAnalyze() {
+    const json = await vscode.window.showQuickPick(['Human-readable', 'JSON'], {
+        placeHolder: 'Output format'
+    });
+    if (!json) {
+        return;
+    }
+    const similarityThresholdInput = await vscode.window.showInputBox({
+        placeHolder: 'Similarity threshold (0.0-1.0)',
+        prompt: 'Recipes above this threshold are considered similar',
+        value: '0.8',
+        validateInput: value => {
+            const num = parseFloat(value);
+            if (isNaN(num) || num < 0 || num > 1) {
+                return 'Must be a number between 0.0 and 1.0';
+            }
+            return null;
+        }
+    });
+    const similarityThreshold = similarityThresholdInput ? parseFloat(similarityThresholdInput) : 0.8;
+    outputChannel.clear();
+    outputChannel.show();
+    outputChannel.appendLine(`Analyzing project structure...`);
+    try {
+        const result = await justAiClient.migrateAnalyze(json === 'JSON', similarityThreshold);
+        outputChannel.appendLine(result);
+        if (json === 'JSON') {
+            const doc = await vscode.workspace.openTextDocument({
+                content: result,
+                language: 'json'
+            });
+            await vscode.window.showTextDocument(doc);
+        }
+    }
+    catch (error) {
+        const msg = `Migrate analyze failed: ${error}`;
+        outputChannel.appendLine(msg);
+        vscode.window.showErrorMessage(msg);
+    }
+}
+async function runMigrateModularize() {
+    const mode = await vscode.window.showQuickPick(['Dry run (preview)', 'Write changes'], {
+        placeHolder: 'Apply modularization?'
+    });
+    if (!mode) {
+        return;
+    }
+    const write = mode === 'Write changes';
+    const dryRun = !write; // dry_run flag for preview
+    outputChannel.clear();
+    outputChannel.show();
+    outputChannel.appendLine(`Modularizing project...`);
+    try {
+        const result = await justAiClient.migrateModularize(write, dryRun);
+        outputChannel.appendLine(result);
+        if (write) {
+            vscode.window.showInformationMessage('Modularization applied to justfile!');
+        }
+    }
+    catch (error) {
+        const msg = `Migrate modularize failed: ${error}`;
+        outputChannel.appendLine(msg);
+        vscode.window.showErrorMessage(msg);
+    }
+}
+async function runMigrateDeduplicate() {
+    const mode = await vscode.window.showQuickPick(['Dry run (preview)', 'Write changes'], {
+        placeHolder: 'Apply deduplication?'
+    });
+    if (!mode) {
+        return;
+    }
+    const write = mode === 'Write changes';
+    const similarityThresholdInput = await vscode.window.showInputBox({
+        placeHolder: 'Similarity threshold (0.0-1.0)',
+        prompt: 'Recipes above this threshold are considered similar',
+        value: '0.8',
+        validateInput: value => {
+            const num = parseFloat(value);
+            if (isNaN(num) || num < 0 || num > 1) {
+                return 'Must be a number between 0.0 and 1.0';
+            }
+            return null;
+        }
+    });
+    const similarityThreshold = similarityThresholdInput ? parseFloat(similarityThresholdInput) : 0.8;
+    const merge = await vscode.window.showQuickPick(['Remove one', 'Smart merge (combine both)'], {
+        placeHolder: 'How to handle duplicates?'
+    });
+    if (!merge) {
+        return;
+    }
+    const mergeFlag = merge === 'Smart merge (combine both)';
+    outputChannel.clear();
+    outputChannel.show();
+    outputChannel.appendLine(`Deduplicating recipes...`);
+    try {
+        const result = await justAiClient.migrateDeduplicate(write, similarityThreshold, false, mergeFlag);
+        outputChannel.appendLine(result);
+        if (write) {
+            vscode.window.showInformationMessage('Deduplication applied to justfile!');
+        }
+    }
+    catch (error) {
+        const msg = `Migrate deduplicate failed: ${error}`;
+        outputChannel.appendLine(msg);
+        vscode.window.showErrorMessage(msg);
+    }
+}
+async function runTemplate() {
+    const request = await vscode.window.showInputBox({
+        placeHolder: 'Describe the template you want to create (e.g., "reusable test template with coverage options")',
+        prompt: 'Enter a natural-language description of the reusable template',
+        validateInput: value => value.trim().length < 10 ? 'Please provide a more detailed description' : null
+    });
+    if (!request) {
+        return;
+    }
+    outputChannel.clear();
+    outputChannel.show();
+    outputChannel.appendLine(`Generating template for: ${request}...`);
+    try {
+        const result = await justAiClient.template(request);
+        outputChannel.appendLine(result);
+        const doc = await vscode.workspace.openTextDocument({
+            content: result,
+            language: 'markdown'
+        });
+        await vscode.window.showTextDocument(doc);
+    }
+    catch (error) {
+        const msg = `Template failed: ${error}`;
+        outputChannel.appendLine(msg);
+        vscode.window.showErrorMessage(msg);
+    }
+}
+async function runInstantiateTemplate() {
+    // First, ask for template name
+    const template = await vscode.window.showInputBox({
+        placeHolder: 'Template name (e.g., test-template)',
+        prompt: 'Enter the template name to instantiate',
+        validateInput: value => value.trim().length === 0 ? 'Template name is required' : null
+    });
+    if (!template) {
+        return;
+    }
+    // Ask for parameter values
+    const values = {};
+    let addingParams = true;
+    while (addingParams) {
+        const param = await vscode.window.showInputBox({
+            placeHolder: 'Parameter as KEY=VALUE (empty to finish)',
+            prompt: 'Enter parameter values for the template (one at a time)',
+            validateInput: value => {
+                if (value.trim() === '')
+                    return null;
+                if (!value.includes('='))
+                    return 'Format must be KEY=VALUE';
+                return null;
+            }
+        });
+        if (!param || param.trim() === '') {
+            addingParams = false;
+        }
+        else {
+            const [key, ...rest] = param.split('=');
+            values[key] = rest.join('=');
+        }
+    }
+    const write = await vscode.window.showQuickPick(['Preview only', 'Write to justfile'], {
+        placeHolder: 'Apply the instantiated template?'
+    });
+    if (!write) {
+        return;
+    }
+    outputChannel.clear();
+    outputChannel.show();
+    outputChannel.appendLine(`Instantiating template: ${template}...`);
+    try {
+        const result = await justAiClient.instantiateTemplate(template, values, write === 'Write to justfile');
+        outputChannel.appendLine(result);
+        if (write === 'Write to justfile') {
+            vscode.window.showInformationMessage('Template instantiated and written to justfile!');
+        }
+        else {
+            const doc = await vscode.workspace.openTextDocument({
+                content: result,
+                language: 'markdown'
+            });
+            await vscode.window.showTextDocument(doc);
+        }
+    }
+    catch (error) {
+        const msg = `Instantiate template failed: ${error}`;
+        outputChannel.appendLine(msg);
+        vscode.window.showErrorMessage(msg);
+    }
+}
+async function runComposeWorkflow() {
+    const request = await vscode.window.showInputBox({
+        placeHolder: 'Describe the workflow to compose (e.g., "release workflow using build, test, and deploy recipes")',
+        prompt: 'Enter a natural-language description of the workflow to compose from existing recipes',
+        validateInput: value => value.trim().length < 10 ? 'Please provide a more detailed description' : null
+    });
+    if (!request) {
+        return;
+    }
+    const write = await vscode.window.showQuickPick(['Preview only', 'Write to justfile'], {
+        placeHolder: 'Apply the composed workflow?'
+    });
+    if (!write) {
+        return;
+    }
+    outputChannel.clear();
+    outputChannel.show();
+    outputChannel.appendLine(`Composing workflow for: ${request}...`);
+    try {
+        const result = await justAiClient.composeWorkflow(request, write === 'Write to justfile');
+        outputChannel.appendLine(result);
+        if (write === 'Write to justfile') {
+            vscode.window.showInformationMessage('Workflow composed and written to justfile!');
+        }
+        else {
+            const doc = await vscode.workspace.openTextDocument({
+                content: result,
+                language: 'markdown'
+            });
+            await vscode.window.showTextDocument(doc);
+        }
+    }
+    catch (error) {
+        const msg = `Compose workflow failed: ${error}`;
         outputChannel.appendLine(msg);
         vscode.window.showErrorMessage(msg);
     }
