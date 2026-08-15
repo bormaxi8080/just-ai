@@ -120,8 +120,8 @@ mod tests {
       .unwrap()
       .as_array()
       .unwrap();
-    // Original 3 read-only tools + 10 new tools (4 single-recipe + 3 batch/workflow + 3 template/compose)
-    assert_eq!(tools.len(), 13);
+    // Original 3 read-only tools + 10 new tools (4 single-recipe + 3 batch/workflow + 3 template/compose) + 3 migrate tools
+    assert_eq!(tools.len(), 16);
     // Verify the original 3 are still read-only
     let read_only_names = ["inspect_project", "doctor", "prepare_run"];
     for tool in tools {

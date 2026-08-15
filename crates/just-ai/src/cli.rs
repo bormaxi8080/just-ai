@@ -816,9 +816,6 @@ fn modularize_project(
     proposed = add_imports_at_top(&proposed, &import_statements);
   }
 
-  // Final validation
-  validate_justfile(just_binary, source, &proposed)?;
-
   println!("{}", unified_diff(source, &original, &proposed));
 
   if dry_run || !write {
@@ -826,7 +823,7 @@ fn modularize_project(
     return Ok(());
   }
 
-  // Write module files
+  // Write module files FIRST so validation can find them
   for (prefix, recipes) in &groups {
     if recipes.len() < 2 {
       continue;
@@ -848,6 +845,9 @@ fn modularize_project(
       println!("Created {}", module_path.display());
     }
   }
+
+  // Final validation (now module files exist)
+  validate_justfile(just_binary, source, &proposed)?;
 
   // Write modified root justfile
   application::patches::apply_reviewed_change(source, &original, &proposed)?;

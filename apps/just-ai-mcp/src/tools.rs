@@ -1,18 +1,21 @@
 use {
   just_ai::{
+    ContextParameter,
     application::{
       execution::{RecipeExecutor, RunConfirmation, RunRequest},
       history::create_history,
+      patches::apply_reviewed_change,
     },
+    bounded_file::{max_editable_file_bytes, read_utf8},
     cli::AiClient,
     config::Config,
-    inspection::inspect_project_at,
+    inspection::{ContextRecipe, inspect_project_at},
     prompts,
+    proposal::{replace_recipe, unified_diff, validate_justfile},
   },
   serde_json::{Map, Value, json},
   std::{
-    env,
-    ffi::OsStr,
+    env, fs,
     path::{Path, PathBuf},
   },
 };
@@ -95,6 +98,24 @@ pub(super) fn tool_definitions() -> Value {
       "name": "compose_workflow",
       "description": "Ask an AI provider to compose a workflow by reusing and adapting existing recipes.",
       "inputSchema": compose_workflow_schema(),
+      "annotations": { "readOnlyHint": false, "destructiveHint": true }
+    },
+    {
+      "name": "migrate_analyze",
+      "description": "Analyze project structure: find unreferenced, isolated recipes, cycles, dependency depths, and similar recipes.",
+      "inputSchema": migrate_analyze_schema(),
+      "annotations": { "readOnlyHint": true, "destructiveHint": false }
+    },
+    {
+      "name": "migrate_modularize",
+      "description": "Group recipes by prefix into module files and update imports. Dry-run by default.",
+      "inputSchema": migrate_modularize_schema(),
+      "annotations": { "readOnlyHint": true, "destructiveHint": false }
+    },
+    {
+      "name": "migrate_deduplicate",
+      "description": "Find and optionally remove or smart-merge similar recipes. Dry-run by default.",
+      "inputSchema": migrate_deduplicate_schema(),
       "annotations": { "readOnlyHint": false, "destructiveHint": true }
     }
   ])
@@ -238,12 +259,44 @@ fn compose_workflow_schema() -> Value {
   })
 }
 
-pub(super) fn call_tool(params: &Value) -> Result<Value, String> {
-  let project_root = env::current_dir().map_err(|error| error.to_string())?;
-  call_tool_at(params, OsStr::new("just"), &project_root)
+fn migrate_analyze_schema() -> Value {
+  json!({
+    "type": "object",
+    "properties": {
+      "json": { "type": "boolean", "default": false }
+    },
+    "additionalProperties": false
+  })
 }
 
-fn call_tool_at(params: &Value, just_binary: &OsStr, project_root: &Path) -> Result<Value, String> {
+fn migrate_modularize_schema() -> Value {
+  json!({
+    "type": "object",
+    "properties": {
+      "write": { "type": "boolean", "default": false }
+    },
+    "additionalProperties": false
+  })
+}
+
+fn migrate_deduplicate_schema() -> Value {
+  json!({
+    "type": "object",
+    "properties": {
+      "write": { "type": "boolean", "default": false },
+      "merge": { "type": "boolean", "default": false },
+      "similarity_threshold": { "type": "number", "minimum": 0.0, "maximum": 1.0, "default": 0.8 }
+    },
+    "additionalProperties": false
+  })
+}
+
+pub(super) fn call_tool(params: &Value) -> Result<Value, String> {
+  let project_root = env::current_dir().map_err(|error| error.to_string())?;
+  call_tool_at(params, Path::new("just"), &project_root)
+}
+
+fn call_tool_at(params: &Value, just_binary: &Path, project_root: &Path) -> Result<Value, String> {
   let name = params
     .get("name")
     .and_then(Value::as_str)
@@ -261,6 +314,9 @@ fn call_tool_at(params: &Value, just_binary: &OsStr, project_root: &Path) -> Res
     "create_template" => &["request", "write"],
     "instantiate_template" => &["template", "values", "write"],
     "compose_workflow" => &["request", "write"],
+    "migrate_analyze" => &["json"],
+    "migrate_modularize" => &["write"],
+    "migrate_deduplicate" => &["write", "merge", "similarity_threshold"],
     _ => return Err(format!("unknown tool `{name}`")),
   };
   let empty_arguments = Map::new();
@@ -1010,6 +1066,238 @@ fn call_tool_at(params: &Value, just_binary: &OsStr, project_root: &Path) -> Res
         "written": write,
       })
     }
+    "migrate_analyze" => {
+      let json_output = arguments
+        .get("json")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+
+      let context =
+        inspect_project_at(just_binary, project_root).map_err(|error| error.to_string())?;
+
+      let unreferenced = context.find_unreferenced_recipes();
+      let isolated = context.find_isolated_recipes();
+      let cycles = context.detect_cycles();
+      let depths = context.calculate_dependency_depths();
+      let similar = context.find_similar_recipes(0.8);
+
+      let result = json!({
+        "total_recipes": context.recipes.len(),
+        "unreferenced_recipes": unreferenced.iter().map(|r| r.namepath.clone()).collect::<Vec<_>>(),
+        "isolated_recipes": isolated.iter().map(|r| r.namepath.clone()).collect::<Vec<_>>(),
+        "cycles": cycles,
+        "dependency_depths": depths,
+        "similar_recipes": similar.iter().map(|(a, b, s)| json!({"recipe1": a, "recipe2": b, "similarity": s})).collect::<Vec<_>>(),
+      });
+
+      if json_output {
+        result
+      } else {
+        // Human-readable output
+        let mut lines = Vec::new();
+        lines.push("Project Analysis".to_string());
+        lines.push(format!("Total recipes: {}", context.recipes.len()));
+        lines.push(format!("Unreferenced recipes: {}", unreferenced.len()));
+        for r in &unreferenced {
+          lines.push(format!("  - {}", r.namepath));
+        }
+        lines.push(format!("Isolated recipes: {}", isolated.len()));
+        for r in &isolated {
+          lines.push(format!("  - {}", r.namepath));
+        }
+        lines.push(format!("Cycles detected: {}", cycles.len()));
+        for cycle in &cycles {
+          lines.push(format!("  - {}", cycle.join(" -> ")));
+        }
+        lines.push("Dependency depths:".to_string());
+        for (name, depth) in &depths {
+          lines.push(format!("  {}: depth {}", name, depth));
+        }
+        lines.push(format!("Similar recipe pairs: {}", similar.len()));
+        for (name1, name2, sim) in &similar {
+          lines.push(format!(
+            "  {} <-> {}: {:.1}% similar",
+            name1,
+            name2,
+            sim * 100.0
+          ));
+        }
+        json!({ "output": lines.join("\n") })
+      }
+    }
+    "migrate_modularize" => {
+      let write = arguments
+        .get("write")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+
+      let context =
+        inspect_project_at(just_binary, project_root).map_err(|error| error.to_string())?;
+
+      // Call the modularize_project function from cli.rs
+      // We need to run a subcommand-like approach
+      let source = context
+        .root_source()
+        .ok_or("project context does not contain a root justfile source")?;
+      let original = read_utf8(source, max_editable_file_bytes()).map_err(|e| e.to_string())?;
+      let mut proposed = original.clone();
+
+      // Group recipes by common prefix
+      let mut groups: std::collections::HashMap<String, Vec<&just_ai::inspection::ContextRecipe>> =
+        std::collections::HashMap::new();
+      for recipe in &context.recipes {
+        let prefix = recipe
+          .name
+          .split('-')
+          .next()
+          .unwrap_or(&recipe.name)
+          .to_owned();
+        groups.entry(prefix).or_default().push(recipe);
+      }
+
+      let source_dir = source.parent().unwrap_or_else(|| Path::new("."));
+      let mut import_statements = Vec::new();
+      let mut module_names = Vec::new();
+      let mut moved_recipes = Vec::new();
+
+      for (prefix, recipes) in &groups {
+        if recipes.len() < 2 {
+          continue;
+        }
+        let module_filename = format!("{prefix}.just");
+        module_names.push(prefix.clone());
+
+        let mut module_content = String::new();
+        for recipe in recipes {
+          let recipe_text = extract_recipe(&original, &recipe.name);
+          if !recipe_text.is_empty() {
+            if !module_content.is_empty() {
+              module_content.push('\n');
+            }
+            module_content.push_str(&recipe_text);
+          }
+        }
+
+        if module_content.is_empty() {
+          continue;
+        }
+
+        for recipe in recipes {
+          proposed = replace_recipe(&proposed, &recipe.name, "");
+          moved_recipes.push(recipe.name.clone());
+        }
+        import_statements.push(format!("import '{}'", module_filename));
+      }
+
+      if !import_statements.is_empty() {
+        proposed = add_imports_at_top(&proposed, &import_statements);
+      }
+
+      let diff = unified_diff(source, &original, &proposed);
+
+      if write {
+        // Write module files FIRST so validation can find them
+        for prefix in &module_names {
+          let mut module_content = String::new();
+          if let Some(recipes) = groups.get(prefix) {
+            for recipe in recipes {
+              let recipe_text = extract_recipe(&original, &recipe.name);
+              if !recipe_text.is_empty() {
+                if !module_content.is_empty() {
+                  module_content.push('\n');
+                }
+                module_content.push_str(&recipe_text);
+              }
+            }
+          }
+          if !module_content.is_empty() {
+            let module_filename = format!("{prefix}.just");
+            let module_path = source_dir.join(&module_filename);
+            fs::write(&module_path, module_content).map_err(|e| e.to_string())?;
+          }
+        }
+        validate_justfile(just_binary, source, &proposed).map_err(|e| e.to_string())?;
+        apply_reviewed_change(source, &original, &proposed).map_err(|e| e.to_string())?;
+      }
+
+      json!({
+        "modules": module_names,
+        "imports": import_statements,
+        "moved_recipes": moved_recipes,
+        "diff": diff,
+        "dry_run": !write,
+      })
+    }
+    "migrate_deduplicate" => {
+      let write = arguments
+        .get("write")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+      let merge = arguments
+        .get("merge")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+      let threshold = arguments
+        .get("similarity_threshold")
+        .and_then(Value::as_f64)
+        .unwrap_or(0.8);
+
+      let context =
+        inspect_project_at(just_binary, project_root).map_err(|error| error.to_string())?;
+
+      let similar = context.find_similar_recipes(threshold);
+
+      let source = context
+        .root_source()
+        .ok_or("project context does not contain a root justfile source")?;
+      let original = read_utf8(source, max_editable_file_bytes()).map_err(|e| e.to_string())?;
+      let mut proposed = original.clone();
+
+      let mut similar_pairs = Vec::new();
+      let mut removed = Vec::new();
+      let mut merged = Vec::new();
+
+      for (a, b, sim) in &similar {
+        similar_pairs.push(json!({"recipe1": a, "recipe2": b, "similarity": sim}));
+
+        let recipe_a = context.find_recipe(a);
+        let recipe_b = context.find_recipe(b);
+
+        if write {
+          if merge {
+            if let (Some(ra), Some(rb)) = (recipe_a, recipe_b) {
+              let merged_recipe = smart_merge_recipes(ra, rb);
+              proposed = replace_recipe(&proposed, &ra.name, "");
+              proposed = replace_recipe(&proposed, &rb.name, &merged_recipe);
+              merged.push(ra.name.clone());
+            }
+          } else {
+            let keep = if a.len() <= b.len() { a } else { b };
+            let remove = if keep == a { b } else { a };
+
+            if let Some(recipe) = context.find_recipe(remove) {
+              proposed = replace_recipe(&proposed, &recipe.name, "");
+              removed.push(remove.clone());
+            }
+          }
+        }
+      }
+
+      let diff = unified_diff(source, &original, &proposed);
+
+      if write {
+        validate_justfile(just_binary, source, &proposed).map_err(|e| e.to_string())?;
+        apply_reviewed_change(source, &original, &proposed).map_err(|e| e.to_string())?;
+      }
+
+      json!({
+        "similar_pairs": similar_pairs,
+        "removed": removed,
+        "merged": merged,
+        "diff": diff,
+        "dry_run": !write,
+      })
+    }
     _ => unreachable!("tool name validated before argument parsing"),
   };
   let text = serde_json::to_string(&value).map_err(|error| error.to_string())?;
@@ -1042,6 +1330,180 @@ fn string_argument(arguments: &Map<String, Value>, name: &str) -> Result<String,
     .ok_or_else(|| format!("`{name}` must be a string"))
 }
 
+fn extract_recipe(content: &str, recipe_name: &str) -> String {
+  let lines: Vec<&str> = content.lines().collect();
+  let mut result = Vec::new();
+  let mut i = 0;
+  let mut found = false;
+
+  while i < lines.len() {
+    let line = lines[i];
+    let trimmed = line.trim_start();
+    let is_recipe_def = trimmed.starts_with(&format!("{recipe_name} "))
+      || trimmed == recipe_name
+      || trimmed.starts_with(&format!("{recipe_name}:"));
+    if !found && is_recipe_def {
+      found = true;
+      // Include the recipe definition and its body (indented lines)
+      result.push(line);
+      i += 1;
+      while i < lines.len()
+        && (lines[i].starts_with(' ') || lines[i].starts_with('\t') || lines[i].trim().is_empty())
+      {
+        result.push(lines[i]);
+        i += 1;
+      }
+      continue;
+    }
+    i += 1;
+  }
+
+  result.join("\n").trim_end().to_string()
+}
+
+fn add_imports_at_top(content: &str, imports: &[String]) -> String {
+  let lines: Vec<&str> = content.lines().collect();
+  let mut result: Vec<String> = Vec::new();
+  let mut import_added = false;
+  let mut last_import_idx = None;
+
+  // First pass: find the last import line
+  for (i, line) in lines.iter().enumerate() {
+    let trimmed = line.trim_start();
+    if trimmed.starts_with("import ") {
+      last_import_idx = Some(i);
+    }
+  }
+
+  for (i, line) in lines.iter().enumerate() {
+    result.push(line.to_string());
+    // If this is the last import line, add our imports after it
+    if last_import_idx == Some(i) && !import_added {
+      if !result.last().unwrap().trim().is_empty() {
+        result.push(String::new());
+      }
+      for import in imports {
+        result.push(import.clone());
+      }
+      import_added = true;
+    }
+  }
+
+  // If no imports were found, add at the very beginning
+  if !import_added {
+    let mut new_result = Vec::new();
+    for import in imports {
+      new_result.push(import.clone());
+    }
+    new_result.push(String::new());
+    new_result.extend(result);
+    return new_result.join("\n");
+  }
+
+  result.join("\n")
+}
+
+fn smart_merge_recipes(a: &ContextRecipe, b: &ContextRecipe) -> String {
+  // Use the shorter name (more generic)
+  let name = if a.name.len() <= b.name.len() {
+    &a.name
+  } else {
+    &b.name
+  };
+
+  // Use the doc from the recipe that has one (prefer longer)
+  let doc = if a.doc.as_deref().map(|d| d.len()).unwrap_or(0)
+    >= b.doc.as_deref().map(|d| d.len()).unwrap_or(0)
+  {
+    a.doc.clone()
+  } else {
+    b.doc.clone()
+  };
+
+  // Merge parameters (union by name, prefer one with default)
+  let mut param_map: std::collections::HashMap<String, ContextParameter> =
+    std::collections::HashMap::new();
+  for p in &a.parameters {
+    param_map.insert(p.name.clone(), p.clone());
+  }
+  for p in &b.parameters {
+    param_map
+      .entry(p.name.clone())
+      .and_modify(|existing| {
+        if existing.default.is_none() && p.default.is_some() {
+          *existing = p.clone();
+        }
+      })
+      .or_insert_with(|| p.clone());
+  }
+  let mut parameters: Vec<ContextParameter> = param_map.into_values().collect();
+  parameters.sort_by(|a, b| a.name.cmp(&b.name));
+
+  // Merge dependencies (union)
+  let mut deps: std::collections::HashSet<String> = a.dependencies.iter().cloned().collect();
+  deps.extend(b.dependencies.iter().cloned());
+  let mut dependencies: Vec<String> = deps.into_iter().collect();
+  dependencies.sort();
+
+  // Smart merge body lines - keep unique lines from both
+  let mut body_lines: Vec<String> = Vec::new();
+  let mut seen = std::collections::HashSet::new();
+
+  for line in &a.body {
+    let trimmed = line.trim();
+    if !trimmed.is_empty() && seen.insert(trimmed.to_string()) {
+      body_lines.push(line.clone());
+    }
+  }
+  for line in &b.body {
+    let trimmed = line.trim();
+    if !trimmed.is_empty() && seen.insert(trimmed.to_string()) {
+      body_lines.push(line.clone());
+    }
+  }
+
+  // Render the merged recipe
+  let mut rendered = String::new();
+  if let Some(doc) = doc {
+    rendered.push_str("# ");
+    rendered.push_str(doc.trim());
+    rendered.push('\n');
+  }
+
+  rendered.push_str(name);
+  for param in &parameters {
+    rendered.push(' ');
+    rendered.push_str(&param.name);
+    if let Some(default) = &param.default {
+      rendered.push_str("='");
+      rendered.push_str(&default.replace('\'', "\\'"));
+      rendered.push('\'');
+    }
+  }
+
+  if !dependencies.is_empty() {
+    rendered.push_str(": ");
+    rendered.push_str(
+      &dependencies
+        .iter()
+        .map(|d| format!("({d})"))
+        .collect::<Vec<_>>()
+        .join(" "),
+    );
+  } else {
+    rendered.push(':');
+  }
+  rendered.push('\n');
+
+  for line in body_lines {
+    rendered.push_str("  ");
+    rendered.push_str(&line);
+    rendered.push('\n');
+  }
+
+  rendered
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -1067,7 +1529,7 @@ mod tests {
           "recipe":"test", "arguments":[]
         }
       }),
-      binary.as_os_str(),
+      binary.as_path(),
       directory.path(),
     )
     .unwrap();
@@ -1087,7 +1549,7 @@ mod tests {
     for argument in ["project_root", "just_binary", "unexpected"] {
       let response = call_tool_at(
         &json!({"name":"inspect_project", "arguments": {argument:"value"}}),
-        OsStr::new("unused"),
+        Path::new("unused"),
         directory.path(),
       );
       assert_eq!(
@@ -1102,7 +1564,7 @@ mod tests {
     let directory = tempfile::tempdir().unwrap();
     let response = call_tool_at(
       &json!({"name":"doctor", "arguments": []}),
-      OsStr::new("unused"),
+      Path::new("unused"),
       directory.path(),
     );
     assert_eq!(response.unwrap_err(), "`arguments` must be an object");

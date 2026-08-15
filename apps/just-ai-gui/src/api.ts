@@ -159,6 +159,59 @@ export interface AiExplainBatchResult {
   explanations: ExplainResponse[];
 }
 
+// Template types
+export interface TemplateParameterInfo {
+  name: string;
+  description: string;
+  required: boolean;
+  default: string | null;
+}
+
+export interface AiTemplateResult {
+  success: boolean;
+  template_name: string;
+  template_description: string;
+  template_category: string;
+  template_parameters: TemplateParameterInfo[];
+  template_body: string[];
+  summary: string;
+}
+
+export interface AiInstantiateTemplateResult {
+  success: boolean;
+  message: string;
+  diff?: string;
+  recipe_name?: string;
+  summary?: string;
+  recipe?: AddRecipeResponse;
+}
+
+export interface AiComposeWorkflowResult {
+  success: boolean;
+  message: string;
+  diff?: string;
+  recipes: string[];
+  summary?: string;
+  execution_order?: string[];
+  workflow?: ComposeWorkflowResponse;
+}
+
+export interface ComposeWorkflowResponse {
+  summary: string;
+  rationale: string[];
+  execution_order: string[];
+  recipes: ComposeRecipe[];
+}
+
+export interface ComposeRecipe {
+  name: string;
+  source: "existing" | "new" | "modified";
+  doc: string | null;
+  parameters: { name: string; default: string | null }[];
+  dependencies: string[];
+  body: string[];
+}
+
 // Wrapper responses from Tauri commands
 export interface AiAddRecipeResult {
   success: boolean;
@@ -224,4 +277,71 @@ export function aiFixBatch(projectRoot: string, write: boolean): Promise<AiFixBa
 
 export function aiExplainBatch(projectRoot: string, recipes?: string[], module?: string): Promise<AiExplainBatchResult> {
   return invoke("ai_explain_batch", { projectRoot, request: { recipes, module } });
+}
+
+// Template commands
+export function aiTemplate(projectRoot: string, request: string): Promise<AiTemplateResult> {
+  return invoke("ai_template", { projectRoot, request: { request } });
+}
+
+export function aiInstantiateTemplate(
+  projectRoot: string,
+  template: string,
+  values: Record<string, string>,
+  write: boolean
+): Promise<AiInstantiateTemplateResult> {
+  return invoke("ai_instantiate_template", { projectRoot, request: { template, values, write } });
+}
+
+export function aiComposeWorkflow(projectRoot: string, request: string, write: boolean): Promise<AiComposeWorkflowResult> {
+  return invoke("ai_compose_workflow", { projectRoot, request: { request, write } });
+}
+
+// Migrate types
+export interface MigrateAnalyzeResult {
+  success: boolean;
+  total_recipes: number;
+  unreferenced_recipes: string[];
+  isolated_recipes: string[];
+  cycles: string[][];
+  dependency_depths: Record<string, number>;
+  similar_recipes: [string, string, number][];
+}
+
+export interface MigrateModularizeResult {
+  success: boolean;
+  message: string;
+  modules: string[];
+  imports: string[];
+  moved_recipes: string[];
+  diff?: string;
+}
+
+export interface MigrateDeduplicateResult {
+  success: boolean;
+  message: string;
+  similar_pairs: [string, string, number][];
+  removed: string[];
+  merged: string[];
+  diff?: string;
+}
+
+export function aiMigrateAnalyze(projectRoot: string, json?: boolean): Promise<MigrateAnalyzeResult> {
+  return invoke("ai_migrate_analyze", { projectRoot, request: { json } });
+}
+
+export function aiMigrateModularize(projectRoot: string, write: boolean): Promise<MigrateModularizeResult> {
+  return invoke("ai_migrate_modularize", { projectRoot, request: { write } });
+}
+
+export function aiMigrateDeduplicate(
+  projectRoot: string,
+  write: boolean,
+  merge?: boolean,
+  similarityThreshold?: number
+): Promise<MigrateDeduplicateResult> {
+  return invoke("ai_migrate_deduplicate", {
+    projectRoot,
+    request: { write, merge: merge ?? false, similarity_threshold: similarityThreshold },
+  });
 }

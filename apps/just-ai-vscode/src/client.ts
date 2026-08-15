@@ -149,6 +149,61 @@ export class JustAiClient {
     return this.runJustAiCommand('export-context', pretty ? '--pretty' : '');
   }
 
+  // Migrate commands
+  async migrateAnalyze(json: boolean = false, similarityThreshold: number = 0.8): Promise<string> {
+    const args = ['migrate', 'analyze'];
+    if (json) {
+      args.push('--json');
+    }
+    args.push('--similarity-threshold', similarityThreshold.toString());
+    return this.runJustAiCommandWithArgs(args);
+  }
+
+  async migrateModularize(write: boolean = false, dryRun: boolean = false): Promise<string> {
+    const args = ['migrate', 'modularize'];
+    if (write) {
+      args.push('--write');
+    }
+    if (dryRun) {
+      args.push('--dry-run');
+    }
+    return this.runJustAiCommandWithArgs(args);
+  }
+
+  async migrateDeduplicate(write: boolean = false, similarityThreshold: number = 0.8, interactive: boolean = false, merge: boolean = false): Promise<string> {
+    const args = ['migrate', 'deduplicate'];
+    if (write) {
+      args.push('--write');
+    }
+    args.push('--similarity-threshold', similarityThreshold.toString());
+    if (interactive) {
+      args.push('--interactive');
+    }
+    if (merge) {
+      args.push('--merge');
+    }
+    return this.runJustAiCommandWithArgs(args);
+  }
+
+  async template(request: string): Promise<string> {
+    return this.runJustAiCommand('template', request);
+  }
+
+  async instantiateTemplate(template: string, values: Record<string, string>, write: boolean = false): Promise<string> {
+    const args = ['instantiate-template', template];
+    for (const [key, value] of Object.entries(values)) {
+      args.push(`${key}=${value}`);
+    }
+    if (write) {
+      args.push('--write');
+    }
+    return this.runJustAiCommandWithArgs(args);
+  }
+
+  async composeWorkflow(request: string, write: boolean = false): Promise<string> {
+    return this.runJustAiCommand('compose-workflow', request, write ? '--write' : '');
+  }
+
   async getHistory(limit: number = 20, recipe?: string, success?: boolean): Promise<HistoryRecord[]> {
     const args = ['history', 'recent', '--limit', limit.toString()];
     if (recipe) { args.push('--recipe', recipe); }

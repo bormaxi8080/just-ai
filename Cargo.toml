@@ -15,7 +15,7 @@ repository = "https://github.com/casey/just"
 rust-version = "1.89.0"
 
 [workspace]
-members = [".", "crates/*"]
+members = [".", "crates/*", "apps/just-ai-mcp"]
 
 [dependencies]
 blake3 = { version = "1.5.0", features = ["mmap", "rayon", "serde"] }
