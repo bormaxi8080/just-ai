@@ -1,0 +1,41 @@
+{
+  "name": "security-scan",
+  "description": "Comprehensive security scanning: dependencies, code, secrets, containers",
+  "category": "security",
+  "parameters": [
+    {
+      "name": "scan_type",
+      "description": "Type of scan (all, deps, code, secrets, container)",
+      "required": false,
+      "default": "all"
+    }
+  ],
+  "body": [
+    "# Dependency vulnerability scan",
+    "security-deps:",
+    "cargo audit",
+    "cargo deny check advisories",
+    "",
+    "# Static code analysis",
+    "security-code:",
+    "cargo geiger",
+    "cargo rustsec",
+    "",
+    "# Secret detection",
+    "security-secrets:",
+    "git-secrets --scan",
+    "truffle3hog filesystem . --no-git",
+    "",
+    "# Container scanning",
+    "security-container:",
+    "trivy image {{image_name}}",
+    "docker scout cves {{image_name}}",
+    "",
+    "# Full security scan",
+    "security-all: security-deps security-code security-secrets security-container",
+    "echo \"Security scan complete!\""
+  ],
+  "created_at": 1786816692,
+  "updated_at": 1786826323,
+  "version": 2
+}

@@ -40,6 +40,10 @@ build:
 fmt:
   cargo fmt --all
 
+# # Clippy linting
+fmt-check:
+  cargo fmt --all -- --check
+
 [group: 'check']
 shellcheck:
   shellcheck www/install.sh
@@ -235,6 +239,214 @@ test-completions:
   echo 'bar:' > tmp/complete/foo.just
   cd tmp/complete && PATH="`realpath bin`:$PATH" bash --init-file just.bash
 
+test-matrix:
+    echo "Testing rust stable,beta on ubuntu-latest,macos-latest"
+    cargo test
+
 [group: 'demo']
 rule124:
   just -f examples/rule124.just
+
+# # Security audit
+lint:
+  cargo clippy -- -D warnings
+  cargo fmt --all -- --check
+  
+
+lint-all: (lint)
+    @if true == "true"
+    cargo deny check
+
+# # Docker build
+audit:
+  cargo audit
+  
+
+# # Deploy stage
+docker-build:
+  docker build -t ghcr.io/app:latest .
+  
+
+docker-clean:
+    docker rmi myapp:build myapp:latest || true
+
+# # Clean up
+docker-run: (docker-prod)
+    docker run -d -p 8080:8080 --name myapp myapp:latest
+
+# # Run container
+docker-prod: (docker-build)
+    docker build --target prod -t myapp:latest .
+
+# # Production stage
+docker-test: (docker-build)
+    docker run --rm myapp:build cargo test
+
+deploy:
+  kubectl apply -f k8s/
+
+# # Rollback
+deploy-prod:
+    @if kubernetes == "kubernetes"
+    kubectl apply -f k8s/production/
+    @else if kubernetes == "docker"
+    docker compose -f docker-compose.production.yml up -d
+    @else
+    kubectl apply -f k8s/ --env production
+
+# # Deploy to production
+deploy-staging:
+    @if kubernetes == "kubernetes"
+    kubectl apply -f k8s/staging/
+    @else if kubernetes == "docker"
+    docker compose -f docker-compose.staging.yml up -d
+    @else
+    kubectl apply -f k8s/ --env staging
+
+# # Generate changelog
+version-bump:
+  cargo set-version --bump patch
+  
+
+# # Create git tag
+changelog:
+  git-cliff --output CHANGELOG.md
+  
+
+# # Publish to registry
+tag:
+  git add Cargo.toml CHANGELOG.md
+  git commit -m "chore: release v1.0.1"
+  git tag -a v1.0.1 -m "Release v1.0.1"
+  git push origin main --tags
+  
+
+release:
+  echo "Release v1.0.1 complete!"
+
+# # All quality checks
+deps-check:
+  cargo outdated
+  cargo deny check
+  
+
+quality:
+  echo "All quality checks passed!"
+
+# # Test documentation examples
+docs-build:
+  @if false == "true"
+  cargo doc --document-private-items --no-deps
+  @else
+  cargo doc --no-deps
+  
+
+# # Deploy to GitHub Pages
+docs-test:
+  cargo test --doc
+  
+
+# # Open docs locally
+docs-deploy-gh:
+  gh-pages -d target/doc
+  
+
+docs-open:
+  open target/doc/myapp/index.html
+
+# # Code scanning
+security-deps:
+    cargo audit
+    cargo deny check
+  
+
+# # Secret scanning
+security-code:
+    cargo geiger --forbid-only
+  
+
+# # Container scanning
+security-secrets:
+    git-secrets --scan
+    trufflehog filesystem --no-verification .
+  
+
+# # Full security scan
+security-container:
+    trivy image myapp:latest
+    docker scout cves myapp:latest
+  
+
+security-all: (security-deps) (security-code) (security-secrets) (security-container)
+    echo "Security scan complete!"
+
+rollback:
+    @if kubernetes == "kubernetes"
+    kubectl rollout undo deployment/staging
+    @else
+    echo "Rollback not configured for kubernetes"
+
+# # Create new migration
+db-migrate:
+    @if sqlx == "sqlx"
+    sqlx migrate run --database-url postgres://localhost/mydb
+    @else if sqlx == "diesel"
+    diesel migration run --database-url postgres://localhost/mydb
+    @else if sqlx == "sea-orm"
+    sea-orm-cli migrate up -u postgres://localhost/mydb
+  
+
+# # Revert last migration
+db-migrate-new NAME:
+    @if sqlx == "sqlx"
+    sqlx migrate add {{NAME}} --database-url postgres://localhost/mydb
+    @else if sqlx == "diesel"
+    diesel migration generate {{NAME}} --database-url postgres://localhost/mydb
+    @else if sqlx == "sea-orm"
+    sea-orm-cli migrate generate {{NAME}} -u postgres://localhost/mydb
+  
+
+db-migrate-revert:
+    @if sqlx == "sqlx"
+    sqlx migrate revert --database-url postgres://localhost/mydb
+    @else if sqlx == "diesel"
+    diesel migration revert --database-url postgres://localhost/mydb
+    @else if sqlx == "sea-orm"
+    sea-orm-cli migrate down -u postgres://localhost/mydb
+
+db-migrate-reset: (db-migrate-down)
+    sqlx migrate run --database-url postgres://localhost/mydb
+
+# # Reset and re-run all migrations
+db-migrate-status:
+    sqlx migrate info --database-url postgres://localhost/mydb
+
+# # Show migration status
+db-migrate-down:
+    sqlx migrate revert --database-url postgres://localhost/mydb
+
+# # Revert last migration
+db-migrate-up:
+    sqlx migrate run --database-url postgres://localhost/mydb
+
+# # Run migrations up
+db-migrate-create NAME='add_table':
+    sqlx migrate add {{NAME}}
+
+# # Save baseline
+bench:
+  cargo bench --bench *
+  
+
+# # Compare with baseline
+bench-save: (bench)
+  cargo bench --bench * -- --save-baseline main
+  
+
+# # Generate benchmark report
+bench-compare: (bench)
+  cargo bench --bench * -- --baseline main
+  
+
+bench-report: (bench)
+  cargo bench --bench * -- --output-format bencher | tee bench-results.txt

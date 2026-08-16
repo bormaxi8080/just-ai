@@ -1,0 +1,72 @@
+{
+  "name": "ci-pipeline",
+  "description": "Complete CI/CD pipeline with build, test, lint, and deploy stages",
+  "category": "ci",
+  "parameters": [
+    {
+      "name": "language",
+      "description": "Programming language (rust, node, python, go, java)",
+      "required": true,
+      "default": "rust"
+    },
+    {
+      "name": "registry",
+      "description": "Container registry for docker images",
+      "required": false,
+      "default": "ghcr.io"
+    },
+    {
+      "name": "deploy_target",
+      "description": "Deployment target (kubernetes, serverless, vm)",
+      "required": false,
+      "default": "kubernetes"
+    },
+    {
+      "name": "deploy_script",
+      "description": "Deploy command script",
+      "required": false,
+      "default": "kubectl apply -f k8s/"
+    },
+    {
+      "name": "project_name",
+      "description": "Project name (for Docker image)",
+      "required": false,
+      "default": "app"
+    },
+    {
+      "name": "version",
+      "description": "Version tag (for Docker image)",
+      "required": false,
+      "default": "latest"
+    }
+  ],
+  "body": [
+    "Build stage",
+    "build:",
+    "cargo build --release",
+    "",
+    "Test stage",
+    "test:",
+    "cargo test --all",
+    "",
+    "Lint stage",
+    "lint:",
+    "cargo clippy -- -D warnings",
+    "cargo fmt --all -- --check",
+    "",
+    "Security audit",
+    "audit:",
+    "cargo audit",
+    "",
+    "Docker build",
+    "docker-build:",
+    "docker build -t {{registry}}/{{project_name}}:{{version}} .",
+    "",
+    "Deploy stage",
+    "deploy: docker-build",
+    "{{deploy_script}}"
+  ],
+  "created_at": 1786816692,
+  "updated_at": 1786826323,
+  "version": 3
+}

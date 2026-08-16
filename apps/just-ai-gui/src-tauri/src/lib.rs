@@ -10,7 +10,7 @@ use just_ai::{
   ai_responses::{
     AddRecipeResponse as AiAddRecipeResponse,
     ComposeWorkflowResponse as AiComposeWorkflowResponse, ExplainResponse, FixResponse,
-    RecipeProposal, SuggestResponse, TemplateResponse as AiTemplateResponse,
+    RecipeProposal, SuggestResponse, TemplateParameter, TemplateResponse as AiTemplateResponse,
     WorkflowResponse as AiWorkflowResponse,
   },
   application::{
@@ -25,7 +25,8 @@ use just_ai::{
   inspection::{ContextRecipe, ProjectContext, inspect_project_at},
   prompts,
   proposal::{
-    handle_add, handle_compose_workflow, handle_fix, handle_workflow, replace_recipe, unified_diff,
+    builtin_templates, handle_add, handle_compose_workflow, handle_fix, handle_workflow,
+    install_builtin_templates, replace_recipe, unified_diff,
     validate_fix_proposal, validate_justfile,
   },
 };
@@ -1457,6 +1458,76 @@ async fn ai_doctor(project_root: PathBuf) -> Result<GuiDoctorResult, String> {
 }
 
 // ========================================================================
+// Built-in Template Commands
+// ========================================================================
+
+#[derive(Serialize)]
+struct BuiltinTemplateInfo {
+  name: String,
+  description: String,
+  category: String,
+  parameters: Vec<TemplateParameter>,
+}
+
+#[derive(Serialize)]
+struct TemplateListBuiltinResult {
+  success: bool,
+  templates: Vec<BuiltinTemplateInfo>,
+}
+
+#[tauri::command]
+async fn ai_template_list_builtin() -> Result<TemplateListBuiltinResult, String> {
+  let builtin = builtin_templates();
+  let templates: Vec<BuiltinTemplateInfo> = builtin
+    .into_iter()
+    .map(|t| BuiltinTemplateInfo {
+      name: t.name,
+      description: t.description,
+      category: t.category,
+      parameters: t.parameters,
+    })
+    .collect();
+  Ok(TemplateListBuiltinResult {
+    success: true,
+    templates,
+  })
+}
+
+#[derive(Deserialize)]
+struct TemplateInstallRequest {
+  templates: Option<Vec<String>>,
+}
+
+#[derive(Serialize)]
+struct TemplateInstallResult {
+  success: bool,
+  installed: Vec<String>,
+}
+
+#[tauri::command]
+async fn ai_template_install(
+  project_root: PathBuf,
+  request: TemplateInstallRequest,
+) -> Result<TemplateInstallResult, String> {
+  if !project_root.is_dir() {
+    return Err(format!(
+      "project root is not a directory: {}",
+      project_root.display()
+    ));
+  }
+  let project_root = project_root.canonicalize().unwrap_or(project_root);
+  env::set_current_dir(&project_root).map_err(|error| error.to_string())?;
+
+  let installed = install_builtin_templates(&project_root, request.templates)
+    .map_err(|error| error.to_string())?;
+
+  Ok(TemplateInstallResult {
+    success: true,
+    installed,
+  })
+}
+
+// ========================================================================
 // Config Validation Commands
 // ========================================================================
 
@@ -1540,6 +1611,8 @@ pub fn run() {
       ai_doctor,
       ai_config_validate,
       ai_config_schema,
+      ai_template_list_builtin,
+      ai_template_install,
     ])
     .run(tauri::generate_context!())
     .expect("failed to run just-ai desktop application");

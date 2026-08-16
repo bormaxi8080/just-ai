@@ -1,0 +1,54 @@
+{
+  "name": "deploy",
+  "description": "Deployment pipeline for various targets",
+  "category": "deploy",
+  "parameters": [
+    {
+      "name": "target",
+      "description": "Deployment target (kubernetes, serverless, vm, docker)",
+      "required": true,
+      "default": "kubernetes"
+    },
+    {
+      "name": "environment",
+      "description": "Environment (staging, production)",
+      "required": false,
+      "default": "staging"
+    },
+    {
+      "name": "deploy_script",
+      "description": "Custom deploy script command",
+      "required": false,
+      "default": "kubectl apply -f k8s/"
+    }
+  ],
+  "body": [
+    "# Deploy to staging",
+    "deploy-staging:",
+    "  @if {{target}} == \"kubernetes\"",
+    "  kubectl apply -f k8s/staging/",
+    "  @else if {{target}} == \"docker\"",
+    "  docker compose -f docker-compose.staging.yml up -d",
+    "  @else",
+    "  {{deploy_script}} --env staging",
+    "",
+    "# Deploy to production",
+    "deploy-prod:",
+    "  @if {{target}} == \"kubernetes\"",
+    "  kubectl apply -f k8s/production/",
+    "  @else if {{target}} == \"docker\"",
+    "  docker compose -f docker-compose.production.yml up -d",
+    "  @else",
+    "  {{deploy_script}} --env production",
+    "",
+    "# Rollback",
+    "rollback:",
+    "  @if {{target}} == \"kubernetes\"",
+    "  kubectl rollout undo deployment/{{environment}}",
+    "  @else",
+    "  echo \"Rollback not configured for {{target}}\""
+  ],
+  "created_at": 1786816692,
+  "updated_at": 1786817269,
+  "version": 1
+}

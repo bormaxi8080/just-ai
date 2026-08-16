@@ -1,0 +1,39 @@
+{
+  "name": "benchmark",
+  "description": "Run benchmarks and compare with baseline",
+  "category": "bench",
+  "parameters": [
+    {
+      "name": "bench_name",
+      "description": "Benchmark name or pattern",
+      "required": false,
+      "default": "*"
+    },
+    {
+      "name": "baseline_branch",
+      "description": "Git branch to compare against",
+      "required": false,
+      "default": "main"
+    }
+  ],
+  "body": [
+    "# Run benchmarks",
+    "bench:",
+    "cargo bench --bench {{bench_name}}",
+    "",
+    "# Save baseline",
+    "bench-save: bench",
+    "cargo bench --bench {{bench_name}} -- --save-baseline main",
+    "",
+    "# Compare with baseline",
+    "bench-compare: bench",
+    "cargo bench --bench {{bench_name}} -- --baseline {{baseline_branch}}",
+    "",
+    "# Generate benchmark report",
+    "bench-report: bench",
+    "cargo bench --bench {{bench_name}} -- --output-format bencher | tee bench-results.txt"
+  ],
+  "created_at": 1786816692,
+  "updated_at": 1786826323,
+  "version": 2
+}

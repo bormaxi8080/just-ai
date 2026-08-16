@@ -1,0 +1,59 @@
+{
+  "name": "release",
+  "description": "Automated release workflow with version bump, changelog, and tagging",
+  "category": "release",
+  "parameters": [
+    {
+      "name": "version_type",
+      "description": "Version bump type (patch, minor, major)",
+      "required": true,
+      "default": "patch"
+    },
+    {
+      "name": "changelog_tool",
+      "description": "Tool to generate changelog (git-cliff, conventional-changelog)",
+      "required": false,
+      "default": "git-cliff"
+    },
+    {
+      "name": "publish",
+      "description": "Whether to publish to package registry",
+      "required": false,
+      "default": "true"
+    },
+    {
+      "name": "version",
+      "description": "Version after bump (e.g., 1.2.3)",
+      "required": false,
+      "default": "1.0.0"
+    }
+  ],
+  "body": [
+    "# Version bump",
+    "version-bump:",
+    "cargo set-version --bump {{version_type}}",
+    "",
+    "# Generate changelog",
+    "changelog:",
+    "{{changelog_tool}} --output CHANGELOG.md",
+    "",
+    "# Create git tag",
+    "tag: version-bump changelog",
+    "git add Cargo.toml CHANGELOG.md",
+    "git commit -m \"chore: release v{{version}}\"",
+    "git tag -a v{{version}} -m \"Release v{{version}}\"",
+    "git push origin main --tags",
+    "",
+    "# Publish to registry",
+    "publish: tag",
+    "@if {{publish}} == \"true\"",
+    "cargo publish",
+    "",
+    "# Full release",
+    "release: publish",
+    "echo \"Release v{{version}} complete!\""
+  ],
+  "created_at": 1786819572,
+  "updated_at": 1786826323,
+  "version": 3
+}

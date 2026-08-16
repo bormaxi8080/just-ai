@@ -1,0 +1,33 @@
+{
+  "name": "lint",
+  "description": "Code quality checks with clippy, fmt, and other linters",
+  "category": "code-quality",
+  "parameters": [
+    {
+      "name": "language",
+      "description": "Programming language",
+      "required": true,
+      "default": "rust"
+    },
+    {
+      "name": "strict",
+      "description": "Enable strict mode (deny warnings)",
+      "required": false,
+      "default": "true"
+    }
+  ],
+  "body": [
+    "# Lint and format",
+    "lint:",
+    "  cargo clippy --all-targets --all-features -- -D warnings",
+    "  cargo fmt --all -- --check",
+    "",
+    "# Additional checks",
+    "lint-all: lint",
+    "  @if {{strict}} == \"true\"",
+    "  cargo deny check"
+  ],
+  "created_at": 1786816692,
+  "updated_at": 1786817269,
+  "version": 1
+}

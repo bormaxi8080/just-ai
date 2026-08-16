@@ -1,0 +1,48 @@
+{
+  "name": "docs",
+  "description": "Generate and deploy documentation",
+  "category": "docs",
+  "parameters": [
+    {
+      "name": "host",
+      "description": "Documentation host (github-pages, gitlab-pages, netlify)",
+      "required": false,
+      "default": "github-pages"
+    },
+    {
+      "name": "include_private",
+      "description": "Include private items in docs",
+      "required": false,
+      "default": "false"
+    },
+    {
+      "name": "project_name",
+      "description": "Project name (for documentation path)",
+      "required": false,
+      "default": "app"
+    }
+  ],
+  "body": [
+    "# Build documentation",
+    "docs-build:",
+    "@if {{include_private}} == \"true\"",
+    "cargo doc --document-private-items --no-deps",
+    "@else",
+    "cargo doc --no-deps",
+    "",
+    "# Test documentation examples",
+    "docs-test:",
+    "cargo test --doc",
+    "",
+    "# Deploy to GitHub Pages",
+    "docs-deploy-gh: docs-build",
+    "gh-pages -d target/doc",
+    "",
+    "# Open docs locally",
+    "docs-open: docs-build",
+    "open target/doc/{{project_name}}/index.html"
+  ],
+  "created_at": 1786816692,
+  "updated_at": 1786826323,
+  "version": 2
+}

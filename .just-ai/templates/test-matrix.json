@@ -1,0 +1,40 @@
+{
+  "name": "test-matrix",
+  "description": "Run tests across multiple versions and platforms",
+  "category": "test",
+  "parameters": [
+    {
+      "name": "language",
+      "description": "Programming language",
+      "required": true,
+      "default": "rust"
+    },
+    {
+      "name": "versions",
+      "description": "Comma-separated version list (e.g., 1.70,1.71,stable)",
+      "required": true,
+      "default": "stable,beta,nightly"
+    },
+    {
+      "name": "platforms",
+      "description": "Comma-separated platform list (e.g., ubuntu,macos,windows)",
+      "required": false,
+      "default": "ubuntu-latest,macos-latest,windows-latest"
+    },
+    {
+      "name": "test_command",
+      "description": "Test command to run",
+      "required": false,
+      "default": "cargo test"
+    }
+  ],
+  "body": [
+    "Test matrix for {{language}}",
+    "test-matrix:",
+    "  echo \"Testing {{language}} {{versions}} on {{platforms}}\"",
+    "  {{test_command}}"
+  ],
+  "created_at": 1786816873,
+  "updated_at": 1786826323,
+  "version": 3
+}

@@ -350,6 +350,32 @@ export function aiConfigSchema(): Promise<ConfigSchemaResult> {
   return invoke("ai_config_schema", {});
 }
 
+// Built-in template types
+export interface BuiltinTemplateInfo {
+  name: string;
+  description: string;
+  category: string;
+  parameters: TemplateParameterInfo[];
+}
+
+export interface TemplateListBuiltinResult {
+  success: boolean;
+  templates: BuiltinTemplateInfo[];
+}
+
+export interface TemplateInstallResult {
+  success: boolean;
+  installed: string[];
+}
+
+export function aiTemplateListBuiltin(): Promise<TemplateListBuiltinResult> {
+  return invoke("ai_template_list_builtin", {});
+}
+
+export function aiTemplateInstall(projectRoot: string, templates?: string[]): Promise<TemplateInstallResult> {
+  return invoke("ai_template_install", { projectRoot, request: { templates } });
+}
+
 // Migrate types
 export interface MigrateAnalyzeResult {
   success: boolean;

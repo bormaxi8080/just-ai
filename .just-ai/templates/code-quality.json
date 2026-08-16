@@ -1,0 +1,47 @@
+{
+  "name": "code-quality",
+  "description": "Comprehensive code quality checks: format, lint, audit, security",
+  "category": "quality",
+  "parameters": [
+    {
+      "name": "language",
+      "description": "Programming language",
+      "required": true,
+      "default": "rust"
+    },
+    {
+      "name": "deny_warnings",
+      "description": "Deny warnings in clippy",
+      "required": false,
+      "default": "true"
+    }
+  ],
+  "body": [
+    "# Format check",
+    "fmt-check:",
+    "cargo fmt --all -- --check",
+    "",
+    "# Clippy linting",
+    "clippy:",
+    "@if {{deny_warnings}} == \"true\"",
+    "cargo clippy -- -D warnings",
+    "@else",
+    "cargo clippy",
+    "",
+    "# Security audit",
+    "audit:",
+    "cargo audit",
+    "",
+    "# Dependency check",
+    "deps-check:",
+    "cargo outdated",
+    "cargo deny check",
+    "",
+    "# All quality checks",
+    "quality: fmt-check clippy audit deps-check",
+    "echo \"All quality checks passed!\""
+  ],
+  "created_at": 1786817269,
+  "updated_at": 1786826323,
+  "version": 2
+}

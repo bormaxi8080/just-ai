@@ -91,6 +91,13 @@ enum Commands {
   },
   #[command(about = "List all stored templates")]
   TemplateList,
+  #[command(about = "List all built-in templates shipped with just-ai")]
+  TemplateListBuiltin,
+  #[command(about = "Install built-in templates to project")]
+  TemplateInstall {
+    #[arg(help = "Template names to install (optional, installs all if omitted)")]
+    templates: Vec<String>,
+  },
   #[command(about = "Delete a stored template")]
   TemplateDelete {
     #[arg(help = "Template name to delete")]
@@ -104,6 +111,11 @@ enum Commands {
     values: Vec<String>,
     #[arg(long, help = "Apply the instantiated recipe after validation")]
     write: bool,
+    #[arg(
+      long,
+      help = "Skip recipes that already exist with different implementations"
+    )]
+    force: bool,
   },
   #[command(about = "Compose a workflow by reusing and adapting existing recipes")]
   ComposeWorkflow {
@@ -455,6 +467,32 @@ fn try_main() -> Result<(), Box<dyn Error>> {
         }
       }
     }
+    Commands::TemplateListBuiltin => {
+      let builtin = crate::proposal::list_builtin_template_names();
+      println!("{} built-in template(s) available:", builtin.len());
+      for name in builtin {
+        println!("  - {}", name);
+      }
+      println!("\nInstall with: just-ai template-install <name1> [name2] ...");
+      println!("Or install all: just-ai template-install");
+    }
+    Commands::TemplateInstall { templates } => {
+      let project_root = env::current_dir()?;
+      let names = if templates.is_empty() {
+        None
+      } else {
+        Some(templates)
+      };
+      let installed = crate::proposal::install_builtin_templates(&project_root, names)?;
+      if installed.is_empty() {
+        println!("No templates installed (already installed or not found).");
+      } else {
+        println!("Installed {} template(s):", installed.len());
+        for name in installed {
+          println!("  - {}", name);
+        }
+      }
+    }
     Commands::TemplateDelete { template } => {
       let project_root = env::current_dir()?;
       let deleted = crate::proposal::delete_template(&project_root, &template)?;
@@ -468,6 +506,7 @@ fn try_main() -> Result<(), Box<dyn Error>> {
       template,
       values,
       write,
+      force,
     } => {
       // Load template from disk
       let project_root = env::current_dir()?;
@@ -489,12 +528,12 @@ fn try_main() -> Result<(), Box<dyn Error>> {
         values_map.insert(parts[0].to_string(), parts[1].to_string());
       }
 
-      // Check required parameters
+      // Apply defaults for all parameters (required and optional)
       for param in &stored_template.parameters {
-        if param.required && !values_map.contains_key(&param.name) {
+        if !values_map.contains_key(&param.name) {
           if let Some(default) = &param.default {
             values_map.insert(param.name.clone(), default.clone());
-          } else {
+          } else if param.required {
             return Err(format!("required parameter '{}' not provided", param.name).into());
           }
         }
@@ -507,6 +546,7 @@ fn try_main() -> Result<(), Box<dyn Error>> {
         &stored_template,
         &values_map,
         write,
+        force,
       )?;
     }
     Commands::ExportContext { pretty } => {

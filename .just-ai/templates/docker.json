@@ -1,0 +1,49 @@
+{
+  "name": "docker",
+  "description": "Multi-stage Dockerfile with build, test, and production stages",
+  "category": "docker",
+  "parameters": [
+    {
+      "name": "base_image",
+      "description": "Base Docker image",
+      "required": true,
+      "default": "rust:1.75"
+    },
+    {
+      "name": "app_name",
+      "description": "Application name",
+      "required": true,
+      "default": "app"
+    },
+    {
+      "name": "port",
+      "description": "Exposed port",
+      "required": false,
+      "default": "8080"
+    }
+  ],
+  "body": [
+    "# Build stage",
+    "docker-build:",
+    "docker build --target build -t {{app_name}}:build .",
+    "",
+    "# Test stage",
+    "docker-test: docker-build",
+    "docker run --rm {{app_name}}:build cargo test",
+    "",
+    "# Production stage",
+    "docker-prod: docker-build",
+    "docker build --target prod -t {{app_name}}:latest .",
+    "",
+    "# Run container",
+    "docker-run: docker-prod",
+    "docker run -d -p {{port}}:{{port}} --name {{app_name}} {{app_name}}:latest",
+    "",
+    "# Clean up",
+    "docker-clean:",
+    "docker rmi {{app_name}}:build {{app_name}}:latest || true"
+  ],
+  "created_at": 1786817269,
+  "updated_at": 1786826323,
+  "version": 2
+}

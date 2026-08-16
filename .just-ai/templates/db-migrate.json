@@ -1,0 +1,49 @@
+{
+  "name": "db-migrate",
+  "description": "Database migration management with up/down scripts",
+  "category": "database",
+  "parameters": [
+    {
+      "name": "migration_tool",
+      "description": "Migration tool (sqlx, diesel, sea-orm)",
+      "required": true,
+      "default": "sqlx"
+    },
+    {
+      "name": "database_url",
+      "description": "Database connection URL",
+      "required": true,
+      "default": "postgres://localhost/mydb"
+    },
+    {
+      "name": "name",
+      "description": "Migration name",
+      "required": false,
+      "default": "add_table"
+    }
+  ],
+  "body": [
+    "# Create new migration",
+    "db-migrate-create NAME={{name}}:",
+    "  {{migration_tool}} migrate add {{NAME}}",
+    "",
+    "# Run migrations up",
+    "db-migrate-up:",
+    "  {{migration_tool}} migrate run --database-url {{database_url}}",
+    "",
+    "# Revert last migration",
+    "db-migrate-down:",
+    "  {{migration_tool}} migrate revert --database-url {{database_url}}",
+    "",
+    "# Show migration status",
+    "db-migrate-status:",
+    "  {{migration_tool}} migrate info --database-url {{database_url}}",
+    "",
+    "# Reset and re-run all migrations",
+    "db-migrate-reset: db-migrate-down",
+    "  {{migration_tool}} migrate run --database-url {{database_url}}"
+  ],
+  "created_at": 1786816692,
+  "updated_at": 1786826323,
+  "version": 2
+}
