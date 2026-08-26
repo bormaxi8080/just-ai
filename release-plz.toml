@@ -4,7 +4,7 @@
 changelog_config = "release-plz-changelog.toml"
 
 # GitHub repository for creating releases
-[[workspace.release]]
+[workspace.release]
 repo_url = "https://github.com/bormaxi8080/just-ai"
 
 # Package configuration

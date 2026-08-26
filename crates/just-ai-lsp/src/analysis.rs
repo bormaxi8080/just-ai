@@ -294,10 +294,7 @@ pub fn provide_code_actions(
                       Position::new(text.lines().count() as u32, 0),
                       Position::new(text.lines().count() as u32, 0),
                     ),
-                    new_text: format!(
-                      "\n{}:\n  # implement {}\n",
-                      recipe_name, recipe_name
-                    ),
+                    new_text: format!("\n{}:\n  # implement {}\n", recipe_name, recipe_name),
                   }],
                 );
                 map
