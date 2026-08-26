@@ -91,6 +91,10 @@ jobs:
 
     - uses: Swatinem/rust-cache@v2
 
+    - name: Build CLI binary (required for integration tests)
+      shell: bash
+      run: cargo build --package just-ai --bin just-ai
+
     - name: Test
       shell: bash
       run: cargo test --all

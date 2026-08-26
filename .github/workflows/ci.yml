@@ -40,6 +40,9 @@ jobs:
       - name: Run Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
+      - name: Build CLI binary (required for integration tests)
+        run: cargo build --package just-ai --bin just-ai
+
       - name: Run tests
         run: cargo test --workspace --all-targets
 
