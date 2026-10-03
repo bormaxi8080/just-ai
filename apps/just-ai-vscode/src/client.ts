@@ -5,11 +5,12 @@ import { existsSync } from 'fs';
 
 export interface JustRecipe {
   namepath: string;
+  module_path: string;
   risk: 'low' | 'medium' | 'high' | 'blocked';
   risks: Array<{ level: string; line: string; reason: string }>;
   body: string[];
   dependencies: string[];
-  parameters: Array<{ name: string; default?: string }>;
+  parameters: Array<{ name: string; default?: string; kind?: string }>;
   doc?: string;
 }
 
@@ -60,10 +61,14 @@ export class JustAiClient {
     return json ? JSON.parse(output) : output;
   }
 
-  async runRecipe(recipe: string, confirmation?: string): Promise<string> {
+  async prepareRecipe(recipe: string, arguments_: string[] = []): Promise<{ policy: { decision: string; reason?: string; phrase?: string }; preview: string[] }> {
+    return JSON.parse(await this.runJustAiCommand('prepare', '--', recipe, ...arguments_));
+  }
+
+  async runRecipe(recipe: string, confirmation?: string, arguments_: string[] = []): Promise<string> {
     const args = ['run', '--yes'];
     if (confirmation !== undefined) { args.push('--confirm', confirmation); }
-    args.push('--', recipe);
+    args.push('--', recipe, ...arguments_);
     return this.runJustAiCommandWithArgs(args);
   }
 
@@ -207,21 +212,14 @@ export class JustAiClient {
 
   static getProjectRoot(uri: vscode.Uri): string | undefined {
     const workspaceFolder = vscode.workspace.getWorkspaceFolder(uri);
-    if (workspaceFolder) {
-      return workspaceFolder.uri.fsPath;
-    }
-
-    // Try to find justfile by walking up
+    if (!workspaceFolder) { return undefined; }
     let currentDir = dirname(uri.fsPath);
-    while (currentDir !== dirname(currentDir)) {
-      if (existsSync(join(currentDir, 'justfile')) ||
-          existsSync(join(currentDir, 'Justfile')) ||
-          existsSync(join(currentDir, '.just'))) {
-        return currentDir;
-      }
+    while (true) {
+      if (existsSync(join(currentDir, 'justfile')) || existsSync(join(currentDir, 'Justfile')) || existsSync(join(currentDir, '.justfile'))) { return currentDir; }
+      if (currentDir === workspaceFolder?.uri.fsPath || currentDir === dirname(currentDir)) { break; }
       currentDir = dirname(currentDir);
     }
-    return undefined;
+    return workspaceFolder?.uri.fsPath;
   }
 }
 
@@ -229,6 +227,8 @@ export class RiskDiagnostics {
   private collection: vscode.DiagnosticCollection;
   private client: JustAiClient | null = null;
   private enabled: boolean = true;
+  private generations = new Map<string, number>();
+  private sequence = 0;
 
   constructor(
     private context: vscode.ExtensionContext,
@@ -259,7 +259,19 @@ export class RiskDiagnostics {
     }
 
     try {
-      const report = await this.client.runDoctor(true) as DoctorReport;
+      const key = document.uri.toString();
+      const generation = ++this.sequence;
+      this.generations.set(key, generation);
+      if (document.isDirty) { this.collection.delete(document.uri); return; }
+      await new Promise(resolve => setTimeout(resolve, 200));
+      if (this.generations.get(key) !== generation || !this.enabled) { return; }
+      const root = JustAiClient.getProjectRoot(document.uri);
+      if (!root) { return; }
+      const config = vscode.workspace.getConfiguration('just-ai', document.uri);
+      const client = new JustAiClient(root, config.get<string>('justBinary', 'just'), config.get<string>('companionBinary', 'just-ai'));
+      const context = await client.getProjectContext();
+      const report = await client.runDoctor(true) as DoctorReport;
+      if (this.generations.get(key) !== generation || !this.enabled || document.isDirty) { return; }
       const diagnostics: vscode.Diagnostic[] = [];
 
       for (const recipe of report.recipes) {
@@ -269,7 +281,10 @@ export class RiskDiagnostics {
 
         for (const finding of recipe.findings) {
           // Try to find the line in the document
-          const lineIndex = this.findLineInDocument(document, finding.line);
+          const recipeContext = context.recipes.find(r => r.namepath === recipe.namepath);
+          const module = context.modules.find(m => m.module_path === recipeContext?.module_path);
+          if (!recipeContext || !module || module.source !== document.uri.fsPath) { continue; }
+          const lineIndex = this.findLineInDocument(document, finding.line, recipeContext.namepath.split('::').pop()!);
           if (lineIndex !== -1) {
             const range = new vscode.Range(lineIndex, 0, lineIndex, 1000);
             const diagnostic = new vscode.Diagnostic(
@@ -299,19 +314,22 @@ export class RiskDiagnostics {
     }
   }
 
-  private findLineInDocument(document: vscode.TextDocument, searchLine: string): number {
-    const normalizedSearch = searchLine.trim().toLowerCase();
-    if (!normalizedSearch) { return -1; }
+  private findLineInDocument(document: vscode.TextDocument, searchLine: string, recipe: string): number {
+    let inside = false;
     for (let i = 0; i < document.lineCount; i++) {
-      const line = document.lineAt(i).text.trim().toLowerCase();
-      if (line && (line.includes(normalizedSearch) || normalizedSearch.includes(line))) {
-        return i;
+      const line = document.lineAt(i).text;
+      if (!inside) {
+        if (line.startsWith(recipe + ':') || line.startsWith(recipe + ' ') || line.startsWith('@' + recipe + ':') || line.startsWith('@' + recipe + ' ')) { inside = true; }
+        continue;
       }
+      if (line.trim() && !line.startsWith(' ') && !line.startsWith('\t')) { break; }
+      if (line.trim() === searchLine.trim()) { return i; }
     }
     return -1;
   }
 
   clear(): void {
+    this.generations.clear();
     this.collection.clear();
   }
 }

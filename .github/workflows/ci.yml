@@ -41,10 +41,17 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
 
       - name: Build CLI binary (required for integration tests)
-        run: cargo build --package just-ai --bin just-ai
+        run: cargo build --locked --package just --package just-ai --package just-ai-mcp --bins
+
+      - name: Use built upstream runner
+        shell: bash
+        run: echo "${{ github.workspace }}/target/debug" >> "$GITHUB_PATH"
 
       - name: Run tests
-        run: cargo test --workspace --all-targets
+        run: cargo test --locked --workspace --all-targets
+
+      - name: Verify companion scenarios
+        run: python tests/companion_smoke.py --bin-dir target/debug
 
   # -------------------------------------------------------------------
   # Build CLI binary for all platforms

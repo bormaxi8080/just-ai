@@ -87,12 +87,27 @@ export function activate(context: vscode.ExtensionContext): void {
     })
   );
 
+  context.subscriptions.push(vscode.window.onDidChangeActiveTextEditor(editor => {
+    if (!editor || !vscode.workspace.getWorkspaceFolder(editor.document.uri)) { return; }
+    const client = clientForUri(editor.document.uri);
+    historyProvider.setClient(client);
+    historyProvider.refresh();
+  }));
+  historyProvider.refresh();
+
   // Initial diagnostics for open justfiles
   for (const document of vscode.workspace.textDocuments) {
     if (document.languageId === 'just') {
       riskDiagnostics.refresh(document);
     }
   }
+}
+
+function clientForUri(uri = vscode.window.activeTextEditor?.document.uri): JustAiClient {
+  const root = uri ? JustAiClient.getProjectRoot(uri) : getProjectRoot();
+  if (!root) { throw new Error('Open a workspace containing a justfile.'); }
+  const config = vscode.workspace.getConfiguration('just-ai', uri);
+  return new JustAiClient(root, config.get<string>('justBinary', 'just'), config.get<string>('companionBinary', 'just-ai'));
 }
 
 function registerCommands(context: vscode.ExtensionContext): void {
@@ -238,12 +253,13 @@ function registerCommands(context: vscode.ExtensionContext): void {
 }
 
 async function runDoctor(): Promise<void> {
+  const client = clientForUri();
   outputChannel.clear();
   outputChannel.show();
   outputChannel.appendLine('Running just-ai doctor...');
 
   try {
-    const result = await justAiClient.runDoctor(false) as string;
+    const result = await client.runDoctor(false) as string;
     outputChannel.appendLine(result);
 
     if (result.includes('blocked')) {
@@ -261,12 +277,13 @@ async function runDoctor(): Promise<void> {
 }
 
 async function runSuggest(): Promise<void> {
+  const client = clientForUri();
   outputChannel.clear();
   outputChannel.show();
   outputChannel.appendLine('Asking AI for recipe suggestions...');
 
   try {
-    const result = await justAiClient.suggest();
+    const result = await client.suggest();
     outputChannel.appendLine(result);
 
     // Show in a new document for better readability
@@ -283,6 +300,7 @@ async function runSuggest(): Promise<void> {
 }
 
 async function runExplain(uri?: vscode.Uri): Promise<void> {
+  const client = clientForUri(uri);
   let recipe: string | undefined;
 
   if (uri) {
@@ -302,7 +320,7 @@ async function runExplain(uri?: vscode.Uri): Promise<void> {
   if (!recipe) {
     // Ask user to pick a recipe
     try {
-      const context = await justAiClient.getProjectContext();
+      const context = await client.getProjectContext();
       const recipeNames = context.recipes.map(r => r.namepath);
       recipe = await vscode.window.showQuickPick(recipeNames, {
         placeHolder: 'Select a recipe to explain'
@@ -320,7 +338,7 @@ async function runExplain(uri?: vscode.Uri): Promise<void> {
   outputChannel.appendLine(`Explaining recipe: ${recipe}...`);
 
   try {
-    const result = await justAiClient.explain(recipe);
+    const result = await client.explain(recipe);
     outputChannel.appendLine(result);
 
     const doc = await vscode.workspace.openTextDocument({
@@ -336,6 +354,7 @@ async function runExplain(uri?: vscode.Uri): Promise<void> {
 }
 
 async function runAdd(): Promise<void> {
+  const client = clientForUri();
   const request = await vscode.window.showInputBox({
     placeHolder: 'Describe the recipe you want to add (e.g., "run tests with coverage")',
     prompt: 'Enter a natural-language description of the recipe to create',
@@ -355,7 +374,7 @@ async function runAdd(): Promise<void> {
   outputChannel.appendLine(`Generating recipe for: ${request}...`);
 
   try {
-    const result = await justAiClient.add(request, write === 'Write to justfile');
+    const result = await client.add(request, write === 'Write to justfile');
     outputChannel.appendLine(result);
 
     if (write === 'Write to justfile') {
@@ -375,8 +394,9 @@ async function runAdd(): Promise<void> {
 }
 
 async function runFix(): Promise<void> {
+  const client = clientForUri();
   try {
-    const context = await justAiClient.getProjectContext();
+    const context = await client.getProjectContext();
     const recipeNames = context.recipes.map(r => r.namepath);
 
     const recipe = await vscode.window.showQuickPick(recipeNames, {
@@ -395,7 +415,7 @@ async function runFix(): Promise<void> {
     outputChannel.show();
     outputChannel.appendLine(`Generating fix for: ${recipe}...`);
 
-    const result = await justAiClient.fix(recipe, write === 'Write fix to justfile');
+    const result = await client.fix(recipe, write === 'Write fix to justfile');
     outputChannel.appendLine(result);
 
     if (write === 'Write fix to justfile') {
@@ -415,12 +435,13 @@ async function runFix(): Promise<void> {
 }
 
 async function runExportContext(): Promise<void> {
+  const client = clientForUri();
   outputChannel.clear();
   outputChannel.show();
   outputChannel.appendLine('Exporting project context...');
 
   try {
-    const result = await justAiClient.exportContext(true);
+    const result = await client.exportContext(true);
     outputChannel.appendLine('Context exported successfully.');
 
     const doc = await vscode.workspace.openTextDocument({
@@ -436,8 +457,9 @@ async function runExportContext(): Promise<void> {
 }
 
 async function runRecipeCommand(): Promise<void> {
+  const client = clientForUri();
   try {
-    const context = await justAiClient.getProjectContext();
+    const context = await client.getProjectContext();
     const recipeNames = context.recipes.map(r => r.namepath);
 
     const recipe = await vscode.window.showQuickPick(recipeNames, {
@@ -447,24 +469,26 @@ async function runRecipeCommand(): Promise<void> {
     if (!recipe) { return; }
 
     const selected = context.recipes.find(r => r.namepath === recipe)!;
-    if (selected.risk === 'blocked') {
-      vscode.window.showErrorMessage(`Recipe ${recipe} is blocked by the risk policy.`);
-      return;
+    const arguments_: string[] = [];
+    if (selected.parameters.length) {
+      const value = await vscode.window.showInputBox({ prompt: 'Recipe arguments as a JSON array of strings. Use [] to let just supply defaults.', value: '[]' });
+      if (value === undefined) { return; }
+      const values: unknown = JSON.parse(value);
+      if (!Array.isArray(values) || values.some(v => typeof v !== 'string')) { throw new Error('Arguments must be a JSON array of strings.'); }
+      arguments_.push(...values);
     }
+    const prepared = await client.prepareRecipe(recipe, arguments_);
+    const policy = prepared.policy;
+    if (policy.decision === 'deny') { vscode.window.showErrorMessage(policy.reason || 'Recipe denied by policy.'); return; }
     let confirmation: string | undefined;
-    if (selected.risk === 'high') {
-      confirmation = await vscode.window.showInputBox({
-        prompt: `High-risk recipe. Type the configured confirmation phrase (default: run ${recipe})`,
-        ignoreFocusOut: true
-      });
+    if (policy.decision === 'confirm_typed') {
+      confirmation = await vscode.window.showInputBox({ prompt: 'Type exactly: ' + policy.phrase, ignoreFocusOut: true });
       if (confirmation === undefined) { return; }
-    } else if (selected.risk === 'medium') {
-      const answer = await vscode.window.showWarningMessage(
-        `Run medium-risk recipe ${recipe}?`, { modal: true }, 'Run');
-      if (answer !== 'Run') { return; }
+    } else if (policy.decision === 'confirm') {
+      if (await vscode.window.showWarningMessage('Run recipe ' + recipe + '?', { modal: true }, 'Run') !== 'Run') { return; }
     }
     outputChannel.show();
-    outputChannel.appendLine(await justAiClient.runRecipe(recipe, confirmation));
+    outputChannel.appendLine(await client.runRecipe(recipe, confirmation, arguments_));
     historyProvider.refresh();
   } catch (error) {
     vscode.window.showErrorMessage(`Failed to run recipe: ${error}`);
@@ -472,6 +496,7 @@ async function runRecipeCommand(): Promise<void> {
 }
 
 async function runWorkflow(): Promise<void> {
+  const client = clientForUri();
   const request = await vscode.window.showInputBox({
     placeHolder: 'Describe the workflow you want to create (e.g., "CI/CD pipeline with build, test, and deploy")',
     prompt: 'Enter a natural-language description of the multi-recipe workflow',
@@ -491,7 +516,7 @@ async function runWorkflow(): Promise<void> {
   outputChannel.appendLine(`Generating workflow for: ${request}...`);
 
   try {
-    const result = await justAiClient.workflow(request, write === 'Write to justfile');
+    const result = await client.workflow(request, write === 'Write to justfile');
     outputChannel.appendLine(result);
 
     if (write === 'Write to justfile') {
@@ -511,6 +536,7 @@ async function runWorkflow(): Promise<void> {
 }
 
 async function runFixBatch(): Promise<void> {
+  const client = clientForUri();
   const write = await vscode.window.showQuickPick(['Preview only', 'Write fixes to justfile'], {
     placeHolder: 'Apply fixes to all failed recipes?'
   });
@@ -522,7 +548,7 @@ async function runFixBatch(): Promise<void> {
   outputChannel.appendLine('Generating fixes for all failed recipes...');
 
   try {
-    const result = await justAiClient.fixBatch(write === 'Write fixes to justfile');
+    const result = await client.fixBatch(write === 'Write fixes to justfile');
     outputChannel.appendLine(result);
 
     if (write === 'Write fixes to justfile') {
@@ -542,11 +568,12 @@ async function runFixBatch(): Promise<void> {
 }
 
 async function runExplainBatch(): Promise<void> {
+  const client = clientForUri();
   // First try to get modules from project context for filtering
   let module: string | undefined;
 
   try {
-    const context = await justAiClient.getProjectContext();
+    const context = await client.getProjectContext();
     const modules = context.modules.map(m => m.module_path).filter(Boolean);
 
     const moduleChoice = await vscode.window.showQuickPick(
@@ -570,7 +597,7 @@ async function runExplainBatch(): Promise<void> {
   );
 
   try {
-    const result = await justAiClient.explainBatch(module);
+    const result = await client.explainBatch(module);
     outputChannel.appendLine(result);
 
     const doc = await vscode.workspace.openTextDocument({
@@ -586,6 +613,7 @@ async function runExplainBatch(): Promise<void> {
 }
 
 async function runMigrateAnalyze(): Promise<void> {
+  const client = clientForUri();
   const json = await vscode.window.showQuickPick(['Human-readable', 'JSON'], {
     placeHolder: 'Output format'
   });
@@ -612,7 +640,7 @@ async function runMigrateAnalyze(): Promise<void> {
   outputChannel.appendLine(`Analyzing project structure...`);
 
   try {
-    const result = await justAiClient.migrateAnalyze(json === 'JSON', similarityThreshold);
+    const result = await client.migrateAnalyze(json === 'JSON', similarityThreshold);
     outputChannel.appendLine(result);
 
     if (json === 'JSON') {
@@ -630,6 +658,7 @@ async function runMigrateAnalyze(): Promise<void> {
 }
 
 async function runMigrateModularize(): Promise<void> {
+  const client = clientForUri();
   const mode = await vscode.window.showQuickPick(['Dry run (preview)', 'Write changes'], {
     placeHolder: 'Apply modularization?'
   });
@@ -644,7 +673,7 @@ async function runMigrateModularize(): Promise<void> {
   outputChannel.appendLine(`Modularizing project...`);
 
   try {
-    const result = await justAiClient.migrateModularize(write, dryRun);
+    const result = await client.migrateModularize(write, dryRun);
     outputChannel.appendLine(result);
 
     if (write) {
@@ -658,6 +687,7 @@ async function runMigrateModularize(): Promise<void> {
 }
 
 async function runMigrateDeduplicate(): Promise<void> {
+  const client = clientForUri();
   const mode = await vscode.window.showQuickPick(['Dry run (preview)', 'Write changes'], {
     placeHolder: 'Apply deduplication?'
   });
@@ -694,7 +724,7 @@ async function runMigrateDeduplicate(): Promise<void> {
   outputChannel.appendLine(`Deduplicating recipes...`);
 
   try {
-    const result = await justAiClient.migrateDeduplicate(write, similarityThreshold, false, mergeFlag);
+    const result = await client.migrateDeduplicate(write, similarityThreshold, false, mergeFlag);
     outputChannel.appendLine(result);
 
     if (write) {
@@ -708,6 +738,7 @@ async function runMigrateDeduplicate(): Promise<void> {
 }
 
 async function runTemplate(): Promise<void> {
+  const client = clientForUri();
   const request = await vscode.window.showInputBox({
     placeHolder: 'Describe the template you want to create (e.g., "reusable test template with coverage options")',
     prompt: 'Enter a natural-language description of the reusable template',
@@ -721,7 +752,7 @@ async function runTemplate(): Promise<void> {
   outputChannel.appendLine(`Generating template for: ${request}...`);
 
   try {
-    const result = await justAiClient.template(request);
+    const result = await client.template(request);
     outputChannel.appendLine(result);
 
     const doc = await vscode.workspace.openTextDocument({
@@ -737,6 +768,7 @@ async function runTemplate(): Promise<void> {
 }
 
 async function runInstantiateTemplate(): Promise<void> {
+  const client = clientForUri();
   // First, ask for template name
   const template = await vscode.window.showInputBox({
     placeHolder: 'Template name (e.g., test-template)',
@@ -779,7 +811,7 @@ async function runInstantiateTemplate(): Promise<void> {
   outputChannel.appendLine(`Instantiating template: ${template}...`);
 
   try {
-    const result = await justAiClient.instantiateTemplate(template, values, write === 'Write to justfile');
+    const result = await client.instantiateTemplate(template, values, write === 'Write to justfile');
     outputChannel.appendLine(result);
 
     if (write === 'Write to justfile') {
@@ -799,6 +831,7 @@ async function runInstantiateTemplate(): Promise<void> {
 }
 
 async function runComposeWorkflow(): Promise<void> {
+  const client = clientForUri();
   const request = await vscode.window.showInputBox({
     placeHolder: 'Describe the workflow to compose (e.g., "release workflow using build, test, and deploy recipes")',
     prompt: 'Enter a natural-language description of the workflow to compose from existing recipes',
@@ -818,7 +851,7 @@ async function runComposeWorkflow(): Promise<void> {
   outputChannel.appendLine(`Composing workflow for: ${request}...`);
 
   try {
-    const result = await justAiClient.composeWorkflow(request, write === 'Write to justfile');
+    const result = await client.composeWorkflow(request, write === 'Write to justfile');
     outputChannel.appendLine(result);
 
     if (write === 'Write to justfile') {
@@ -900,6 +933,8 @@ function showHistoryDetail(record: any): void {
 }
 
 function getProjectRoot(): string | undefined {
+  const uri = vscode.window.activeTextEditor?.document.uri;
+  if (uri) { return JustAiClient.getProjectRoot(uri); }
   const workspaceFolders = vscode.workspace.workspaceFolders;
   if (workspaceFolders && workspaceFolders.length > 0) {
     return workspaceFolders[0].uri.fsPath;

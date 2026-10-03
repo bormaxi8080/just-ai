@@ -51,6 +51,12 @@ async fn prepare_run(request: RunRequest) -> Result<PreparedRun, String> {
 
 #[tauri::command]
 async fn recent_runs(project_root: PathBuf, limit: usize) -> Result<Vec<RunRecord>, String> {
+  tauri::async_runtime::spawn_blocking(move || recent_runs_blocking(project_root, limit))
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+fn recent_runs_blocking(project_root: PathBuf, limit: usize) -> Result<Vec<RunRecord>, String> {
   if !project_root.is_dir() {
     return Err(format!(
       "project root is not a directory: {}",
@@ -143,6 +149,12 @@ fn cancel_run(active_run: tauri::State<'_, ActiveRun>) -> Result<bool, String> {
 
 #[tauri::command]
 async fn ai_suggest(project_root: PathBuf) -> Result<SuggestResponse, String> {
+  tauri::async_runtime::spawn_blocking(move || ai_suggest_blocking(project_root))
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+fn ai_suggest_blocking(project_root: PathBuf) -> Result<SuggestResponse, String> {
   if !project_root.is_dir() {
     return Err(format!(
       "project root is not a directory: {}",
@@ -163,6 +175,15 @@ async fn ai_suggest(project_root: PathBuf) -> Result<SuggestResponse, String> {
 
 #[tauri::command]
 async fn ai_explain(project_root: PathBuf, recipe_name: String) -> Result<ExplainResponse, String> {
+  tauri::async_runtime::spawn_blocking(move || ai_explain_blocking(project_root, recipe_name))
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+fn ai_explain_blocking(
+  project_root: PathBuf,
+  recipe_name: String,
+) -> Result<ExplainResponse, String> {
   if !project_root.is_dir() {
     return Err(format!(
       "project root is not a directory: {}",
@@ -205,6 +226,15 @@ struct GuiAddRecipeResponse {
 
 #[tauri::command]
 async fn ai_add_recipe(
+  project_root: PathBuf,
+  request: AddRecipeRequest,
+) -> Result<GuiAddRecipeResponse, String> {
+  tauri::async_runtime::spawn_blocking(move || ai_add_recipe_blocking(project_root, request))
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+fn ai_add_recipe_blocking(
   project_root: PathBuf,
   request: AddRecipeRequest,
 ) -> Result<GuiAddRecipeResponse, String> {
@@ -276,6 +306,15 @@ struct GuiFixRecipeResponse {
 
 #[tauri::command]
 async fn ai_fix_recipe(
+  project_root: PathBuf,
+  request: FixRecipeRequest,
+) -> Result<GuiFixRecipeResponse, String> {
+  tauri::async_runtime::spawn_blocking(move || ai_fix_recipe_blocking(project_root, request))
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+fn ai_fix_recipe_blocking(
   project_root: PathBuf,
   request: FixRecipeRequest,
 ) -> Result<GuiFixRecipeResponse, String> {
@@ -356,6 +395,15 @@ struct GuiWorkflowResponse {
 
 #[tauri::command]
 async fn ai_workflow(
+  project_root: PathBuf,
+  request: WorkflowRequest,
+) -> Result<GuiWorkflowResponse, String> {
+  tauri::async_runtime::spawn_blocking(move || ai_workflow_blocking(project_root, request))
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+fn ai_workflow_blocking(
   project_root: PathBuf,
   request: WorkflowRequest,
 ) -> Result<GuiWorkflowResponse, String> {
@@ -446,6 +494,15 @@ async fn ai_template(
   project_root: PathBuf,
   request: TemplateRequest,
 ) -> Result<GuiTemplateResponse, String> {
+  tauri::async_runtime::spawn_blocking(move || ai_template_blocking(project_root, request))
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+fn ai_template_blocking(
+  project_root: PathBuf,
+  request: TemplateRequest,
+) -> Result<GuiTemplateResponse, String> {
   if !project_root.is_dir() {
     return Err(format!(
       "project root is not a directory: {}",
@@ -510,6 +567,17 @@ struct GuiInstantiateTemplateResponse {
 
 #[tauri::command]
 async fn ai_instantiate_template(
+  project_root: PathBuf,
+  request: InstantiateTemplateRequest,
+) -> Result<GuiInstantiateTemplateResponse, String> {
+  tauri::async_runtime::spawn_blocking(move || {
+    ai_instantiate_template_blocking(project_root, request)
+  })
+  .await
+  .map_err(|error| error.to_string())?
+}
+
+fn ai_instantiate_template_blocking(
   project_root: PathBuf,
   request: InstantiateTemplateRequest,
 ) -> Result<GuiInstantiateTemplateResponse, String> {
@@ -585,6 +653,15 @@ async fn ai_compose_workflow(
   project_root: PathBuf,
   request: ComposeWorkflowRequest,
 ) -> Result<GuiComposeWorkflowResponse, String> {
+  tauri::async_runtime::spawn_blocking(move || ai_compose_workflow_blocking(project_root, request))
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+fn ai_compose_workflow_blocking(
+  project_root: PathBuf,
+  request: ComposeWorkflowRequest,
+) -> Result<GuiComposeWorkflowResponse, String> {
   if !project_root.is_dir() {
     return Err(format!(
       "project root is not a directory: {}",
@@ -655,6 +732,15 @@ struct GuiFixBatchResponse {
 
 #[tauri::command]
 async fn ai_fix_batch(
+  project_root: PathBuf,
+  request: FixBatchRequest,
+) -> Result<GuiFixBatchResponse, String> {
+  tauri::async_runtime::spawn_blocking(move || ai_fix_batch_blocking(project_root, request))
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+fn ai_fix_batch_blocking(
   project_root: PathBuf,
   request: FixBatchRequest,
 ) -> Result<GuiFixBatchResponse, String> {
@@ -784,6 +870,15 @@ async fn ai_explain_batch(
   project_root: PathBuf,
   request: ExplainBatchRequest,
 ) -> Result<GuiExplainBatchResponse, String> {
+  tauri::async_runtime::spawn_blocking(move || ai_explain_batch_blocking(project_root, request))
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+fn ai_explain_batch_blocking(
+  project_root: PathBuf,
+  request: ExplainBatchRequest,
+) -> Result<GuiExplainBatchResponse, String> {
   if !project_root.is_dir() {
     return Err(format!(
       "project root is not a directory: {}",
@@ -847,6 +942,15 @@ struct GuiMigrateAnalyzeResult {
 
 #[tauri::command]
 async fn ai_migrate_analyze(
+  project_root: PathBuf,
+  _request: MigrateAnalyzeRequest,
+) -> Result<GuiMigrateAnalyzeResult, String> {
+  tauri::async_runtime::spawn_blocking(move || ai_migrate_analyze_blocking(project_root, _request))
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+fn ai_migrate_analyze_blocking(
   project_root: PathBuf,
   _request: MigrateAnalyzeRequest,
 ) -> Result<GuiMigrateAnalyzeResult, String> {
@@ -965,6 +1069,17 @@ async fn ai_migrate_deduplicate(
   project_root: PathBuf,
   request: MigrateDeduplicateRequest,
 ) -> Result<GuiMigrateDeduplicateResult, String> {
+  tauri::async_runtime::spawn_blocking(move || {
+    ai_migrate_deduplicate_blocking(project_root, request)
+  })
+  .await
+  .map_err(|error| error.to_string())?
+}
+
+fn ai_migrate_deduplicate_blocking(
+  project_root: PathBuf,
+  request: MigrateDeduplicateRequest,
+) -> Result<GuiMigrateDeduplicateResult, String> {
   if !project_root.is_dir() {
     return Err(format!(
       "project root is not a directory: {}",
@@ -1011,6 +1126,12 @@ struct GuiExportContextResult {
 
 #[tauri::command]
 async fn ai_export_context(project_root: PathBuf) -> Result<GuiExportContextResult, String> {
+  tauri::async_runtime::spawn_blocking(move || ai_export_context_blocking(project_root))
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+fn ai_export_context_blocking(project_root: PathBuf) -> Result<GuiExportContextResult, String> {
   if !project_root.is_dir() {
     return Err(format!(
       "project root is not a directory: {}",
@@ -1047,6 +1168,12 @@ struct GuiDoctorResult {
 
 #[tauri::command]
 async fn ai_doctor(project_root: PathBuf) -> Result<GuiDoctorResult, String> {
+  tauri::async_runtime::spawn_blocking(move || ai_doctor_blocking(project_root))
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+fn ai_doctor_blocking(project_root: PathBuf) -> Result<GuiDoctorResult, String> {
   if !project_root.is_dir() {
     return Err(format!(
       "project root is not a directory: {}",
@@ -1115,6 +1242,12 @@ struct TemplateListBuiltinResult {
 
 #[tauri::command]
 async fn ai_template_list_builtin() -> Result<TemplateListBuiltinResult, String> {
+  tauri::async_runtime::spawn_blocking(move || ai_template_list_builtin_blocking())
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+fn ai_template_list_builtin_blocking() -> Result<TemplateListBuiltinResult, String> {
   let builtin = builtin_templates();
   let templates: Vec<BuiltinTemplateInfo> = builtin
     .into_iter()
@@ -1144,6 +1277,15 @@ struct TemplateInstallResult {
 
 #[tauri::command]
 async fn ai_template_install(
+  project_root: PathBuf,
+  request: TemplateInstallRequest,
+) -> Result<TemplateInstallResult, String> {
+  tauri::async_runtime::spawn_blocking(move || ai_template_install_blocking(project_root, request))
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+fn ai_template_install_blocking(
   project_root: PathBuf,
   request: TemplateInstallRequest,
 ) -> Result<TemplateInstallResult, String> {
@@ -1177,6 +1319,12 @@ struct ConfigValidationResult {
 
 #[tauri::command]
 async fn ai_config_validate(project_root: PathBuf) -> Result<ConfigValidationResult, String> {
+  tauri::async_runtime::spawn_blocking(move || ai_config_validate_blocking(project_root))
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+fn ai_config_validate_blocking(project_root: PathBuf) -> Result<ConfigValidationResult, String> {
   if !project_root.is_dir() {
     return Err(format!(
       "project root is not a directory: {}",
@@ -1213,6 +1361,12 @@ struct ConfigSchemaResult {
 
 #[tauri::command]
 async fn ai_config_schema() -> Result<ConfigSchemaResult, String> {
+  tauri::async_runtime::spawn_blocking(move || ai_config_schema_blocking())
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+fn ai_config_schema_blocking() -> Result<ConfigSchemaResult, String> {
   let schema = schemars::schema_for!(just_ai::config::Config);
   Ok(ConfigSchemaResult {
     success: true,

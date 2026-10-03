@@ -135,6 +135,12 @@ enum Commands {
     #[arg(long, help = "Emit JSON instead of human-readable output")]
     json: bool,
   },
+  #[command(about = "Prepare a recipe and emit its preview and effective policy as JSON")]
+  Prepare {
+    recipe: String,
+    #[arg(trailing_var_arg = true)]
+    arguments: Vec<String>,
+  },
   #[command(about = "Prepare, authorize, and run a recipe through just")]
   Run {
     #[arg(help = "Recipe name or namepath")]
@@ -585,6 +591,16 @@ fn try_main() -> Result<(), Box<dyn Error>> {
       if report.highest_risk == RiskLevel::Blocked {
         return Err("blocked-risk recipes found".into());
       }
+    }
+    Commands::Prepare { recipe, arguments } => {
+      let prepared = application::execution::RecipeExecutor::new(&cli.just_binary).prepare(
+        application::execution::RunRequest {
+          project_root: env::current_dir()?,
+          recipe,
+          arguments,
+        },
+      )?;
+      println!("{}", serde_json::to_string(&prepared)?);
     }
     Commands::Run {
       recipe,

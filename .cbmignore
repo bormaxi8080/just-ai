@@ -1,0 +1,6 @@
+# Generated dependencies and output must not duplicate source symbols.
+**/node_modules/
+**/out/
+**/dist/
+**/target/
+.codebase-memory/graph.db.zst

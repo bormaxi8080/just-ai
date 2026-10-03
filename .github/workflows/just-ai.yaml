@@ -7,6 +7,8 @@ on:
       - "apps/just-ai-gui/**"
       - "apps/just-ai-mcp/**"
       - "apps/just-ai-vscode/**"
+      - "tests/companion_smoke.py"
+      - "crates/just-ai-lsp/**"
       - "Cargo.toml"
       - "Cargo.lock"
       - "agent/**"
@@ -19,6 +21,8 @@ on:
       - "apps/just-ai-gui/**"
       - "apps/just-ai-mcp/**"
       - "apps/just-ai-vscode/**"
+      - "tests/companion_smoke.py"
+      - "crates/just-ai-lsp/**"
       - "Cargo.toml"
       - "Cargo.lock"
       - "agent/**"
@@ -35,11 +39,15 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all -- --check
       - run: cargo clippy --package just-ai --all-targets -- -D warnings
-      - run: cargo build --package just-ai --bin just-ai
-      - run: cargo test --package just-ai
+      - run: cargo build --locked --package just --package just-ai --package just-ai-mcp --bins
+      - name: Use built upstream runner
+        shell: bash
+        run: echo "${{ github.workspace }}/target/debug" >> "$GITHUB_PATH"
+      - run: cargo test --locked --package just-ai --package just-ai-lsp
       - run: cargo fmt --manifest-path apps/just-ai-mcp/Cargo.toml -- --check
       - run: cargo clippy --manifest-path apps/just-ai-mcp/Cargo.toml --all-targets --locked -- -D warnings
       - run: cargo test --manifest-path apps/just-ai-mcp/Cargo.toml --locked
+      - run: python tests/companion_smoke.py --bin-dir target/debug
 
   windows-core:
     runs-on: windows-latest
@@ -50,11 +58,19 @@ jobs:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
       - run: cargo clippy --package just-ai --all-targets -- -D warnings
-      - run: cargo build --package just-ai --bin just-ai
-      - run: cargo test --package just-ai
+      - run: cargo build --locked --package just --package just-ai --package just-ai-mcp --bins
+      - name: Use built upstream runner
+        shell: bash
+        run: echo "${{ github.workspace }}/target/debug" >> "$GITHUB_PATH"
+      - run: cargo test --locked --package just-ai --package just-ai-lsp
+
+      - run: python tests/companion_smoke.py --bin-dir target/debug
 
   desktop:
-    runs-on: macos-latest
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     defaults:
       run:
         working-directory: apps/just-ai-gui
@@ -66,6 +82,9 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: apps/just-ai-gui/package-lock.json
+      - name: Linux desktop dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev
       - run: npm ci
       - run: npm run build
       - run: cargo check --manifest-path src-tauri/Cargo.toml --locked

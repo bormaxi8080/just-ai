@@ -5,12 +5,13 @@ const os = require('node:os');
 const path = require('node:path');
 const Module = require('node:module');
 let trusted = true;
+let folders = [];
 const originalLoad = Module._load;
 Module._load = function (request, parent, isMain) {
-  if (request === 'vscode') { return { workspace: { get isTrusted() { return trusted; } } }; }
+  if (request === 'vscode') { return { workspace: { get isTrusted() { return trusted; }, getWorkspaceFolder(uri) { return folders.find(folder => uri.fsPath.startsWith(folder.uri.fsPath + path.sep)); } } }; }
   return originalLoad.call(this, request, parent, isMain);
 };
-const { JustAiClient } = require('../out/client.js');
+const { JustAiClient, RiskDiagnostics } = require('../out/client.js');
 Module._load = originalLoad;
 
 test('companion receives the configured just binary, valid argv and JSON contracts', { skip: process.platform === 'win32' }, async () => {
@@ -18,7 +19,7 @@ test('companion receives the configured just binary, valid argv and JSON contrac
   try {
     const binary = path.join(root, process.platform === 'win32' ? 'companion.cmd' : 'companion');
     const script = path.join(root, 'companion.cjs');
-    fs.writeFileSync(script, `const fs = require('node:fs'); const args = process.argv.slice(2); fs.writeFileSync('argv.json', JSON.stringify(args)); const command = args[2]; if (command === 'export-context') console.log(JSON.stringify({recipes: [], modules: [], warnings: []})); else if (command === 'doctor') console.log(JSON.stringify({recipes: [], total_recipes: 0})); else if (command === 'history') console.log('[]'); else console.log('ok');`);
+    fs.writeFileSync(script, `const fs = require('node:fs'); const args = process.argv.slice(2); fs.writeFileSync('argv.json', JSON.stringify(args)); const command = args[2]; if (command === 'export-context') console.log(JSON.stringify({recipes: [], modules: [], warnings: []})); else if (command === 'prepare') console.log(JSON.stringify({policy: {decision: 'confirm_typed', phrase: 'execute deploy'}, preview: ['echo safe']})); else if (command === 'doctor') console.log(JSON.stringify({recipes: [], total_recipes: 0})); else if (command === 'history') console.log('[]'); else console.log('ok');`);
     fs.writeFileSync(binary, `#!/bin/sh\nexec "${process.execPath}" "${script}" "$@"\n`, { mode: 0o755 });
     const client = new JustAiClient(root, '/configured/just', binary);
     assert.deepEqual((await client.getProjectContext()).recipes, []);
@@ -27,6 +28,8 @@ test('companion receives the configured just binary, valid argv and JSON contrac
     assert.deepEqual(JSON.parse(fs.readFileSync(path.join(root, 'argv.json'))), ['--just-binary', '/configured/just', 'doctor', '--json']);
     await client.add('recipe request', false);
     assert.deepEqual(JSON.parse(fs.readFileSync(path.join(root, 'argv.json'))), ['--just-binary', '/configured/just', 'add', 'recipe request']);
+    assert.equal((await client.prepareRecipe('deploy', ['one argument'])).policy.phrase, 'execute deploy');
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(root, 'argv.json'))).slice(2), ['prepare', '--', 'deploy', 'one argument']);
     await client.runRecipe('deploy; echo injected', 'run deploy; echo injected');
     assert.deepEqual(JSON.parse(fs.readFileSync(path.join(root, 'argv.json'))).slice(2), ['run', '--yes', '--confirm', 'run deploy; echo injected', '--', 'deploy; echo injected']);
     assert.deepEqual(await client.getHistory(10, 'test', false), []);
@@ -43,4 +46,26 @@ test('untrusted workspaces cannot spawn companion processes', async () => {
   trusted = false;
   try { await assert.rejects(new JustAiClient(os.tmpdir()).getProjectContext(), /Trust this workspace/); }
   finally { trusted = true; }
+});
+
+
+test('project lookup respects nested justfiles and workspace boundaries', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'just-ai-roots-'));
+  try {
+    const a = path.join(root, 'a'), b = path.join(root, 'b'), nested = path.join(b, 'nested');
+    fs.mkdirSync(a); fs.mkdirSync(nested, {recursive: true});
+    fs.writeFileSync(path.join(a, 'justfile'), ''); fs.writeFileSync(path.join(nested, '.justfile'), '');
+    folders = [a,b].map(fsPath => ({uri: {fsPath}}));
+    assert.equal(JustAiClient.getProjectRoot({fsPath: path.join(a, 'justfile')}), a);
+    assert.equal(JustAiClient.getProjectRoot({fsPath: path.join(nested, '.justfile')}), nested);
+    assert.equal(JustAiClient.getProjectRoot({fsPath: path.join(root, 'outside.just')}), undefined);
+  } finally { folders = []; fs.rmSync(root, {recursive: true, force: true}); }
+});
+
+test('diagnostics locate exact lines inside the selected recipe', () => {
+  const lines = ['a:', '  echo same', '', 'b:', '  echo same', '  echo same extra'];
+  const document = {lineCount: lines.length, lineAt(i) { return {text: lines[i]}; }};
+  const locate = RiskDiagnostics.prototype.findLineInDocument;
+  assert.equal(locate.call({}, document, 'echo same', 'b'), 4);
+  assert.equal(locate.call({}, document, 'echo sam', 'b'), -1);
 });
