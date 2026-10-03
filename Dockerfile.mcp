@@ -2,6 +2,7 @@
 FROM rust:1.89-slim-bookworm AS builder
 RUN apt-get update && apt-get install -y --no-install-recommends pkg-config libssl-dev ca-certificates && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
+ENV CARGO_BUILD_JOBS=2
 COPY Cargo.toml Cargo.lock build.rs ./
 COPY src/ src/
 COPY etc/ etc/
@@ -11,7 +12,7 @@ COPY crates/ crates/
 COPY apps/just-ai-mcp/ apps/just-ai-mcp/
 COPY agent/ agent/
 COPY docs/ docs/
-RUN cargo build --release --locked -p just -p just-ai-mcp
+RUN cargo build --release --locked -p just -p just-ai -p just-ai-mcp
 
 FROM debian:bookworm-slim AS runtime
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates libssl3 && rm -rf /var/lib/apt/lists/*
