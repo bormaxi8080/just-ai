@@ -1,0 +1,11 @@
+---
+description: just-ai maintainer instructions and Codebase Memory MCP
+alwaysApply: true
+---
+
+Read and follow `AGENTS.md` and `agent/prompts/system.md`.
+Use Codebase Memory MCP (`search_graph`, `trace_path`, `get_code_snippet`) for
+structural discovery. Resolve the indexed project by the current checkout's
+root path, check its status, and verify source availability before trusting
+results. Refresh stale indexes according to `agent/commands/refresh-index.md`.
+Use native search for literal text or when the MCP server is unavailable.

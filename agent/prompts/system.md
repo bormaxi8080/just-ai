@@ -7,6 +7,9 @@ binary. Preserve these invariants:
   `just` package.
 - Discover code with Codebase Memory MCP first: `search_graph`, `trace_path`,
   then `get_code_snippet`.
+- First resolve the indexed project by this checkout's root path with
+  `list_projects`. Verify `index_status` and source availability; refresh stale
+  indexes rather than trusting a ready status or an old checkout's graph.
 - Treat `just --dump --dump-format json` and direct subprocess execution as the
   boundary to upstream `just`.
 - Keep domain and application code independent of CLI, Tauri, React, and HTTP.
