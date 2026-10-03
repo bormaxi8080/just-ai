@@ -357,3 +357,7 @@ pub struct ComposeRecipe {
   #[serde(default)]
   pub source: String, // "existing", "new", or "modified"
 }
+
+pub fn validate_value(schema: &Value, value: &Value) -> Result<(), String> {
+  jsonschema::validate(schema, value).map_err(|error| error.to_string())
+}

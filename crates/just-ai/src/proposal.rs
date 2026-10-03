@@ -72,6 +72,7 @@ pub fn save_template(
   project_root: &Path,
   template: &TemplateProposal,
 ) -> Result<(), Box<dyn Error>> {
+  validate_template_name(&template.name)?;
   let dir = get_template_dir(project_root);
   fs::create_dir_all(&dir)?;
 
@@ -123,6 +124,7 @@ pub fn load_template(
   project_root: &Path,
   template_name: &str,
 ) -> Result<Option<TemplateProposal>, Box<dyn Error>> {
+  validate_template_name(template_name)?;
   let path = get_template_path(project_root, template_name);
   if !path.exists() {
     return Ok(None);
@@ -175,6 +177,7 @@ pub fn list_templates(project_root: &Path) -> Result<Vec<String>, Box<dyn Error>
 
 /// Delete a template
 pub fn delete_template(project_root: &Path, template_name: &str) -> Result<bool, Box<dyn Error>> {
+  validate_template_name(template_name)?;
   let path = get_template_path(project_root, template_name);
   if path.exists() {
     fs::remove_file(path)?;
@@ -1051,7 +1054,7 @@ pub fn replace_recipe(original: &str, recipe_name: &str, new_recipe: &str) -> St
   result.join("\n")
 }
 
-fn validate_proposal(
+pub(crate) fn validate_proposal(
   context: &ProjectContext,
   proposal: &RecipeProposal,
   batch_recipes: Option<&[RecipeProposal]>,
@@ -1355,173 +1358,24 @@ pub fn handle_instantiate_template(
   write: bool,
   force: bool,
 ) -> Result<(), Box<dyn Error>> {
-  // Substitute template parameters in the body
-  let mut substituted_body = Vec::new();
-  for line in &template.body {
-    let mut substituted = line.clone();
-    for (key, value) in values {
-      substituted = substituted.replace(&format!("{{{{{key}}}}}"), value);
-    }
-    substituted_body.push(substituted);
-  }
-
-  // Parse the template body into multiple recipes
-  let recipes = parse_template_body(
-    &substituted_body,
-    &template.name,
-    &template.description,
-    &template.parameters,
-  )?;
-
-  // Validate all recipes, skipping existing non-equivalent ones if force is true
-  // Also skip recipes that are functionally equivalent to existing ones
-  let mut recipes_to_instantiate = Vec::new();
-  let mut skipped_recipes = Vec::new();
-
-  for recipe in &recipes {
-    // First check if recipe is functionally equivalent to existing
-    let is_equivalent = if context.has_recipe(&recipe.name) {
-      if let Some(existing) = context.find_recipe(&recipe.name) {
-        let existing_body: String = existing
-          .body
-          .iter()
-          .map(|l| l.trim())
-          .collect::<Vec<_>>()
-          .join(" ");
-        let proposed_body: String = recipe
-          .body
-          .iter()
-          .map(|l| l.trim())
-          .collect::<Vec<_>>()
-          .join(" ");
-        let existing_deps = {
-          let mut deps = existing.dependencies.clone();
-          deps.sort();
-          deps
-        };
-        let proposed_deps = {
-          let mut deps = recipe.dependencies.clone();
-          deps.sort();
-          deps
-        };
-        existing_body == proposed_body && existing_deps == proposed_deps
-      } else {
-        false
-      }
-    } else {
-      false
-    };
-
-    if is_equivalent {
-      // Skip equivalent recipes automatically
-      skipped_recipes.push(recipe.name.clone());
-      println!(
-        "Skipping equivalent recipe: {} (already exists with same implementation)",
-        recipe.name
-      );
-      continue;
-    }
-
-    let validation_result = validate_proposal(context, recipe, Some(&recipes));
-    match validation_result {
-      Ok(()) => {
-        recipes_to_instantiate.push(recipe.clone());
-      }
-      Err(e) => {
-        let err_msg = e.to_string();
-        if force && err_msg.contains("already exists") {
-          // Skip this recipe - it already exists with a different implementation
-          skipped_recipes.push(recipe.name.clone());
-          println!(
-            "Skipping existing recipe: {} (use --force to override behavior)",
-            recipe.name
-          );
-        } else {
-          return Err(e);
-        }
-      }
-    }
-  }
-
-  if recipes_to_instantiate.is_empty() {
-    println!(
-      "All recipes from template '{}' already exist. Nothing to instantiate.",
-      template.name
-    );
-    if !skipped_recipes.is_empty() {
-      println!("Skipped recipes: {}", skipped_recipes.join(", "));
-    }
-    return Ok(());
-  }
-
-  let source = context
-    .root_source()
-    .ok_or("project context does not contain a root justfile source")?;
-  let original = bounded_file::read_utf8(source, max_editable_file_bytes())?;
-
-  // Insert all recipes one by one
-  let mut proposed = original.clone();
-  let mut all_risks = Vec::new();
-
-  for recipe in &recipes_to_instantiate {
-    let rendered = render_recipe(recipe);
-    proposed = insert_recipe_grouped(
-      &proposed,
-      &rendered,
-      context,
-      &recipe.dependencies,
-      &recipe.name,
-    );
-
-    let risks = RiskFinding::scan_lines(&recipe.body);
-    let max_risk = RiskLevel::highest(&risks);
-    if max_risk == RiskLevel::Blocked {
-      return Err(
-        format!(
-          "recipe `{}` has blocked risk and will not be written",
-          recipe.name
-        )
-        .into(),
-      );
-    }
-    all_risks.extend(risks);
-  }
-
-  bounded_file::ensure_text_limit(&proposed, "proposed justfile", max_editable_file_bytes())?;
-  validate_justfile(just_binary, source, &proposed)?;
-
-  let highest_risk = RiskLevel::highest(&all_risks);
-
+  let plan =
+    crate::application::templates::TemplatePlan::prepare(context, template, values, force)?;
+  plan.validate(just_binary)?;
   println!("Template instantiated: {}", template.name);
-  println!();
   println!(
-    "Recipes: {}",
-    recipes_to_instantiate
-      .iter()
-      .map(|r| r.name.as_str())
-      .collect::<Vec<_>>()
-      .join(", ")
+    "{}",
+    unified_diff(&plan.source, &plan.original, &plan.proposed)
   );
-  if !skipped_recipes.is_empty() {
-    println!("Skipped (already exist): {}", skipped_recipes.join(", "));
-  }
-  println!("Highest risk: {}", highest_risk);
-
-  println!();
-  println!("{}", unified_diff(source, &original, &proposed));
-
   if write {
-    application::patches::apply_reviewed_change(source, &original, &proposed)?;
-    println!("Wrote {}", source.display());
+    plan.apply(just_binary)?;
+    println!("Wrote {}", plan.source.display());
   } else {
-    println!("Dry run only. Re-run with --write to apply this template.");
+    println!("Dry run only. Re-run with --write to apply changes.");
   }
-
   Ok(())
 }
 
-/// Parse template body (which contains multiple just recipes) into individual RecipeProposals
-fn parse_template_body(
+pub(crate) fn parse_template_body(
   body: &[String],
   template_name: &str,
   template_description: &str,
@@ -1850,4 +1704,28 @@ pub fn handle_compose_workflow(
   }
 
   Ok(())
+}
+
+fn validate_template_name(name: &str) -> Result<(), Box<dyn Error>> {
+  if name.is_empty()
+    || !name
+      .chars()
+      .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+  {
+    return Err("template name must contain only letters, digits, underscores and hyphens".into());
+  }
+  Ok(())
+}
+
+pub fn validate_generated_source(
+  binary: &Path,
+  source: &Path,
+  proposed: &str,
+) -> Result<(), Box<dyn Error>> {
+  let config = crate::config::Config::load(source.parent().ok_or("missing source directory")?)?;
+  let lines = proposed.lines().map(str::to_owned).collect::<Vec<_>>();
+  if RiskLevel::highest(&config.risk.scan_lines(&lines)) == RiskLevel::Blocked {
+    return Err("generated proposal has blocked risk and will not be written".into());
+  }
+  validate_justfile(binary, source, proposed)
 }

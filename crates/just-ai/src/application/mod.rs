@@ -6,3 +6,5 @@ pub mod history;
 pub mod modularization;
 pub mod patches;
 pub mod project_context;
+
+pub mod templates;

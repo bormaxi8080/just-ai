@@ -109,7 +109,7 @@ pub(super) fn tool_definitions() -> Value {
       "name": "migrate_modularize",
       "description": "Group recipes by prefix into module files and update imports. Dry-run by default.",
       "inputSchema": migrate_modularize_schema(),
-      "annotations": { "readOnlyHint": true, "destructiveHint": false }
+      "annotations": { "readOnlyHint": false, "destructiveHint": true }
     },
     {
       "name": "migrate_deduplicate",
@@ -144,7 +144,7 @@ fn run_recipe_schema() -> Value {
           "type": { "type": "string", "enum": ["none", "confirmed", "typed"] },
           "phrase": { "type": "string" }
         },
-        "required": ["type"]
+        "required": ["type"], "additionalProperties": false
       }
     },
     "required": ["recipe"],
@@ -330,6 +330,12 @@ fn call_tool_at(params: &Value, just_binary: &Path, project_root: &Path) -> Resu
   {
     return Err(format!("unsupported argument `{argument}` for `{name}`"));
   }
+  let catalog = tool_definitions();
+  let schema = catalog
+    .as_array()
+    .and_then(|tools| tools.iter().find(|tool| tool["name"] == name))
+    .ok_or("missing tool schema")?;
+  just_ai::ai_responses::validate_value(&schema["inputSchema"], &Value::Object(arguments.clone()))?;
   let value = match name {
     "inspect_project" => serde_json::to_value(
       inspect_project_at(just_binary, project_root).map_err(|error| error.to_string())?,
@@ -459,7 +465,7 @@ fn call_tool_at(params: &Value, just_binary: &Path, project_root: &Path) -> Resu
       )
       .map_err(|error| error.to_string())?;
       let just_binary_path = Path::new(just_binary);
-      just_ai::proposal::validate_justfile(just_binary_path, source, &proposed)
+      just_ai::proposal::validate_generated_source(just_binary_path, source, &proposed)
         .map_err(|error| error.to_string())?;
       if write {
         just_ai::application::patches::apply_reviewed_change(source, &original, &proposed)
@@ -517,7 +523,7 @@ fn call_tool_at(params: &Value, just_binary: &Path, project_root: &Path) -> Resu
       )
       .map_err(|error| error.to_string())?;
       let just_binary_path = Path::new(just_binary);
-      just_ai::proposal::validate_justfile(just_binary_path, source, &proposed)
+      just_ai::proposal::validate_generated_source(just_binary_path, source, &proposed)
         .map_err(|error| error.to_string())?;
       if write {
         just_ai::application::patches::apply_reviewed_change(source, &original, &proposed)
@@ -590,7 +596,7 @@ fn call_tool_at(params: &Value, just_binary: &Path, project_root: &Path) -> Resu
       )
       .map_err(|error| error.to_string())?;
       let just_binary_path = Path::new(just_binary);
-      just_ai::proposal::validate_justfile(just_binary_path, source, &proposed)
+      just_ai::proposal::validate_generated_source(just_binary_path, source, &proposed)
         .map_err(|error| error.to_string())?;
       if write {
         just_ai::application::patches::apply_reviewed_change(source, &original, &proposed)
@@ -697,7 +703,7 @@ fn call_tool_at(params: &Value, just_binary: &Path, project_root: &Path) -> Resu
 
         let just_binary_path = Path::new(just_binary);
         let source = context.root_source().unwrap();
-        just_ai::proposal::validate_justfile(just_binary_path, source, &proposed)
+        just_ai::proposal::validate_generated_source(just_binary_path, source, &proposed)
           .map_err(|error| error.to_string())?;
 
         let diff = just_ai::proposal::unified_diff(source, &original, &proposed);
@@ -791,8 +797,8 @@ fn call_tool_at(params: &Value, just_binary: &Path, project_root: &Path) -> Resu
         serde_json::to_string_pretty(&response.template).map_err(|e| e.to_string())?;
 
       if write {
-        // Store template as a comment in the justfile or a separate file
-        // For now, we just return the template info
+        just_ai::proposal::save_template(project_root, &response.template)
+          .map_err(|e| e.to_string())?;
       }
 
       json!({
@@ -815,118 +821,33 @@ fn call_tool_at(params: &Value, just_binary: &Path, project_root: &Path) -> Resu
     }
     "instantiate_template" => {
       let template_name = string_argument(arguments, "template")?;
-      let values_map: std::collections::HashMap<String, String> = arguments
-        .get("values")
-        .and_then(|v| serde_json::from_value(v.clone()).ok())
-        .unwrap_or_default();
+      let values_map = serde_json::from_value(
+        arguments
+          .get("values")
+          .cloned()
+          .unwrap_or_else(|| json!({})),
+      )
+      .map_err(|e| e.to_string())?;
       let write = arguments
         .get("write")
         .and_then(Value::as_bool)
         .unwrap_or(false);
-
-      let context =
-        inspect_project_at(just_binary, project_root).map_err(|error| error.to_string())?;
-      let client = AiClient::from_project(project_root).map_err(|error| error.to_string())?;
-
-      // Generate template from request
-      let template_prompt = format!(
-        "Find or create a template named '{}' for this project.",
-        template_name
-      );
-      let template_response = client
-        .complete_json::<just_ai::ai_responses::TemplateResponse>(
-          "Generate a reusable just recipe template as strict JSON.",
-          &prompts::template(
-            &context.ai_json().map_err(|e| e.to_string())?,
-            &template_prompt,
-          ),
-        )
-        .map_err(|error| error.to_string())?;
-
-      // Check required parameters
-      for param in &template_response.template.parameters {
-        if param.required && !values_map.contains_key(&param.name) {
-          if param.default.is_some() {
-            // Use default
-          } else {
-            return Err(format!("required parameter '{}' not provided", param.name));
-          }
-        }
-      }
-
-      // Substitute template parameters
-      let mut recipe_body = Vec::new();
-      for line in &template_response.template.body {
-        let mut substituted = line.clone();
-        for (key, value) in &values_map {
-          substituted = substituted.replace(&format!("{{{{{key}}}}}"), value);
-        }
-        recipe_body.push(substituted);
-      }
-
-      let recipe = just_ai::ai_responses::RecipeProposal {
-        name: template_response.template.name.clone(),
-        doc: Some(template_response.template.description.clone()),
-        parameters: template_response
-          .template
-          .parameters
-          .iter()
-          .map(|p| just_ai::ai_responses::RecipeParameterProposal {
-            name: p.name.clone(),
-            default: values_map.get(&p.name).cloned().or(p.default.clone()),
-          })
-          .collect(),
-        dependencies: vec![],
-        body: recipe_body,
-      };
-
-      let source = context
-        .root_source()
-        .ok_or("project context does not contain a root justfile source")?;
-      let original =
-        just_ai::bounded_file::read_utf8(source, just_ai::bounded_file::max_editable_file_bytes())
-          .map_err(|error| error.to_string())?;
-      let rendered = just_ai::proposal::render_recipe(&recipe);
-      let proposed = just_ai::proposal::insert_recipe_grouped(
-        &original,
-        &rendered,
+      let context = inspect_project_at(just_binary, project_root).map_err(|e| e.to_string())?;
+      let template = just_ai::proposal::load_template(project_root, &template_name)
+        .map_err(|e| e.to_string())?
+        .ok_or("stored template not found")?;
+      let plan = just_ai::application::templates::TemplatePlan::prepare(
         &context,
-        &recipe.dependencies,
-        &recipe.name,
-      );
-      just_ai::bounded_file::ensure_text_limit(
-        &proposed,
-        "proposed justfile",
-        just_ai::bounded_file::max_editable_file_bytes(),
+        &template,
+        &values_map,
+        false,
       )
-      .map_err(|error| error.to_string())?;
-      let just_binary_path = Path::new(just_binary);
-      just_ai::proposal::validate_justfile(just_binary_path, source, &proposed)
-        .map_err(|error| error.to_string())?;
-
-      let risks = just_ai::domain::risk::RiskFinding::scan_lines(&recipe.body);
-      let risk = just_ai::domain::risk::RiskLevel::highest(&risks);
-      if risk == just_ai::domain::risk::RiskLevel::Blocked {
-        return Err("instantiated template has blocked risk and will not be written".into());
-      }
-
-      let diff = just_ai::proposal::unified_diff(source, &original, &proposed);
-
+      .map_err(|e| e.to_string())?;
+      plan.validate(just_binary).map_err(|e| e.to_string())?;
       if write {
-        just_ai::application::patches::apply_reviewed_change(source, &original, &proposed)
-          .map_err(|error| error.to_string())?;
+        plan.apply(just_binary).map_err(|e| e.to_string())?;
       }
-
-      json!({
-        "summary": format!("Template '{}' instantiated", template_name),
-        "recipe": {
-          "name": recipe.name,
-          "body": recipe.body,
-          "dependencies": recipe.dependencies,
-        },
-        "diff": diff,
-        "written": write,
-      })
+      json!({"summary": format!("Template '{template_name}' instantiated"), "recipes": plan.recipes, "diff": unified_diff(&plan.source, &plan.original, &plan.proposed), "written": write})
     }
     "compose_workflow" => {
       let request = string_argument(arguments, "request")?;
@@ -1042,7 +963,7 @@ fn call_tool_at(params: &Value, just_binary: &Path, project_root: &Path) -> Resu
       )
       .map_err(|error| error.to_string())?;
       let just_binary_path = Path::new(just_binary);
-      just_ai::proposal::validate_justfile(just_binary_path, source, &proposed)
+      just_ai::proposal::validate_generated_source(just_binary_path, source, &proposed)
         .map_err(|error| error.to_string())?;
 
       let all_risks: Vec<_> = response
@@ -1308,5 +1229,57 @@ mod tests {
       directory.path(),
     );
     assert_eq!(response.unwrap_err(), "`arguments` must be an object");
+  }
+}
+
+#[cfg(test)]
+mod contract_regressions {
+  use super::*;
+  #[test]
+  fn malformed_values_are_rejected_before_project_access() {
+    let root = tempfile::tempdir().unwrap();
+    for params in [
+      json!({"name":"migrate_modularize","arguments":{"write":"true"}}),
+      json!({"name":"prepare_run","arguments":{"recipe":17}}),
+      json!({"name":"run_recipe","arguments":{"recipe":"safe","confirmation":{"type":"confirmed","extra":true}}}),
+    ] {
+      let error = call_tool_at(&params, Path::new("missing-runner"), root.path()).unwrap_err();
+      assert!(!error.contains("just dump"), "{error}");
+    }
+    let catalog = tool_definitions();
+    assert_eq!(
+      catalog
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|tool| tool["name"] == "migrate_modularize")
+        .unwrap()["annotations"]["readOnlyHint"],
+      false
+    );
+  }
+  #[test]
+  fn instantiate_uses_stored_template_without_provider_credentials() {
+    let root = tempfile::tempdir().unwrap();
+    std::fs::write(root.path().join("justfile"), "hello:\n  @echo hello\n").unwrap();
+    let template = just_ai::ai_responses::TemplateProposal {
+      name: "example".into(),
+      description: "test".into(),
+      category: "test".into(),
+      parameters: vec![],
+      body: vec!["@echo stored-marker".into()],
+    };
+    just_ai::proposal::save_template(root.path(), &template).unwrap();
+    let result = call_tool_at(
+      &json!({"name":"instantiate_template","arguments":{"template":"example","values":{},"write":true}}),
+      Path::new("just"),
+      root.path(),
+    )
+    .unwrap();
+    assert_eq!(result["structuredContent"]["written"], true);
+    assert!(
+      std::fs::read_to_string(root.path().join("justfile"))
+        .unwrap()
+        .contains("stored-marker")
+    );
   }
 }

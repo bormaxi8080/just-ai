@@ -7,7 +7,7 @@ use std::{
 use just_ai::{
   ai_responses::{
     AddRecipeResponse as AiAddRecipeResponse, ComposeWorkflowResponse as AiComposeWorkflowResponse,
-    ExplainResponse, FixResponse, RecipeProposal, SuggestResponse, TemplateParameter,
+    ExplainResponse, FixResponse, SuggestResponse, TemplateParameter,
     TemplateResponse as AiTemplateResponse, WorkflowResponse as AiWorkflowResponse,
   },
   application::{
@@ -16,7 +16,6 @@ use just_ai::{
     history::{RunRecord, create_history_at},
     modularization::ModularizationPlan,
   },
-  bounded_file::{max_editable_file_bytes, read_utf8},
   cli::AiClient,
   config::Config,
   domain::risk::{RiskFinding, RiskLevel},
@@ -467,6 +466,8 @@ async fn ai_template(
     )
     .map_err(|error| error.to_string())?;
 
+  just_ai::proposal::save_template(&project_root, &response.template).map_err(|e| e.to_string())?;
+
   let template_params: Vec<TemplateParameterInfo> = response
     .template
     .parameters
@@ -521,126 +522,45 @@ async fn ai_instantiate_template(
   let context =
     inspect_project_at("just", project_root.clone()).map_err(|error| error.to_string())?;
 
-  // First, generate the template from the template name
-  let template_prompt = format!(
-    "Find or create a template named '{}' for this project.",
-    request.template
-  );
-  let template_response = AiClient::from_project(&project_root)
-    .map_err(|error| error.to_string())?
-    .complete_json::<AiTemplateResponse>(
-      "Generate a reusable just recipe template as strict JSON.",
-      &prompts::template(
-        &context.ai_json().map_err(|error| error.to_string())?,
-        &template_prompt,
-      ),
-    )
-    .map_err(|error| error.to_string())?;
-
-  // Check required parameters - fill in defaults if provided
-  let mut values_map = request.values.clone();
-  for param in &template_response.template.parameters {
-    if param.required && !values_map.contains_key(&param.name) {
-      if let Some(default) = &param.default {
-        values_map.insert(param.name.clone(), default.clone());
-      } else {
-        return Err(format!("required parameter '{}' not provided", param.name));
-      }
-    }
-  }
-
-  // Substitute template parameters in the body
-  let mut recipe_body = Vec::new();
-  for line in &template_response.template.body {
-    let mut substituted = line.clone();
-    for (key, value) in &values_map {
-      substituted = substituted.replace(&format!("{{{{{key}}}}}"), value);
-    }
-    recipe_body.push(substituted);
-  }
-
-  // Build the recipe proposal from the template
-  let recipe = RecipeProposal {
-    name: template_response.template.name.clone(),
-    doc: Some(template_response.template.description.clone()),
-    parameters: template_response
-      .template
-      .parameters
-      .iter()
-      .map(|p| just_ai::ai_responses::RecipeParameterProposal {
-        name: p.name.clone(),
-        default: values_map.get(&p.name).cloned().or(p.default.clone()),
-      })
-      .collect(),
-    dependencies: vec![],
-    body: recipe_body,
-  };
-
-  let source = context
-    .root_source()
-    .ok_or("project context does not contain a root justfile source")?;
-  let original = read_utf8(source, max_editable_file_bytes()).map_err(|error| error.to_string())?;
-  let rendered = just_ai::proposal::render_recipe(&recipe);
-  let proposed = just_ai::proposal::insert_recipe_grouped(
-    &original,
-    &rendered,
+  let template = just_ai::proposal::load_template(&project_root, &request.template)
+    .map_err(|e| e.to_string())?
+    .ok_or("stored template not found")?;
+  let plan = just_ai::application::templates::TemplatePlan::prepare(
     &context,
-    &recipe.dependencies,
-    &recipe.name,
-  );
-  just_ai::bounded_file::ensure_text_limit(
-    &proposed,
-    "proposed justfile",
-    just_ai::bounded_file::max_editable_file_bytes(),
+    &template,
+    &request.values,
+    false,
   )
-  .map_err(|error| error.to_string())?;
-
-  let just_binary_path = PathBuf::from("just");
-  just_ai::proposal::validate_justfile(&just_binary_path, source, &proposed)
-    .map_err(|error| error.to_string())?;
-
-  let risks = just_ai::domain::risk::RiskFinding::scan_lines(&recipe.body);
-  let risk = just_ai::domain::risk::RiskLevel::highest(&risks);
-  if risk == just_ai::domain::risk::RiskLevel::Blocked {
-    return Err("instantiated template has blocked risk and will not be written".into());
-  }
-
-  let diff = just_ai::proposal::unified_diff(source, &original, &proposed);
-
-  let recipe_clone = recipe.clone();
-  let recipe_name = recipe.name.clone();
-
+  .map_err(|e| e.to_string())?;
+  plan
+    .validate(PathBuf::from("just").as_path())
+    .map_err(|e| e.to_string())?;
   if request.write {
-    just_ai::application::patches::apply_reviewed_change(source, &original, &proposed)
-      .map_err(|error| error.to_string())?;
-
-    Ok(GuiInstantiateTemplateResponse {
-      success: true,
-      message: format!("Template '{}' instantiated and written", request.template),
-      diff: Some(diff),
-      recipe_name: Some(recipe_name),
-      summary: Some(format!("Template '{}' instantiated", request.template)),
-      recipe: Some(AiAddRecipeResponse {
-        summary: format!("Template '{}' instantiated", request.template),
-        recipe: recipe_clone,
-        rationale: vec!["Instantiated from template".to_string()],
-      }),
-    })
-  } else {
-    let recipe_clone2 = recipe.clone();
-    Ok(GuiInstantiateTemplateResponse {
-      success: true,
-      message: format!("Template '{}' instantiated (dry run)", request.template),
-      diff: Some(diff),
-      recipe_name: Some(recipe_name),
-      summary: Some(format!("Template '{}' instantiated", request.template)),
-      recipe: Some(AiAddRecipeResponse {
-        summary: format!("Template '{}' instantiated", request.template),
-        recipe: recipe_clone2,
-        rationale: vec!["Instantiated from template".to_string()],
-      }),
-    })
+    plan
+      .apply(PathBuf::from("just").as_path())
+      .map_err(|e| e.to_string())?;
   }
+  let first = plan.recipes.first().cloned();
+  Ok(GuiInstantiateTemplateResponse {
+    success: true,
+    message: format!(
+      "Template '{}' instantiated{}",
+      request.template,
+      if request.write {
+        " and written"
+      } else {
+        " (dry run)"
+      }
+    ),
+    diff: Some(unified_diff(&plan.source, &plan.original, &plan.proposed)),
+    recipe_name: first.as_ref().map(|recipe| recipe.name.clone()),
+    summary: Some("Instantiated from stored template".into()),
+    recipe: first.map(|recipe| AiAddRecipeResponse {
+      summary: "Instantiated from stored template".into(),
+      recipe,
+      rationale: vec![],
+    }),
+  })
 }
 
 #[derive(Deserialize)]
@@ -822,7 +742,7 @@ async fn ai_fix_batch(
   }
 
   let just_binary_path = PathBuf::from("just");
-  just_ai::proposal::validate_justfile(&just_binary_path, source, &proposed)
+  just_ai::proposal::validate_generated_source(&just_binary_path, source, &proposed)
     .map_err(|error| error.to_string())?;
 
   if request.write {

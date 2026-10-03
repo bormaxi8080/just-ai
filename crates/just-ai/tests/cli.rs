@@ -598,3 +598,37 @@ fn deduplication_keeps_referenced_duplicates() {
   assert!(plan.removed.is_empty());
   assert_eq!(plan.original, plan.proposed);
 }
+
+#[test]
+fn stored_template_uses_defaults_and_rejects_unresolved_or_unknown_values() {
+  use just_ai::{
+    ai_responses::{TemplateParameter, TemplateProposal},
+    application::templates::TemplatePlan,
+  };
+  let directory = tempfile::tempdir().unwrap();
+  std::fs::write(directory.path().join("justfile"), "hello:\n  @echo hello\n").unwrap();
+  let template = TemplateProposal {
+    name: "example".into(),
+    description: "test".into(),
+    category: "test".into(),
+    body: vec!["@echo {{value}}".into()],
+    parameters: vec![TemplateParameter {
+      name: "value".into(),
+      description: "value".into(),
+      required: true,
+      default: Some("default-marker".into()),
+    }],
+  };
+  just_ai::proposal::save_template(directory.path(), &template).unwrap();
+  let stored = just_ai::proposal::load_template(directory.path(), "example")
+    .unwrap()
+    .unwrap();
+  let context = just_ai::inspect_project_at("just", directory.path()).unwrap();
+  let plan = TemplatePlan::prepare(&context, &stored, &Default::default(), false).unwrap();
+  assert!(plan.proposed.contains("default-marker"));
+  plan.validate(std::path::Path::new("just")).unwrap();
+  let mut values = std::collections::HashMap::new();
+  values.insert("unknown".into(), "value".into());
+  assert!(TemplatePlan::prepare(&context, &stored, &values, false).is_err());
+  assert!(just_ai::proposal::load_template(directory.path(), "../outside").is_err());
+}
