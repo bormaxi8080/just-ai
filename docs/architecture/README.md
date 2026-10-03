@@ -151,3 +151,8 @@ The gate verifies these contracts; it cannot certify every graph edge. Parser
 diagnostics and other unresolved calls still require direct source inspection.
 After upgrading a long-lived MCP process, reconnect it before subsequent edits
 so its old watcher cannot overwrite the refreshed index.
+
+The desktop main-window capability grants event listen/unlisten for live recipe
+output. The opt-in Docker `native-smoke` target exercises the embedded frontend
+and real IPC under Xvfb; run it with `docker run --init` so Xvfb's readiness
+signal reaches its parent. WebDriver is pinned to 2.0.6 for Rust 1.89 compatibility.

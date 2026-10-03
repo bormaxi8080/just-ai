@@ -36,6 +36,7 @@ def main():
 
     app = args.application.resolve(strict=True)
     runner = args.just.resolve(strict=True)
+    python = Path(sys.executable).as_posix()
     args.artifacts.mkdir(parents=True, exist_ok=True)
     artifacts = args.artifacts.resolve()
     command = ["tauri-driver", "--port", "4444"]
@@ -45,7 +46,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix="just-ai-desktop-") as temporary:
         root = Path(temporary)
         (root / "justfile").write_text(
-            'hello:\n    @echo native-desktop-ok\n\nquiet:\n    @python -c "import time; print(\'native-running\', flush=True); time.sleep(60)"\n',
+            f'hello:\n    @echo native-desktop-ok\n\nquiet:\n    @"{python}" -c "import time; print(\'native-running\', flush=True); time.sleep(60)"\n',
             encoding="utf-8",
         )
         config = root / "just-ai.toml"

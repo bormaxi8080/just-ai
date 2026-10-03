@@ -23,3 +23,9 @@ An output idle timeout terminates the isolated process tree; zero disables it
 for intentionally quiet long-running recipes. Capture limits cannot exceed the
 8 MiB hard ceiling. CLI flags/environment override the configured runner; MCP
 continues to use its server-controlled binary.
+
+The main desktop window has explicit Tauri capabilities for event listen and
+unlisten. Run stdout/stderr arrives through that subscription while the process
+is active. Custom command IPC alone does not grant core event permissions.
+Packaged Linux smoke exercises this real event path, unlike renderer mocks.
+Desktop Docker builds enable `tauri/custom-protocol` to embed frontend assets.

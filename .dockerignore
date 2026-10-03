@@ -8,3 +8,6 @@
 .codebase-memory/
 .DS_Store
 *.log
+
+**/__pycache__/
+**/desktop-test-artifacts/

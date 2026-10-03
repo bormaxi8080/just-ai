@@ -48,8 +48,9 @@ def main():
                                 text=True, check=True, timeout=180)
         return unpack(json.loads(output.stdout))
 
+    refreshed = None
     if args.refresh:
-        call("index_repository", repo_path=str(root), mode="full", persistence=True)
+        refreshed = call("index_repository", repo_path=str(root), mode="full", persistence=True)
     projects = call("list_projects", format="json", limit=1000)
     candidates = projects.get("projects", [])
     if isinstance(candidates, dict):
@@ -58,9 +59,19 @@ def main():
     if len(matching) != 1:
         raise RuntimeError("Expected exactly one indexed project for the current checkout root")
     project = matching[0]["name"]
-    status = call("index_status", project=project, format="json", diagnostics="summary")
+    status = call("index_status", project=project, format="json", diagnostics="full")
     if status.get("status") != "ready":
         raise RuntimeError(f"Index is not ready: {status}")
+    diagnostics = refreshed or status
+    for category in ("parse_partial", "parse_unusable", "skipped"):
+        coverage = diagnostics.get(category, {})
+        if coverage.get("truncated"):
+            raise RuntimeError(f"Truncated {category} coverage; inspect full index diagnostics")
+        for entry in coverage.get("files", []):
+            path = entry.get("path", entry.get("file", ""))
+            if path.startswith(("apps/just-ai-", "crates/just-ai/", "crates/just-ai-lsp/")):
+                raise RuntimeError(f"Companion source coverage failure: {category}: {path}")
+            print(f"Upstream parser diagnostic: {category}: {path}; inspect this source directly")
     generated = call("search_graph", project=project, format="json",
                      file_pattern="apps/just-ai-vscode/out/*", limit=1)
     if generated.get("total", 0) != 0:
@@ -94,10 +105,6 @@ def main():
         raise RuntimeError(f"TemplatePlan adapter call coverage mismatch: missing={expected-observed}, unexpected={observed-expected}")
     print(f"Codebase source/exclusion/CLI-MCP-GUI call checks passed: {project}")
     print(f"Index: {status.get('nodes', '?')} nodes, {status.get('edges', '?')} edges")
-    # Parser diagnostics remain visible; a boundary check does not certify every edge.
-    for key in ("parse_partial_count", "parse_unusable_count", "skipped_count"):
-        if status.get(key):
-            print(f"Parser diagnostic: {key}={status[key]}; inspect affected source directly")
 
 
 if __name__ == "__main__":

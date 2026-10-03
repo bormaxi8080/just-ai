@@ -23,9 +23,12 @@ COPY docs/ docs/
 COPY apps/just-ai-gui/src-tauri/ apps/just-ai-gui/src-tauri/
 COPY --from=frontend-builder /app/dist/ apps/just-ai-gui/dist/
 RUN cargo build --release --locked -p just
-RUN cargo build --release --locked --manifest-path apps/just-ai-gui/src-tauri/Cargo.toml --bin just-ai-gui
+RUN cargo build --release --locked --manifest-path apps/just-ai-gui/src-tauri/Cargo.toml --bin just-ai-gui --features tauri/custom-protocol
 
-FROM debian:bookworm-slim AS runtime
+FROM builder AS webdriver-builder
+RUN cargo install tauri-driver --version 2.0.6 --locked --root /usr/local
+
+FROM debian:bookworm-slim AS desktop-runtime
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates libssl3 libwebkit2gtk-4.1-0 libgtk-3-0 libayatana-appindicator3-1 librsvg2-2 && rm -rf /var/lib/apt/lists/*
 RUN useradd -m -u 1000 -s /bin/bash justai
 COPY --from=builder /app/target/release/just /usr/local/bin/just
@@ -35,3 +38,15 @@ USER justai
 WORKDIR /workspace
 ENV JUST_AI_DATA_DIR=/home/justai/.local/share/just-ai
 ENTRYPOINT ["just-ai-gui"]
+
+# Explicit opt-in test image; the default final stage remains the desktop runtime.
+FROM desktop-runtime AS native-smoke
+USER root
+RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-selenium xvfb xauth webkit2gtk-driver && rm -rf /var/lib/apt/lists/*
+COPY --from=webdriver-builder /usr/local/bin/tauri-driver /usr/local/bin/tauri-driver
+COPY tests/desktop_smoke.py /opt/desktop_smoke.py
+RUN mkdir -p /workspace /artifacts && chown justai:justai /workspace /artifacts
+USER justai
+ENTRYPOINT ["xvfb-run", "-a", "python3", "/opt/desktop_smoke.py", "--application", "/usr/local/bin/just-ai-gui", "--just", "/usr/local/bin/just", "--artifacts", "/artifacts"]
+
+FROM desktop-runtime AS runtime

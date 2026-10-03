@@ -110,3 +110,18 @@ boundaries. `tests/codebase_index_check.py` checks current source and exact
 call coverage, and the Linux CI graph job uses a pinned, checksum-verified
 0.11.0 in an isolated cache. Other parser diagnostics still require source
 inspection; this is not a claim of complete resolution for every language.
+
+Native Linux ARM64 desktop verification completed in a local Docker container:
+real WebKit/Tauri IPC passed project inspection, upstream execution, persisted
+history, policy denial, live stdout and process-tree cancellation. This exposed
+and fixed missing main-window Tauri event listen/unlisten capabilities. Desktop
+Docker now embeds frontend assets with `tauri/custom-protocol`, and its opt-in
+`native-smoke` stage pins WebDriver 2.0.6 and runs under Docker `--init`. The
+production final stage remains the desktop runtime. Native Windows execution
+remains a CI gate and was not run locally; nothing was pushed to trigger it.
+
+JSX ampersands are encoded as entities: renderer tests still pass (seven), and
+the production JS bundle is byte-identical. Companion parser diagnostics are
+now clean; remaining MCP warnings concern upstream `release-plz-changelog.toml`
+and `examples/rule124.just`. The graph gate rejects companion parse/skipped
+coverage failures and exposes upstream diagnostics for direct source review.

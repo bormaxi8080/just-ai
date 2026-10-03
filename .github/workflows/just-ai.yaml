@@ -11,6 +11,8 @@ on:
       - "tests/desktop_smoke.py"
       - "tests/codebase_index_check.py"
       - ".cbmignore"
+      - "Dockerfile.gui"
+      - ".dockerignore"
       - "crates/just-ai-lsp/**"
       - "Cargo.toml"
       - "Cargo.lock"
@@ -28,6 +30,8 @@ on:
       - "tests/desktop_smoke.py"
       - "tests/codebase_index_check.py"
       - ".cbmignore"
+      - "Dockerfile.gui"
+      - ".dockerignore"
       - "crates/just-ai-lsp/**"
       - "Cargo.toml"
       - "Cargo.lock"
@@ -100,7 +104,7 @@ jobs:
         run: |
           cargo build --manifest-path ../../Cargo.toml --locked --package just --bin just
           npm run tauri -- build --debug --no-bundle
-          cargo install tauri-driver --locked
+          cargo install tauri-driver --version 2.0.6 --locked
           python -m pip install "selenium>=4.26,<5"
       - name: Native Linux desktop workflows
         if: runner.os == 'Linux'
@@ -144,3 +148,20 @@ jobs:
         env:
           CBM_CACHE_DIR: ${{ runner.temp }}/just-ai-codebase-cache
         run: python tests/codebase_index_check.py --binary "$RUNNER_TEMP/codebase-mcp/codebase-memory-mcp" --refresh
+
+  desktop-container:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build embedded desktop and native test image
+        run: docker build --file Dockerfile.gui --target native-smoke --tag just-ai-desktop-smoke .
+      - name: Exercise packaged Linux desktop with real IPC
+        run: docker run --init --name just-ai-desktop-smoke-test just-ai-desktop-smoke
+      - name: Collect native failure artifacts
+        if: failure()
+        run: docker cp just-ai-desktop-smoke-test:/artifacts desktop-test-artifacts || true
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: desktop-container-failure
+          path: desktop-test-artifacts/

@@ -60,3 +60,14 @@ policy denial, live events and cancellation. Run Linux under `xvfb-run -a`;
 Windows requires matching Edge WebDriver. See the script's `--help`. Native
 `tauri-driver` does not support macOS WKWebView; renderer tests and Rust checks
 run there. Driver logs and failed screenshots are uploaded by CI.
+
+For packaged Linux desktop verification, run:
+
+```sh
+docker build --file Dockerfile.gui --target native-smoke --tag just-ai-desktop-smoke .
+docker run --init --name just-ai-desktop-smoke-test just-ai-desktop-smoke
+```
+
+The default final Docker stage remains the production runtime. `native-smoke`
+is opt-in and adds WebDriver/Xvfb/test dependencies. Docker desktop builds
+explicitly enable `tauri/custom-protocol` so the frontend is embedded.

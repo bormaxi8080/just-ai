@@ -1,0 +1,9 @@
+{
+  "identifier": "main-events",
+  "description": "Let the main desktop window receive recipe run events.",
+  "windows": ["main"],
+  "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten"
+  ]
+}

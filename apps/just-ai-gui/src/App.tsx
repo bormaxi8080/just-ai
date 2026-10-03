@@ -509,7 +509,7 @@ export function App() {
                 {fixRecipeLoading ? "Fixing..." : "Fix Recipe"}
               </button>
               <button onClick={handleFixRecipeWrite} disabled={running || fixRecipeLoading}>
-                Fix & Write
+                Fix &amp; Write
               </button>
             </div>
           )}
@@ -525,7 +525,7 @@ export function App() {
               {addRecipeLoading ? "Adding..." : "Add Recipe"}
             </button>
             <button onClick={handleAddRecipeWrite} disabled={running || addRecipeLoading || !addRecipeRequest.trim()}>
-              Add & Write
+              Add &amp; Write
             </button>
           </div>
           <div className="ai-buttons">
@@ -540,7 +540,7 @@ export function App() {
               {workflowLoading ? "Generating..." : "Create Workflow"}
             </button>
             <button onClick={handleWorkflowWrite} disabled={running || workflowLoading || !workflowRequest.trim()}>
-              Workflow & Write
+              Workflow &amp; Write
             </button>
           </div>
           <div className="ai-buttons">
@@ -548,7 +548,7 @@ export function App() {
               {fixBatchLoading ? "Analyzing..." : "Fix All Failed"}
             </button>
             <button onClick={handleFixBatchWrite} disabled={running || fixBatchLoading}>
-              Fix All & Write
+              Fix All &amp; Write
             </button>
           </div>
           <div className="ai-buttons">
@@ -634,7 +634,7 @@ export function App() {
                 {instantiateTemplateLoading ? "Instantiating..." : "Instantiate (Dry-run)"}
               </button>
               <button onClick={handleInstantiateTemplateWrite} disabled={running || instantiateTemplateLoading || !instantiateTemplateName.trim()}>
-                Instantiate & Write
+                Instantiate &amp; Write
               </button>
             </div>
           </div>
@@ -654,7 +654,7 @@ export function App() {
                 {composeWorkflowLoading ? "Composing..." : "Compose Workflow"}
               </button>
               <button onClick={handleComposeWorkflowWrite} disabled={running || composeWorkflowLoading || !composeWorkflowRequest.trim()}>
-                Compose & Write
+                Compose &amp; Write
               </button>
             </div>
           </div>
@@ -761,7 +761,7 @@ function RecipeDetail({ recipe, onRun }: { recipe: Recipe; onRun: (arguments_: s
               onChange={(event) => setValues({ ...values, [parameter.name]: event.target.value })} />}
         </label>)}
       {parameterError && <p className="error">{parameterError}</p>}
-      <button className="run-button">Prepare & run</button>
+      <button className="run-button">Prepare &amp; run</button>
     </form>
     <h3>Local risk analysis</h3>
     <div className="risk-card"><strong data-risk={recipe.risk}>{recipe.risk}</strong>
