@@ -446,13 +446,26 @@ async function runRecipeCommand(): Promise<void> {
 
     if (!recipe) { return; }
 
-    // For now, just run the recipe via terminal
-    const terminal = vscode.window.createTerminal({
-      name: `just ${recipe}`,
-      cwd: vscode.workspace.workspaceFolders?.[0].uri.fsPath
-    });
-    terminal.show();
-    terminal.sendText(`just ${recipe}`);
+    const selected = context.recipes.find(r => r.namepath === recipe)!;
+    if (selected.risk === 'blocked') {
+      vscode.window.showErrorMessage(`Recipe ${recipe} is blocked by the risk policy.`);
+      return;
+    }
+    let confirmation: string | undefined;
+    if (selected.risk === 'high') {
+      confirmation = await vscode.window.showInputBox({
+        prompt: `High-risk recipe. Type the configured confirmation phrase (default: run ${recipe})`,
+        ignoreFocusOut: true
+      });
+      if (confirmation === undefined) { return; }
+    } else if (selected.risk === 'medium') {
+      const answer = await vscode.window.showWarningMessage(
+        `Run medium-risk recipe ${recipe}?`, { modal: true }, 'Run');
+      if (answer !== 'Run') { return; }
+    }
+    outputChannel.show();
+    outputChannel.appendLine(await justAiClient.runRecipe(recipe, confirmation));
+    historyProvider.refresh();
   } catch (error) {
     vscode.window.showErrorMessage(`Failed to run recipe: ${error}`);
   }

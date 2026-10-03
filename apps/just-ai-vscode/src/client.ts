@@ -60,6 +60,13 @@ export class JustAiClient {
     return json ? JSON.parse(output) : output;
   }
 
+  async runRecipe(recipe: string, confirmation?: string): Promise<string> {
+    const args = ['run', '--yes'];
+    if (confirmation !== undefined) { args.push('--confirm', confirmation); }
+    args.push('--', recipe);
+    return this.runJustAiCommandWithArgs(args);
+  }
+
   async suggest(): Promise<string> {
     return this.runJustAiCommand('suggest');
   }

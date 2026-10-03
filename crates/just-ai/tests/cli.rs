@@ -437,3 +437,27 @@ fn history_accepts_recipe_and_success_filters() {
   );
   assert!(serde_json::from_slice::<Vec<serde_json::Value>>(&output.stdout).is_ok());
 }
+
+#[cfg(unix)]
+#[test]
+fn modularize_validation_failure_leaves_project_untouched() {
+  use std::os::unix::fs::PermissionsExt;
+  let directory = tempfile::tempdir().unwrap();
+  let original = "test-a:\n  echo a\n\ntest-b:\n  echo b\n";
+  let root = directory.path().join("justfile");
+  std::fs::write(&root, original).unwrap();
+  let binary = directory.path().join("fake-just");
+  std::fs::write(&binary, "#!/bin/sh\nif [ \"$1\" = \"--dump\" ]; then exec just \"$@\"; fi\necho 'validation rejected' >&2\nexit 1\n").unwrap();
+  std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o700)).unwrap();
+  let output = just_ai()
+    .current_dir(directory.path())
+    .arg("--just-binary")
+    .arg(binary)
+    .args(["migrate", "modularize", "--write"])
+    .output()
+    .unwrap();
+  assert!(!output.status.success());
+  assert!(String::from_utf8_lossy(&output.stderr).contains("validation rejected"));
+  assert_eq!(std::fs::read_to_string(root).unwrap(), original);
+  assert!(!directory.path().join("test.just").exists());
+}
