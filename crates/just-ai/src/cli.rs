@@ -337,10 +337,10 @@ fn try_main() -> Result<(), Box<dyn Error>> {
       if all_failed {
         // Batch fix all failed recipes
         use crate::config::Config;
-        use application::history::create_history;
+        use application::history::create_history_at;
         let project_root = env::current_dir()?;
         let config = Config::load(&project_root)?;
-        let history = create_history(config.history)?;
+        let history = create_history_at(&project_root, config.history)?;
         // Query for ALL failed runs
         let failed_runs = history.query(None, Some(false), 100)?;
 
@@ -436,10 +436,10 @@ fn try_main() -> Result<(), Box<dyn Error>> {
       } else {
         let recipe = recipe.ok_or("recipe name required (or use --all-failed)")?;
         use crate::config::Config;
-        use application::history::create_history;
+        use application::history::create_history_at;
         let project_root = env::current_dir()?;
         let config = Config::load(&project_root)?;
-        let history = create_history(config.history)?;
+        let history = create_history_at(&project_root, config.history)?;
         // Query for failed runs of this recipe
         let failed_runs = history.query(Some(&recipe), Some(false), 10)?;
         let history_json = serde_json::to_string_pretty(&failed_runs)?;
@@ -596,7 +596,7 @@ fn try_main() -> Result<(), Box<dyn Error>> {
       use crate::config::Config;
       use application::{
         execution::{RecipeExecutor, RunConfirmation, RunRequest, interactive_authorize},
-        history::{RunRecord, create_history},
+        history::{RunRecord, create_history_at},
       };
       use std::time::{Instant, SystemTime, UNIX_EPOCH};
       let project_root = env::current_dir()?;
@@ -630,7 +630,7 @@ fn try_main() -> Result<(), Box<dyn Error>> {
         &completed,
         &config.history,
       );
-      let history = create_history(config.history)?;
+      let history = create_history_at(&project_root, config.history)?;
       history.append(&record)?;
       std::io::stdout().write_all(&completed.stdout)?;
       std::io::stderr().write_all(&completed.stderr)?;
@@ -646,10 +646,10 @@ fn try_main() -> Result<(), Box<dyn Error>> {
         success,
       } => {
         use crate::config::Config;
-        use application::history::create_history;
+        use application::history::create_history_at;
         let project_root = env::current_dir()?;
         let config = Config::load(&project_root)?;
-        let history = create_history(config.history)?;
+        let history = create_history_at(&project_root, config.history)?;
         let records = history.query(recipe.as_deref(), success, limit)?;
         if json {
           println!("{}", serde_json::to_string_pretty(&records)?);

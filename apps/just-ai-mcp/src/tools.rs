@@ -3,7 +3,7 @@ use {
     application::{
       deduplication::smart_merge_recipes,
       execution::{RecipeExecutor, RunConfirmation, RunRequest},
-      history::create_history,
+      history::{RunRecord, create_history_at},
       modularization::ModularizationPlan,
       patches::apply_reviewed_change,
     },
@@ -380,9 +380,28 @@ fn call_tool_at(params: &Value, just_binary: &Path, project_root: &Path) -> Resu
           arguments: arguments_vec.clone(),
         })
         .map_err(|error| error.to_string())?;
+      let started_at_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|e| e.to_string())?
+        .as_millis();
+      let started = std::time::Instant::now();
       let completed = executor
         .execute(&prepared, &confirmation)
         .map_err(|error| error.to_string())?;
+      let config = Config::load(project_root)
+        .map_err(|e| e.to_string())?
+        .history;
+      let record = RunRecord::completed(
+        &prepared.request,
+        started_at_ms,
+        started.elapsed().as_millis(),
+        &completed,
+        &config,
+      );
+      create_history_at(project_root, config)
+        .map_err(|e| e.to_string())?
+        .append(&record)
+        .map_err(|e| e.to_string())?;
       json!({
         "status": completed.status.to_string(),
         "success": completed.status.success(),
@@ -393,7 +412,8 @@ fn call_tool_at(params: &Value, just_binary: &Path, project_root: &Path) -> Resu
     }
     "get_history" => {
       let config = Config::load(project_root).map_err(|error| error.to_string())?;
-      let history = create_history(config.history).map_err(|error| error.to_string())?;
+      let history =
+        create_history_at(project_root, config.history).map_err(|error| error.to_string())?;
       let recipe_filter = arguments
         .get("recipe")
         .and_then(Value::as_str)
@@ -466,7 +486,8 @@ fn call_tool_at(params: &Value, just_binary: &Path, project_root: &Path) -> Resu
         .and_then(Value::as_bool)
         .unwrap_or(false);
       let config = Config::load(project_root).map_err(|error| error.to_string())?;
-      let history = create_history(config.history).map_err(|error| error.to_string())?;
+      let history =
+        create_history_at(project_root, config.history).map_err(|error| error.to_string())?;
       let failed_runs = history
         .query(Some(&recipe_name), Some(false), 10)
         .map_err(|error| error.to_string())?;
@@ -596,7 +617,8 @@ fn call_tool_at(params: &Value, just_binary: &Path, project_root: &Path) -> Resu
         .and_then(Value::as_bool)
         .unwrap_or(false);
       let config = Config::load(project_root).map_err(|error| error.to_string())?;
-      let history = create_history(config.history).map_err(|error| error.to_string())?;
+      let history =
+        create_history_at(project_root, config.history).map_err(|error| error.to_string())?;
       let failed_runs = history
         .query(None, Some(false), 100)
         .map_err(|error| error.to_string())?;

@@ -510,3 +510,49 @@ fn ai_context_redacts_recipe_bodies_docs_and_defaults_without_mutating_source() 
   assert!(context.recipes[0].body[0].contains("synthetic-body-secret"));
   serde_json::from_str::<serde_json::Value>(&sanitized).unwrap();
 }
+
+#[test]
+fn sqlite_history_is_scoped_to_project_root() {
+  let directory = tempfile::tempdir().unwrap();
+  let data = directory.path().join("data");
+  let a = directory.path().join("a");
+  let b = directory.path().join("b");
+  for root in [&a, &b] {
+    std::fs::create_dir(root).unwrap();
+    std::fs::write(root.join("justfile"), "hello:\n  @echo history-marker\n").unwrap();
+  }
+  let output = just_ai()
+    .current_dir(&a)
+    .env("JUST_AI_DATA_DIR", &data)
+    .args(["run", "hello"])
+    .output()
+    .unwrap();
+  assert!(
+    output.status.success(),
+    "{}",
+    String::from_utf8_lossy(&output.stderr)
+  );
+  let output = just_ai()
+    .current_dir(&b)
+    .env("JUST_AI_DATA_DIR", &data)
+    .args(["history", "recent", "--json"])
+    .output()
+    .unwrap();
+  assert!(output.status.success());
+  let records: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+  assert_eq!(records, serde_json::json!([]));
+  let output = just_ai()
+    .current_dir(&a)
+    .env("JUST_AI_DATA_DIR", &data)
+    .args(["history", "recent", "--json"])
+    .output()
+    .unwrap();
+  assert_eq!(
+    serde_json::from_slice::<serde_json::Value>(&output.stdout)
+      .unwrap()
+      .as_array()
+      .unwrap()
+      .len(),
+    1
+  );
+}

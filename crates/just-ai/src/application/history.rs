@@ -112,7 +112,7 @@ impl From<SqliteRunRecord> for RunRecord {
   }
 }
 
-pub trait RunHistory {
+pub trait RunHistory: Send + Sync {
   fn append(&self, record: &RunRecord) -> io::Result<()>;
   fn recent(&self, limit: usize) -> io::Result<Vec<RunRecord>>;
   fn query(
@@ -251,13 +251,16 @@ impl RunHistory for JsonLineHistory {
 
 impl SqliteHistory {
   pub async fn new(config: HistoryConfig) -> io::Result<Self> {
-    let base = std::env::var_os("JUST_AI_DATA_DIR")
-      .map(PathBuf::from)
-      .or_else(dirs::data_local_dir)
-      .unwrap_or_else(std::env::temp_dir)
-      .join("just-ai");
-    fs::create_dir_all(&base)?;
-    let db_path = base.join(&config.database_file);
+    Self::new_at(&std::env::current_dir()?, config).await
+  }
+
+  pub async fn new_at(root: &Path, config: HistoryConfig) -> io::Result<Self> {
+    let db_path = project_history_path(root, &config.database_file);
+    fs::create_dir_all(
+      db_path
+        .parent()
+        .ok_or_else(|| io::Error::other("missing history directory"))?,
+    )?;
     let db_url = format!("sqlite://{}?mode=rwc", db_path.display());
 
     let pool = SqlitePoolOptions::new()
@@ -314,14 +317,11 @@ impl SqliteHistory {
 
 impl RunHistory for SqliteHistory {
   fn append(&self, record: &RunRecord) -> io::Result<()> {
-    // For synchronous interface, we block on the async operation in a new runtime
-    let rt = tokio::runtime::Runtime::new().map_err(io::Error::other)?;
-    rt.block_on(self.append_async(record))
+    run_io(self.append_async(record))
   }
 
   fn recent(&self, limit: usize) -> io::Result<Vec<RunRecord>> {
-    let rt = tokio::runtime::Runtime::new().map_err(io::Error::other)?;
-    rt.block_on(self.recent_async(limit))
+    run_io(self.recent_async(limit))
   }
 
   fn query(
@@ -330,13 +330,18 @@ impl RunHistory for SqliteHistory {
     success: Option<bool>,
     limit: usize,
   ) -> io::Result<Vec<RunRecord>> {
-    let rt = tokio::runtime::Runtime::new().map_err(io::Error::other)?;
-    rt.block_on(self.query_async(recipe, success, limit))
+    run_io(self.query_async(recipe, success, limit))
   }
 }
 
 impl SqliteHistory {
   async fn append_async(&self, record: &RunRecord) -> io::Result<()> {
+    if serde_json::to_vec(record).map_err(io::Error::other)?.len() > self.config.max_record_bytes {
+      return Err(io::Error::new(
+        io::ErrorKind::InvalidInput,
+        "history record exceeds size limit",
+      ));
+    }
     let sqlite_record: SqliteRunRecord = record.clone().into();
     sqlx::query(
             r#"
@@ -455,17 +460,36 @@ impl SqliteHistory {
   }
 }
 
+fn run_io<T: Send>(
+  future: impl std::future::Future<Output = io::Result<T>> + Send,
+) -> io::Result<T> {
+  // The synchronous port may be called by an async adapter. Own the runtime on
+  // a worker thread so neither block_on nor runtime destruction nests in Tokio.
+  std::thread::scope(|scope| {
+    scope
+      .spawn(move || {
+        let rt = tokio::runtime::Runtime::new().map_err(io::Error::other)?;
+        rt.block_on(future)
+      })
+      .join()
+      .map_err(|_| io::Error::other("history worker panicked"))?
+  })
+}
+
 pub fn create_history(config: HistoryConfig) -> io::Result<Box<dyn RunHistory>> {
+  create_history_at(&std::env::current_dir()?, config)
+}
+
+pub fn create_history_at(root: &Path, config: HistoryConfig) -> io::Result<Box<dyn RunHistory>> {
   match config.backend {
     HistoryBackend::Jsonl => {
-      let path = project_history_path(Path::new("."), &config.file_name);
+      let path = project_history_path(root, &config.file_name);
       Ok(Box::new(JsonLineHistory::new(path, config)))
     }
     HistoryBackend::Sqlite => {
       // This creates the history in a blocking manner - caller should use async version
       // For backward compatibility, we provide a synchronous factory that works with existing code
-      let rt = tokio::runtime::Runtime::new().map_err(io::Error::other)?;
-      let history = rt.block_on(SqliteHistory::new(config))?;
+      let history = run_io(SqliteHistory::new_at(root, config))?;
       Ok(Box::new(history))
     }
   }
@@ -709,5 +733,13 @@ mod tests {
       .args(["/C", "exit", "0"])
       .status()
       .unwrap()
+  }
+}
+
+#[cfg(test)]
+mod runtime_tests {
+  #[tokio::test]
+  async fn synchronous_history_worker_is_safe_inside_async_runtime() {
+    assert_eq!(super::run_io(async { Ok(42) }).unwrap(), 42);
   }
 }

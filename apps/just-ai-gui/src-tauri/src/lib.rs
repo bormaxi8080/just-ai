@@ -13,13 +13,13 @@ use just_ai::{
   application::{
     deduplication::smart_merge_recipes,
     execution::{CancellationToken, PreparedRun, RecipeExecutor, RunConfirmation, RunRequest},
-    history::{RunRecord, create_history},
+    history::{RunRecord, create_history_at},
     modularization::ModularizationPlan,
     patches::apply_reviewed_change,
   },
   bounded_file::{max_editable_file_bytes, read_utf8},
   cli::AiClient,
-  config::{Config, HistoryConfig},
+  config::Config,
   domain::risk::{RiskFinding, RiskLevel},
   inspection::{ProjectContext, inspect_project_at},
   prompts,
@@ -60,8 +60,10 @@ async fn recent_runs(project_root: PathBuf, limit: usize) -> Result<Vec<RunRecor
       project_root.display()
     ));
   }
-  let config = HistoryConfig::default();
-  let history = create_history(config).map_err(|error| error.to_string())?;
+  let config = Config::load(&project_root)
+    .map_err(|error| error.to_string())?
+    .history;
+  let history = create_history_at(&project_root, config).map_err(|error| error.to_string())?;
   history
     .recent(limit.min(100))
     .map_err(|error| error.to_string())
@@ -99,7 +101,7 @@ async fn execute_run(
       .map_err(|error| error.to_string())?
       .as_millis();
     let started = Instant::now();
-    let _project_root = prepared.request.project_root.clone();
+    let project_root = prepared.request.project_root.clone();
     let completed = RecipeExecutor::new("just")
       .execute_streaming(&prepared, &confirmation, &cancellation, |event| {
         let _ = app.emit("run-event", event);
@@ -110,10 +112,14 @@ async fn execute_run(
       started_at_ms,
       started.elapsed().as_millis(),
       &completed,
-      &HistoryConfig::default(),
+      &Config::load(&project_root)
+        .map_err(|error| error.to_string())?
+        .history,
     );
-    let config = HistoryConfig::default();
-    let history = create_history(config).map_err(|error| error.to_string())?;
+    let config = Config::load(&project_root)
+      .map_err(|error| error.to_string())?
+      .history;
+    let history = create_history_at(&project_root, config).map_err(|error| error.to_string())?;
     history.append(&record).map_err(|error| error.to_string())?;
     Ok(RunResult {
       success: completed.status.success(),
@@ -286,7 +292,8 @@ async fn ai_fix_recipe(
     inspect_project_at("just", project_root.clone()).map_err(|error| error.to_string())?;
 
   let config = Config::load(&project_root).map_err(|error| error.to_string())?;
-  let history = create_history(config.history).map_err(|error| error.to_string())?;
+  let history =
+    create_history_at(&project_root, config.history).map_err(|error| error.to_string())?;
   let failed_runs = history
     .query(Some(&request.recipe_name), Some(false), 10)
     .map_err(|error| error.to_string())?;
@@ -743,7 +750,8 @@ async fn ai_fix_batch(
     inspect_project_at("just", project_root.clone()).map_err(|error| error.to_string())?;
 
   let config = Config::load(&project_root).map_err(|error| error.to_string())?;
-  let history = create_history(config.history).map_err(|error| error.to_string())?;
+  let history =
+    create_history_at(&project_root, config.history).map_err(|error| error.to_string())?;
   let failed_runs = history
     .query(None, Some(false), 100)
     .map_err(|error| error.to_string())?;
