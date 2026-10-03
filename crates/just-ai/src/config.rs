@@ -40,11 +40,13 @@ impl Config {
         path: path.clone(),
         source: e.to_string(),
       })?;
-      toml::from_str(&content).map_err(|e| ConfigError {
+      let config: Self = toml::from_str(&content).map_err(|e| ConfigError {
         kind: ConfigErrorKind::ParseError,
-        path,
+        path: path.clone(),
         source: e.to_string(),
-      })
+      })?;
+      config.validate(&path)?;
+      Ok(config)
     } else {
       Ok(Self::default())
     }
@@ -57,11 +59,47 @@ impl Config {
       path: path.to_path_buf(),
       source: e.to_string(),
     })?;
-    toml::from_str(&content).map_err(|e| ConfigError {
+    let config: Self = toml::from_str(&content).map_err(|e| ConfigError {
       kind: ConfigErrorKind::ParseError,
       path: path.to_path_buf(),
       source: e.to_string(),
-    })
+    })?;
+    config.validate(path)?;
+    Ok(config)
+  }
+  pub fn validate(&self, path: &Path) -> Result<(), ConfigError> {
+    let fail = |source: String| ConfigError {
+      kind: ConfigErrorKind::ParseError,
+      path: path.into(),
+      source,
+    };
+    for pattern in &self.history.redact_patterns {
+      regex::Regex::new(pattern)
+        .map_err(|error| fail(format!("invalid history redact pattern: {error}")))?;
+    }
+    if self.ai.timeout_secs == 0
+      || self.ai.max_tokens == Some(0)
+      || self
+        .ai
+        .temperature
+        .is_some_and(|value| !value.is_finite() || !(0.0..=2.0).contains(&value))
+    {
+      return Err(fail(
+        "invalid AI timeout, token limit or temperature".into(),
+      ));
+    }
+    if self.execution.max_capture_bytes == 0
+      || self.execution.max_capture_bytes > crate::bounded_output::MAX_CAPTURE_BYTES
+      || self.execution.stream_queue_capacity == 0
+      || self.execution.stream_queue_capacity > 65536
+      || self.execution.cancellation_poll_ms == 0
+      || self.execution.cancellation_poll_ms > 1000
+    {
+      return Err(fail(
+        "invalid execution capture limit, queue capacity or cancellation interval".into(),
+      ));
+    }
+    Ok(())
   }
 }
 
@@ -206,7 +244,7 @@ pub struct ExecutionConfig {
   /// Default just binary name or path.
   #[serde(default = "default_just_binary")]
   pub just_binary: String,
-  /// Read timeout for process output streams in seconds.
+  /// Maximum output idle interval in seconds; zero disables this timeout.
   #[serde(default = "default_read_timeout_secs")]
   pub read_timeout_secs: u64,
 }

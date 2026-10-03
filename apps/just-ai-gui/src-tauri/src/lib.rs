@@ -29,6 +29,12 @@ use just_ai::{
 use serde::{Deserialize, Serialize};
 use tauri::Emitter;
 
+fn configured_runner(root: &std::path::Path) -> Result<PathBuf, String> {
+  just_ai::config::Config::load(root)
+    .map(|config| config.execution.just_binary.into())
+    .map_err(|error| error.to_string())
+}
+
 #[tauri::command]
 fn inspect_project(project_root: PathBuf) -> Result<ProjectContext, String> {
   if !project_root.is_dir() {
@@ -38,15 +44,18 @@ fn inspect_project(project_root: PathBuf) -> Result<ProjectContext, String> {
     ));
   }
 
-  inspect_project_at("just", project_root).map_err(|error| error.to_string())
+  let config = just_ai::config::Config::load(&project_root).map_err(|error| error.to_string())?;
+  inspect_project_at(&config.execution.just_binary, project_root).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
 async fn prepare_run(request: RunRequest) -> Result<PreparedRun, String> {
-  tauri::async_runtime::spawn_blocking(move || RecipeExecutor::new("just").prepare(request))
-    .await
-    .map_err(|error| error.to_string())?
-    .map_err(|error| error.to_string())
+  tauri::async_runtime::spawn_blocking(move || {
+    RecipeExecutor::from_project(&request.project_root)?.prepare(request)
+  })
+  .await
+  .map_err(|error| error.to_string())?
+  .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -105,7 +114,8 @@ async fn execute_run(
       .as_millis();
     let started = Instant::now();
     let project_root = prepared.request.project_root.clone();
-    let completed = RecipeExecutor::new("just")
+    let completed = RecipeExecutor::from_project(&project_root)
+      .map_err(|error| error.to_string())?
       .execute_streaming(&prepared, &confirmation, &cancellation, |event| {
         let _ = app.emit("run-event", event);
       })
@@ -161,8 +171,8 @@ fn ai_suggest_blocking(project_root: PathBuf) -> Result<SuggestResponse, String>
       project_root.display()
     ));
   }
-  let context =
-    inspect_project_at("just", project_root.clone()).map_err(|error| error.to_string())?;
+  let context = inspect_project_at(configured_runner(&project_root)?, project_root.clone())
+    .map_err(|error| error.to_string())?;
   let response = AiClient::from_project(&project_root)
     .map_err(|error| error.to_string())?
     .complete_json::<SuggestResponse>(
@@ -190,8 +200,8 @@ fn ai_explain_blocking(
       project_root.display()
     ));
   }
-  let context =
-    inspect_project_at("just", project_root.clone()).map_err(|error| error.to_string())?;
+  let context = inspect_project_at(configured_runner(&project_root)?, project_root.clone())
+    .map_err(|error| error.to_string())?;
   let recipe = context
     .find_recipe(&recipe_name)
     .ok_or_else(|| format!("recipe `{recipe_name}` not found"))?;
@@ -244,8 +254,8 @@ fn ai_add_recipe_blocking(
       project_root.display()
     ));
   }
-  let context =
-    inspect_project_at("just", project_root.clone()).map_err(|error| error.to_string())?;
+  let context = inspect_project_at(configured_runner(&project_root)?, project_root.clone())
+    .map_err(|error| error.to_string())?;
   let response = AiClient::from_project(&project_root)
     .map_err(|error| error.to_string())?
     .complete_json::<AiAddRecipeResponse>(
@@ -259,7 +269,7 @@ fn ai_add_recipe_blocking(
 
   if request.write {
     handle_add(
-      &PathBuf::from("just"),
+      &configured_runner(&project_root)?,
       &context,
       &request.request,
       response,
@@ -324,8 +334,8 @@ fn ai_fix_recipe_blocking(
       project_root.display()
     ));
   }
-  let context =
-    inspect_project_at("just", project_root.clone()).map_err(|error| error.to_string())?;
+  let context = inspect_project_at(configured_runner(&project_root)?, project_root.clone())
+    .map_err(|error| error.to_string())?;
 
   let config = Config::load(&project_root).map_err(|error| error.to_string())?;
   let history =
@@ -347,7 +357,7 @@ fn ai_fix_recipe_blocking(
 
   if request.write {
     handle_fix(
-      &PathBuf::from("just"),
+      &configured_runner(&project_root)?,
       &context,
       &request.recipe_name,
       response,
@@ -413,8 +423,8 @@ fn ai_workflow_blocking(
       project_root.display()
     ));
   }
-  let context =
-    inspect_project_at("just", project_root.clone()).map_err(|error| error.to_string())?;
+  let context = inspect_project_at(configured_runner(&project_root)?, project_root.clone())
+    .map_err(|error| error.to_string())?;
 
   let response = AiClient::from_project(&project_root)
     .map_err(|error| error.to_string())?
@@ -431,7 +441,7 @@ fn ai_workflow_blocking(
 
   if request.write {
     handle_workflow(
-      &PathBuf::from("just"),
+      &configured_runner(&project_root)?,
       &context,
       &request.request,
       response,
@@ -509,8 +519,8 @@ fn ai_template_blocking(
       project_root.display()
     ));
   }
-  let context =
-    inspect_project_at("just", project_root.clone()).map_err(|error| error.to_string())?;
+  let context = inspect_project_at(configured_runner(&project_root)?, project_root.clone())
+    .map_err(|error| error.to_string())?;
 
   let response = AiClient::from_project(&project_root)
     .map_err(|error| error.to_string())?
@@ -587,8 +597,8 @@ fn ai_instantiate_template_blocking(
       project_root.display()
     ));
   }
-  let context =
-    inspect_project_at("just", project_root.clone()).map_err(|error| error.to_string())?;
+  let context = inspect_project_at(configured_runner(&project_root)?, project_root.clone())
+    .map_err(|error| error.to_string())?;
 
   let template = just_ai::proposal::load_template(&project_root, &request.template)
     .map_err(|e| e.to_string())?
@@ -601,11 +611,11 @@ fn ai_instantiate_template_blocking(
   )
   .map_err(|e| e.to_string())?;
   plan
-    .validate(PathBuf::from("just").as_path())
+    .validate(configured_runner(&project_root)?.as_path())
     .map_err(|e| e.to_string())?;
   if request.write {
     plan
-      .apply(PathBuf::from("just").as_path())
+      .apply(configured_runner(&project_root)?.as_path())
       .map_err(|e| e.to_string())?;
   }
   let first = plan.recipes.first().cloned();
@@ -668,8 +678,8 @@ fn ai_compose_workflow_blocking(
       project_root.display()
     ));
   }
-  let context =
-    inspect_project_at("just", project_root.clone()).map_err(|error| error.to_string())?;
+  let context = inspect_project_at(configured_runner(&project_root)?, project_root.clone())
+    .map_err(|error| error.to_string())?;
 
   let response = AiClient::from_project(&project_root)
     .map_err(|error| error.to_string())?
@@ -686,7 +696,7 @@ fn ai_compose_workflow_blocking(
 
   if request.write {
     handle_compose_workflow(
-      &PathBuf::from("just"),
+      &configured_runner(&project_root)?,
       &context,
       &request.request,
       response,
@@ -750,8 +760,8 @@ fn ai_fix_batch_blocking(
       project_root.display()
     ));
   }
-  let context =
-    inspect_project_at("just", project_root.clone()).map_err(|error| error.to_string())?;
+  let context = inspect_project_at(configured_runner(&project_root)?, project_root.clone())
+    .map_err(|error| error.to_string())?;
 
   let config = Config::load(&project_root).map_err(|error| error.to_string())?;
   let history =
@@ -827,7 +837,7 @@ fn ai_fix_batch_blocking(
     fixed_recipes.push(response.recipe.name.clone());
   }
 
-  let just_binary_path = PathBuf::from("just");
+  let just_binary_path = configured_runner(&project_root)?;
   just_ai::proposal::validate_generated_source(&just_binary_path, source, &proposed)
     .map_err(|error| error.to_string())?;
 
@@ -885,8 +895,8 @@ fn ai_explain_batch_blocking(
       project_root.display()
     ));
   }
-  let context =
-    inspect_project_at("just", project_root.clone()).map_err(|error| error.to_string())?;
+  let context = inspect_project_at(configured_runner(&project_root)?, project_root.clone())
+    .map_err(|error| error.to_string())?;
 
   let client = AiClient::from_project(&project_root).map_err(|error| error.to_string())?;
   let mut explanations = Vec::new();
@@ -960,8 +970,8 @@ fn ai_migrate_analyze_blocking(
       project_root.display()
     ));
   }
-  let context =
-    inspect_project_at("just", project_root.clone()).map_err(|error| error.to_string())?;
+  let context = inspect_project_at(configured_runner(&project_root)?, project_root.clone())
+    .map_err(|error| error.to_string())?;
 
   let unreferenced = context.find_unreferenced_recipes();
   let isolated = context.find_isolated_recipes();
@@ -1001,7 +1011,8 @@ async fn ai_migrate_modularize(
   request: MigrateModularizeRequest,
 ) -> Result<GuiMigrateModularizeResult, String> {
   tauri::async_runtime::spawn_blocking(move || {
-    let context = inspect_project_at("just", &project_root).map_err(|error| error.to_string())?;
+    let context = inspect_project_at(configured_runner(&project_root)?, &project_root)
+      .map_err(|error| error.to_string())?;
     let plan = ModularizationPlan::prepare(&context).map_err(|error| error.to_string())?;
     let modules = plan
       .modules
@@ -1023,11 +1034,11 @@ async fn ai_migrate_modularize(
     }
     if request.write {
       plan
-        .apply(&PathBuf::from("just"))
+        .apply(&configured_runner(&project_root)?)
         .map_err(|error| error.to_string())?;
     } else {
       plan
-        .validate(&PathBuf::from("just"))
+        .validate(&configured_runner(&project_root)?)
         .map_err(|error| error.to_string())?;
     }
     Ok(GuiMigrateModularizeResult {
@@ -1086,18 +1097,18 @@ fn ai_migrate_deduplicate_blocking(
       project_root.display()
     ));
   }
-  let context =
-    inspect_project_at("just", project_root.clone()).map_err(|error| error.to_string())?;
+  let context = inspect_project_at(configured_runner(&project_root)?, project_root.clone())
+    .map_err(|error| error.to_string())?;
 
   let threshold = request.similarity_threshold.unwrap_or(0.8);
   let plan =
     DeduplicationPlan::prepare(&context, threshold, request.merge).map_err(|e| e.to_string())?;
   plan
-    .validate(PathBuf::from("just").as_path())
+    .validate(configured_runner(&project_root)?.as_path())
     .map_err(|e| e.to_string())?;
   if request.write {
     plan
-      .apply(PathBuf::from("just").as_path())
+      .apply(configured_runner(&project_root)?.as_path())
       .map_err(|e| e.to_string())?;
   }
   Ok(GuiMigrateDeduplicateResult {
@@ -1138,8 +1149,8 @@ fn ai_export_context_blocking(project_root: PathBuf) -> Result<GuiExportContextR
       project_root.display()
     ));
   }
-  let context =
-    inspect_project_at("just", project_root.clone()).map_err(|error| error.to_string())?;
+  let context = inspect_project_at(configured_runner(&project_root)?, project_root.clone())
+    .map_err(|error| error.to_string())?;
 
   Ok(GuiExportContextResult {
     success: true,
@@ -1180,8 +1191,8 @@ fn ai_doctor_blocking(project_root: PathBuf) -> Result<GuiDoctorResult, String> 
       project_root.display()
     ));
   }
-  let context =
-    inspect_project_at("just", project_root.clone()).map_err(|error| error.to_string())?;
+  let context = inspect_project_at(configured_runner(&project_root)?, project_root.clone())
+    .map_err(|error| error.to_string())?;
 
   let recipes = context
     .recipes

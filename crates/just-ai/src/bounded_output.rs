@@ -27,7 +27,10 @@ pub(crate) fn extend_with_limit(
   Ok(())
 }
 
-fn capture_with_limit(command: &mut Command, limit: usize) -> Result<Output, CaptureError> {
+pub(crate) fn capture_with_limit(
+  command: &mut Command,
+  limit: usize,
+) -> Result<Output, CaptureError> {
   command.stdout(Stdio::piped()).stderr(Stdio::piped());
   let mut child = command.spawn().map_err(CaptureError::Io)?;
   let Some(stdout) = child.stdout.take() else {

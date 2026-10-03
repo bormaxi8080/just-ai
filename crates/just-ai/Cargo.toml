@@ -9,6 +9,7 @@ name = "just-ai"
 path = "src/main.rs"
 
 [dependencies]
+regex = "1.10.4"
 clap = { version = "4.0.0", features = ["derive", "env"] }
 dirs = "6.0.0"
 jsonschema = { version = "0.48.0", default-features = false }

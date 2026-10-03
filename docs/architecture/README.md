@@ -119,7 +119,7 @@ The fork includes upstream master `602ee328c9b21361121b498674334012175d4d81`
 (the published release remains 1.58.0). Root `src/` matches upstream exactly.
 Companion changes and upstream synchronization have separate commits.
 
-CLI, MCP and desktop use the same modularization plan and recipe-merge helper.
+CLI, MCP and desktop use the same modularization and exact-source deduplication plans.
 Modularization currently refuses projects with existing imports/modules, before
 changing any file. Desktop commands do not change process-global cwd. LSP uses
 core project inspection and refreshes disk analysis on each request; unsaved

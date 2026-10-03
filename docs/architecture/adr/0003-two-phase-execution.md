@@ -17,3 +17,9 @@ child process. The frontend cannot submit a shell command.
 
 Policy cannot be bypassed by changing UI state after preview. CLI, GUI, and
 future daemon integrations share the same execution semantics.
+
+Execution loads project capture limits, queue capacity and cancellation polling.
+An output idle timeout terminates the isolated process tree; zero disables it
+for intentionally quiet long-running recipes. Capture limits cannot exceed the
+8 MiB hard ceiling. CLI flags/environment override the configured runner; MCP
+continues to use its server-controlled binary.

@@ -24,6 +24,7 @@ pub struct AiRequest {
 #[derive(Clone, Debug)]
 pub struct OpenAiResponsesProvider {
   agent: ureq::Agent,
+  settings: crate::config::AiConfig,
   api_key: String,
   base_url: String,
   model: String,
@@ -32,6 +33,7 @@ pub struct OpenAiResponsesProvider {
 #[derive(Clone, Debug)]
 pub struct OllamaProvider {
   agent: ureq::Agent,
+  settings: crate::config::AiConfig,
   api_key: Option<String>,
   base_url: String,
   model: String,
@@ -45,7 +47,8 @@ impl OllamaProvider {
     api_key: Option<String>,
   ) -> Self {
     Self {
-      agent: provider_agent(),
+      agent: provider_agent(120),
+      settings: crate::config::AiConfig::default(),
       api_key,
       base_url: base_url.into(),
       model: model.into(),
@@ -61,7 +64,8 @@ impl OpenAiResponsesProvider {
     api_key: impl Into<String>,
   ) -> Self {
     Self {
-      agent: provider_agent(),
+      agent: provider_agent(120),
+      settings: crate::config::AiConfig::default(),
       api_key: api_key.into(),
       base_url: base_url.into(),
       model: model.into(),
@@ -85,6 +89,7 @@ pub type AiStream = Pin<Box<dyn Stream<Item = Result<String, ProviderError>> + S
 #[derive(Clone, Debug)]
 pub struct OpenAiCompatibleProvider {
   agent: ureq::Agent,
+  settings: crate::config::AiConfig,
   api_key: Option<String>,
   base_url: String,
   model: String,
@@ -98,7 +103,8 @@ impl OpenAiCompatibleProvider {
     api_key: Option<String>,
   ) -> Self {
     Self {
-      agent: provider_agent(),
+      agent: provider_agent(120),
+      settings: crate::config::AiConfig::default(),
       api_key,
       base_url: base_url.into(),
       model: model.into(),
@@ -110,6 +116,7 @@ impl OpenAiCompatibleProvider {
 #[derive(Clone, Debug)]
 pub struct AnthropicProvider {
   agent: ureq::Agent,
+  settings: crate::config::AiConfig,
   api_key: String,
   base_url: String,
   model: String,
@@ -123,7 +130,8 @@ impl AnthropicProvider {
     api_key: impl Into<String>,
   ) -> Self {
     Self {
-      agent: provider_agent(),
+      agent: provider_agent(120),
+      settings: crate::config::AiConfig::default(),
       api_key: api_key.into(),
       base_url: base_url.into(),
       model: model.into(),
@@ -135,6 +143,7 @@ impl AnthropicProvider {
 #[derive(Clone, Debug)]
 pub struct AzureOpenAiProvider {
   agent: ureq::Agent,
+  settings: crate::config::AiConfig,
   api_key: String,
   endpoint: String,
   deployment: String,
@@ -150,7 +159,8 @@ impl AzureOpenAiProvider {
     api_version: impl Into<String>,
   ) -> Self {
     Self {
-      agent: provider_agent(),
+      agent: provider_agent(120),
+      settings: crate::config::AiConfig::default(),
       api_key: api_key.into(),
       endpoint: endpoint.into(),
       deployment: deployment.into(),
@@ -163,6 +173,7 @@ impl AzureOpenAiProvider {
 #[derive(Clone, Debug)]
 pub struct GeminiProvider {
   agent: ureq::Agent,
+  settings: crate::config::AiConfig,
   api_key: String,
   base_url: String,
   model: String,
@@ -176,7 +187,8 @@ impl GeminiProvider {
     api_key: impl Into<String>,
   ) -> Self {
     Self {
-      agent: provider_agent(),
+      agent: provider_agent(120),
+      settings: crate::config::AiConfig::default(),
       api_key: api_key.into(),
       base_url: base_url.into(),
       model: model.into(),
@@ -187,7 +199,7 @@ impl GeminiProvider {
 impl AiProvider for OpenAiResponsesProvider {
   fn complete(&self, request: &AiRequest) -> Result<String, ProviderError> {
     let url = format!("{}/responses", self.base_url.trim_end_matches('/'));
-    let body = serde_json::json!({
+    let mut body = serde_json::json!({
       "model": self.model,
       "reasoning": { "effort": "none" },
       "instructions": request.system,
@@ -199,6 +211,7 @@ impl AiProvider for OpenAiResponsesProvider {
         "schema": request.schema
       }}
     });
+    apply_settings(&mut body, &self.settings, "OpenAiResponsesProvider");
     let response = post_json(&self.agent, &url, Some(&self.api_key), &body)?;
     if response.get("status").and_then(Value::as_str) != Some("completed") {
       return Err(ProviderError::new(format!(
@@ -227,7 +240,7 @@ impl AiProvider for OpenAiResponsesProvider {
 
   fn complete_stream(&self, request: &AiRequest) -> Result<AiStream, ProviderError> {
     let url = format!("{}/responses", self.base_url.trim_end_matches('/'));
-    let body = serde_json::json!({
+    let mut body = serde_json::json!({
       "model": self.model,
       "reasoning": { "effort": "none" },
       "instructions": request.system,
@@ -240,6 +253,7 @@ impl AiProvider for OpenAiResponsesProvider {
       }},
       "stream": true
     });
+    apply_settings(&mut body, &self.settings, "OpenAiResponsesProvider");
     let agent = self.agent.clone();
     let api_key = self.api_key.clone();
     let stream = async_stream::stream! {
@@ -300,7 +314,7 @@ impl AiProvider for OpenAiResponsesProvider {
 impl AiProvider for OllamaProvider {
   fn complete(&self, request: &AiRequest) -> Result<String, ProviderError> {
     let url = format!("{}/api/chat", self.base_url.trim_end_matches('/'));
-    let body = serde_json::json!({
+    let mut body = serde_json::json!({
       "model": self.model,
       "messages": [
         { "role": "system", "content": request.system },
@@ -310,6 +324,7 @@ impl AiProvider for OllamaProvider {
       "stream": false,
       "options": { "temperature": 0 }
     });
+    apply_settings(&mut body, &self.settings, "OllamaProvider");
     let response = post_json(&self.agent, &url, self.api_key.as_deref(), &body)?;
     if response.get("done").and_then(Value::as_bool) != Some(true) {
       return Err(ProviderError::new(
@@ -325,7 +340,7 @@ impl AiProvider for OllamaProvider {
 
   fn complete_stream(&self, request: &AiRequest) -> Result<AiStream, ProviderError> {
     let url = format!("{}/api/chat", self.base_url.trim_end_matches('/'));
-    let body = serde_json::json!({
+    let mut body = serde_json::json!({
       "model": self.model,
       "messages": [
         { "role": "system", "content": request.system },
@@ -335,6 +350,7 @@ impl AiProvider for OllamaProvider {
       "stream": true,
       "options": { "temperature": 0 }
     });
+    apply_settings(&mut body, &self.settings, "OllamaProvider");
     let agent = self.agent.clone();
     let api_key = self.api_key.clone();
     let stream = async_stream::stream! {
@@ -384,7 +400,7 @@ impl AiProvider for OllamaProvider {
 impl AiProvider for OpenAiCompatibleProvider {
   fn complete(&self, request: &AiRequest) -> Result<String, ProviderError> {
     let url = format!("{}/chat/completions", self.base_url.trim_end_matches('/'));
-    let body = serde_json::json!({
+    let mut body = serde_json::json!({
       "model": self.model,
       "messages": [
         { "role": "system", "content": request.system },
@@ -392,6 +408,7 @@ impl AiProvider for OpenAiCompatibleProvider {
       ],
       "response_format": { "type": "json_object" }
     });
+    apply_settings(&mut body, &self.settings, "OpenAiCompatibleProvider");
     let response = post_json(&self.agent, &url, self.api_key.as_deref(), &body)?;
     response
       .pointer("/choices/0/message/content")
@@ -402,7 +419,7 @@ impl AiProvider for OpenAiCompatibleProvider {
 
   fn complete_stream(&self, request: &AiRequest) -> Result<AiStream, ProviderError> {
     let url = format!("{}/chat/completions", self.base_url.trim_end_matches('/'));
-    let body = serde_json::json!({
+    let mut body = serde_json::json!({
       "model": self.model,
       "messages": [
         { "role": "system", "content": request.system },
@@ -411,6 +428,7 @@ impl AiProvider for OpenAiCompatibleProvider {
       "response_format": { "type": "json_object" },
       "stream": true
     });
+    apply_settings(&mut body, &self.settings, "OpenAiCompatibleProvider");
     let agent = self.agent.clone();
     let api_key = self.api_key.clone();
     let stream = async_stream::stream! {
@@ -461,7 +479,7 @@ impl AiProvider for OpenAiCompatibleProvider {
 impl AiProvider for AnthropicProvider {
   fn complete(&self, request: &AiRequest) -> Result<String, ProviderError> {
     let url = format!("{}/v1/messages", self.base_url.trim_end_matches('/'));
-    let body = serde_json::json!({
+    let mut body = serde_json::json!({
       "model": self.model,
       "max_tokens": 8192,
       "system": request.system,
@@ -473,6 +491,7 @@ impl AiProvider for AnthropicProvider {
       }],
       "tool_choice": { "type": "tool", "name": "structured_output" }
     });
+    apply_settings(&mut body, &self.settings, "AnthropicProvider");
     let mut req = self
       .agent
       .post(&url)
@@ -495,7 +514,7 @@ impl AiProvider for AnthropicProvider {
 
   fn complete_stream(&self, request: &AiRequest) -> Result<AiStream, ProviderError> {
     let url = format!("{}/v1/messages", self.base_url.trim_end_matches('/'));
-    let body = serde_json::json!({
+    let mut body = serde_json::json!({
       "model": self.model,
       "max_tokens": 8192,
       "system": request.system,
@@ -508,6 +527,7 @@ impl AiProvider for AnthropicProvider {
       "tool_choice": { "type": "tool", "name": "structured_output" },
       "stream": true
     });
+    apply_settings(&mut body, &self.settings, "AnthropicProvider");
     let agent = self.agent.clone();
     let api_key = self.api_key.clone();
     let stream = stream! {
@@ -563,7 +583,7 @@ impl AiProvider for AzureOpenAiProvider {
       self.deployment,
       self.api_version
     );
-    let body = serde_json::json!({
+    let mut body = serde_json::json!({
       "messages": [
         { "role": "system", "content": request.system },
         { "role": "user", "content": request.user }
@@ -571,6 +591,7 @@ impl AiProvider for AzureOpenAiProvider {
       "response_format": { "type": "json_object" },
       "temperature": 0
     });
+    apply_settings(&mut body, &self.settings, "AzureOpenAiProvider");
     let response = post_json(&self.agent, &url, Some(&self.api_key), &body)?;
     response
       .pointer("/choices/0/message/content")
@@ -586,7 +607,7 @@ impl AiProvider for AzureOpenAiProvider {
       self.deployment,
       self.api_version
     );
-    let body = serde_json::json!({
+    let mut body = serde_json::json!({
       "messages": [
         { "role": "system", "content": request.system },
         { "role": "user", "content": request.user }
@@ -595,6 +616,7 @@ impl AiProvider for AzureOpenAiProvider {
       "temperature": 0,
       "stream": true
     });
+    apply_settings(&mut body, &self.settings, "AzureOpenAiProvider");
     let agent = self.agent.clone();
     let api_key = self.api_key.clone();
     let stream = stream! {
@@ -648,7 +670,7 @@ impl AiProvider for GeminiProvider {
       self.model,
       self.api_key
     );
-    let body = serde_json::json!({
+    let mut body = serde_json::json!({
       "contents": [
         { "role": "user", "parts": [{ "text": format!("{}\n\n{}", request.system, request.user) }] }
       ],
@@ -658,6 +680,7 @@ impl AiProvider for GeminiProvider {
         "temperature": 0
       }
     });
+    apply_settings(&mut body, &self.settings, "GeminiProvider");
     let response = post_json(&self.agent, &url, None, &body)?;
     response
       .pointer("/candidates/0/content/parts/0/text")
@@ -673,7 +696,7 @@ impl AiProvider for GeminiProvider {
       self.model,
       self.api_key
     );
-    let body = serde_json::json!({
+    let mut body = serde_json::json!({
       "contents": [
         { "role": "user", "parts": [{ "text": format!("{}\n\n{}", request.system, request.user) }] }
       ],
@@ -683,6 +706,7 @@ impl AiProvider for GeminiProvider {
         "temperature": 0
       }
     });
+    apply_settings(&mut body, &self.settings, "GeminiProvider");
     let agent = self.agent.clone();
     let stream = stream! {
       let req = agent.post(&url).header("Content-Type", "application/json");
@@ -721,9 +745,47 @@ impl AiProvider for GeminiProvider {
   }
 }
 
-fn provider_agent() -> ureq::Agent {
+macro_rules! configurable_provider {
+  ($($provider:ty),+ $(,)?) => {$(
+    impl $provider {
+      pub fn with_config(mut self, config: &crate::config::AiConfig) -> Result<Self, ProviderError> {
+        if config.timeout_secs == 0 || config.max_tokens == Some(0)
+          || config.temperature.is_some_and(|value| !value.is_finite() || !(0.0..=2.0).contains(&value))
+        { return Err(ProviderError::new("invalid AI timeout, token limit or temperature")); }
+        self.agent = provider_agent(config.timeout_secs);
+        self.settings = config.clone();
+        Ok(self)
+      }
+    }
+  )+};
+}
+configurable_provider!(
+  OpenAiResponsesProvider,
+  OllamaProvider,
+  OpenAiCompatibleProvider,
+  AnthropicProvider,
+  AzureOpenAiProvider,
+  GeminiProvider
+);
+
+fn apply_settings(body: &mut Value, config: &crate::config::AiConfig, provider: &str) {
+  let (target, token_key) = match provider {
+    "OllamaProvider" => (&mut body["options"], "num_predict"),
+    "GeminiProvider" => (&mut body["generationConfig"], "maxOutputTokens"),
+    "OpenAiResponsesProvider" => (body, "max_output_tokens"),
+    _ => (body, "max_tokens"),
+  };
+  if let Some(tokens) = config.max_tokens {
+    target[token_key] = tokens.into();
+  }
+  if let Some(temperature) = config.temperature {
+    target["temperature"] = serde_json::json!(temperature);
+  }
+}
+
+fn provider_agent(timeout_secs: u64) -> ureq::Agent {
   ureq::Agent::config_builder()
-    .timeout_global(Some(Duration::from_secs(120)))
+    .timeout_global(Some(Duration::from_secs(timeout_secs)))
     .build()
     .into()
 }
@@ -915,7 +977,13 @@ mod tests {
       request
     });
 
-    let provider = OllamaProvider::new(format!("http://{address}"), "local-model", None);
+    let provider = OllamaProvider::new(format!("http://{address}"), "local-model", None)
+      .with_config(&crate::config::AiConfig {
+        max_tokens: Some(123),
+        temperature: Some(0.25),
+        ..Default::default()
+      })
+      .unwrap();
     let content = provider
       .complete(&AiRequest {
         system: "system".into(),
@@ -935,15 +1003,49 @@ mod tests {
     let body: Value = serde_json::from_str(request.split("\r\n\r\n").nth(1).unwrap()).unwrap();
     assert_eq!(body.get("stream").and_then(Value::as_bool), Some(false));
     assert_eq!(
+      body.pointer("/options/num_predict").and_then(Value::as_u64),
+      Some(123)
+    );
+    assert_eq!(
       body
         .pointer("/format/properties/summary/type")
         .and_then(Value::as_str),
       Some("string")
     );
     assert_eq!(
-      body.pointer("/options/temperature").and_then(Value::as_i64),
-      Some(0)
+      body.pointer("/options/temperature").and_then(Value::as_f64),
+      Some(0.25)
     );
+  }
+
+  #[test]
+  fn provider_timeout_is_effective() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = thread::spawn(move || {
+      let (mut connection, _) = listener.accept().unwrap();
+      read_http_request(&mut connection);
+      thread::sleep(Duration::from_secs(2));
+    });
+    let provider = OllamaProvider::new(format!("http://{address}"), "test", None)
+      .with_config(&crate::config::AiConfig {
+        timeout_secs: 1,
+        ..Default::default()
+      })
+      .unwrap();
+    let started = std::time::Instant::now();
+    assert!(
+      provider
+        .complete(&AiRequest {
+          system: String::new(),
+          user: String::new(),
+          schema_name: "test".into(),
+          schema: serde_json::json!({})
+        })
+        .is_err()
+    );
+    assert!(started.elapsed() < Duration::from_secs(2));
+    server.join().unwrap();
   }
 
   fn read_http_request(stream: &mut std::net::TcpStream) -> String {

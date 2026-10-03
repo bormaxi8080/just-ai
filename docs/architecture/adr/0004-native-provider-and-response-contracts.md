@@ -27,3 +27,9 @@ risk values, missing properties, invalid recipe names, and empty recipe bodies.
 - Invalid model structures fail before proposal or presentation logic.
 - Responses API or provider-specific transports can be added as separate
   adapters without changing application use cases.
+
+Project AI timeout and optional temperature/token limits configure native
+providers for both complete and streaming calls. Provider adapters translate
+limits into their native API fields. History custom regular expressions apply
+at persistence boundaries to arguments and both output tails; invalid patterns
+are rejected by configuration loading and fail closed for direct constructors.

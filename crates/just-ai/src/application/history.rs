@@ -152,7 +152,31 @@ pub fn project_history_path(root: &Path, file_name: &str) -> PathBuf {
 #[must_use]
 pub fn output_tail(bytes: &[u8], config: &HistoryConfig) -> String {
   let from = bytes.len().saturating_sub(config.output_tail_bytes);
-  redact_text(&String::from_utf8_lossy(&bytes[from..])).0
+  redact_history_text(&String::from_utf8_lossy(&bytes[from..]), config)
+}
+
+fn redact_history_text(text: &str, config: &HistoryConfig) -> String {
+  let mut text = redact_text(text).0;
+  for pattern in &config.redact_patterns {
+    // Invalid patterns fail closed for constructors used outside Config::load.
+    let Ok(regex) = regex::Regex::new(pattern) else {
+      return "<redacted>".into();
+    };
+    text = regex.replace_all(&text, "<redacted>").into_owned();
+  }
+  text
+}
+
+fn redacted_record(record: &RunRecord, config: &HistoryConfig) -> RunRecord {
+  let mut record = record.clone();
+  record.arguments = record
+    .arguments
+    .iter()
+    .map(|value| redact_history_text(value, config))
+    .collect();
+  record.stdout_tail = redact_history_text(&record.stdout_tail, config);
+  record.stderr_tail = redact_history_text(&record.stderr_tail, config);
+  record
 }
 
 impl JsonLineHistory {
@@ -199,7 +223,8 @@ impl JsonLineHistory {
 
 impl RunHistory for JsonLineHistory {
   fn append(&self, record: &RunRecord) -> io::Result<()> {
-    let encoded = serde_json::to_vec(record).map_err(io::Error::other)?;
+    let record = redacted_record(record, &self.config);
+    let encoded = serde_json::to_vec(&record).map_err(io::Error::other)?;
     if encoded.len() > self.config.max_record_bytes {
       return Err(io::Error::new(
         io::ErrorKind::InvalidInput,
@@ -336,7 +361,8 @@ impl RunHistory for SqliteHistory {
 
 impl SqliteHistory {
   async fn append_async(&self, record: &RunRecord) -> io::Result<()> {
-    if serde_json::to_vec(record).map_err(io::Error::other)?.len() > self.config.max_record_bytes {
+    let record = redacted_record(record, &self.config);
+    if serde_json::to_vec(&record).map_err(io::Error::other)?.len() > self.config.max_record_bytes {
       return Err(io::Error::new(
         io::ErrorKind::InvalidInput,
         "history record exceeds size limit",
@@ -543,6 +569,33 @@ mod tests {
       stdout_tail: String::new(),
       stderr_tail: String::new(),
     }
+  }
+
+  #[test]
+  fn custom_redaction_is_applied_at_jsonl_storage_boundary() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("history.jsonl");
+    let config = HistoryConfig {
+      redact_patterns: vec!["private-[0-9]+".into()],
+      ..Default::default()
+    };
+    let history = JsonLineHistory::new(&path, config.clone());
+    let record = RunRecord {
+      id: "test".into(),
+      recipe: "test".into(),
+      arguments: vec!["private-123".into()],
+      started_at_ms: 1,
+      duration_ms: 1,
+      exit_code: Some(0),
+      success: true,
+      cancelled: false,
+      stdout_tail: "private-456".into(),
+      stderr_tail: String::new(),
+    };
+    history.append(&record).unwrap();
+    let stored = fs::read_to_string(path).unwrap();
+    assert!(!stored.contains("private-"));
+    assert_eq!(output_tail(b"private-789", &config), "<redacted>");
   }
 
   #[test]

@@ -272,7 +272,16 @@ pub(crate) fn run() -> ExitCode {
 }
 
 fn try_main() -> Result<(), Box<dyn Error>> {
-  let cli = Cli::parse();
+  let matches = <Cli as clap::CommandFactory>::command().get_matches();
+  let default_runner =
+    matches.value_source("just_binary") == Some(clap::parser::ValueSource::DefaultValue);
+  let mut cli = <Cli as clap::FromArgMatches>::from_arg_matches(&matches)?;
+  if default_runner {
+    cli.just_binary = crate::config::Config::load(&env::current_dir()?)?
+      .execution
+      .just_binary
+      .into();
+  }
   if let Commands::Agent { command } = &cli.command {
     print_agent_command(command);
     return Ok(());
@@ -1038,36 +1047,50 @@ impl AiClient {
     }
 
     let provider: Box<dyn provider::AiProvider> = match provider.as_str() {
-      "openai" => Box::new(provider::OpenAiResponsesProvider::new(
-        base_url,
-        model,
-        api_key.expect("API key requirement checked above"),
-      )),
-      "ollama" => Box::new(provider::OllamaProvider::new(base_url, model, api_key)),
-      "openai-compatible" => Box::new(provider::OpenAiCompatibleProvider::new(
-        base_url, model, api_key,
-      )),
-      "anthropic" => Box::new(provider::AnthropicProvider::new(
-        base_url,
-        model,
-        api_key.expect("API key requirement checked above"),
-      )),
+      "openai" => Box::new(
+        provider::OpenAiResponsesProvider::new(
+          base_url,
+          model,
+          api_key.expect("API key requirement checked above"),
+        )
+        .with_config(&config)?,
+      ),
+      "ollama" => {
+        Box::new(provider::OllamaProvider::new(base_url, model, api_key).with_config(&config)?)
+      }
+      "openai-compatible" => Box::new(
+        provider::OpenAiCompatibleProvider::new(base_url, model, api_key).with_config(&config)?,
+      ),
+      "anthropic" => Box::new(
+        provider::AnthropicProvider::new(
+          base_url,
+          model,
+          api_key.expect("API key requirement checked above"),
+        )
+        .with_config(&config)?,
+      ),
       "azure" => {
         let deployment = env::var("JUST_AI_AZURE_DEPLOYMENT").unwrap_or_else(|_| model.clone());
         let api_version =
           env::var("JUST_AI_API_VERSION").unwrap_or_else(|_| "2024-08-01-preview".to_owned());
-        Box::new(provider::AzureOpenAiProvider::new(
-          base_url,
-          deployment,
-          api_key.expect("API key requirement checked above"),
-          api_version,
-        ))
+        Box::new(
+          provider::AzureOpenAiProvider::new(
+            base_url,
+            deployment,
+            api_key.expect("API key requirement checked above"),
+            api_version,
+          )
+          .with_config(&config)?,
+        )
       }
-      "gemini" => Box::new(provider::GeminiProvider::new(
-        base_url,
-        model,
-        api_key.expect("API key requirement checked above"),
-      )),
+      "gemini" => Box::new(
+        provider::GeminiProvider::new(
+          base_url,
+          model,
+          api_key.expect("API key requirement checked above"),
+        )
+        .with_config(&config)?,
+      ),
       other => return Err(format!("unsupported JUST_AI_PROVIDER `{other}`").into()),
     };
     Ok(Self { provider })

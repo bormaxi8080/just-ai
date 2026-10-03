@@ -95,7 +95,7 @@ impl Error for ExecutionError {}
 #[derive(Clone, Debug)]
 pub struct RecipeExecutor {
   just_binary: PathBuf,
-  config: ExecutionConfig,
+  config: Option<ExecutionConfig>,
 }
 
 impl RecipeExecutor {
@@ -103,7 +103,7 @@ impl RecipeExecutor {
   pub fn new(just_binary: impl Into<PathBuf>) -> Self {
     Self {
       just_binary: just_binary.into(),
-      config: ExecutionConfig::default(),
+      config: None,
     }
   }
 
@@ -111,12 +111,43 @@ impl RecipeExecutor {
   pub fn with_config(just_binary: impl Into<PathBuf>, config: ExecutionConfig) -> Self {
     Self {
       just_binary: just_binary.into(),
-      config,
+      config: Some(config),
     }
+  }
+
+  pub fn from_project(root: &std::path::Path) -> Result<Self, ExecutionError> {
+    let config = crate::config::Config::load(root)
+      .map_err(|error| ExecutionError(error.to_string()))?
+      .execution;
+    Ok(Self::with_config(config.just_binary.clone(), config))
+  }
+
+  fn execution_config(&self, request: &RunRequest) -> Result<ExecutionConfig, ExecutionError> {
+    let config = match &self.config {
+      Some(config) => config.clone(),
+      None => {
+        crate::config::Config::load(&request.project_root)
+          .map_err(|error| ExecutionError(error.to_string()))?
+          .execution
+      }
+    };
+    if config.max_capture_bytes == 0
+      || config.max_capture_bytes > crate::bounded_output::MAX_CAPTURE_BYTES
+      || config.stream_queue_capacity == 0
+      || config.stream_queue_capacity > 65536
+      || config.cancellation_poll_ms == 0
+      || config.cancellation_poll_ms > 1000
+    {
+      return Err(ExecutionError(
+        "invalid execution capture limit, queue capacity or cancellation interval".into(),
+      ));
+    }
+    Ok(config)
   }
 
   pub fn prepare(&self, request: RunRequest) -> Result<PreparedRun, ExecutionError> {
     validate_request(&request)?;
+    let execution = self.execution_config(&request)?;
     let dump = crate::just_dump::load_at(&self.just_binary, Some(&request.project_root))
       .map_err(|error| ExecutionError(format!("just safety inspection failed: {error}")))?;
     if let Some(function) = crate::just_dump::first_function_call(&dump) {
@@ -129,8 +160,11 @@ impl RecipeExecutor {
         "safe preview unavailable: project configures dotenv-command".into(),
       ));
     }
-    let output = crate::bounded_output::capture(&mut self.prepare_command(&request))
-      .map_err(|error| ExecutionError(format!("just dry-run output capture failed: {error}")))?;
+    let output = crate::bounded_output::capture_with_limit(
+      &mut self.prepare_command(&request),
+      execution.max_capture_bytes,
+    )
+    .map_err(|error| ExecutionError(format!("just dry-run output capture failed: {error}")))?;
     if !output.status.success() {
       return Err(command_error("just dry-run", &output.stderr));
     }
@@ -166,7 +200,7 @@ impl RecipeExecutor {
       prepared,
       confirmation,
       &CancellationToken::default(),
-      self.config.max_capture_bytes,
+      self.execution_config(&prepared.request)?.max_capture_bytes,
       |_| {},
     )
   }
@@ -185,7 +219,7 @@ impl RecipeExecutor {
       prepared,
       confirmation,
       cancellation,
-      self.config.max_capture_bytes,
+      self.execution_config(&prepared.request)?.max_capture_bytes,
       emit,
     )
   }
@@ -201,6 +235,7 @@ impl RecipeExecutor {
   where
     F: FnMut(RunEvent),
   {
+    let config = self.execution_config(&prepared.request)?;
     let current = self.prepare(prepared.request.clone())?;
     if &current != prepared {
       return Err(ExecutionError(
@@ -229,7 +264,7 @@ impl RecipeExecutor {
       process_tree.terminate(&mut child)?;
       return Err(ExecutionError("stderr pipe missing".into()));
     };
-    let (sender, receiver) = mpsc::sync_channel(self.config.stream_queue_capacity);
+    let (sender, receiver) = mpsc::sync_channel(config.stream_queue_capacity);
     stream_reader(stdout, StreamKind::Stdout, sender.clone());
     stream_reader(stderr, StreamKind::Stderr, sender);
 
@@ -239,7 +274,12 @@ impl RecipeExecutor {
     let mut cancelled = false;
     let mut terminated = false;
     let mut output_error = None;
+    let mut last_output = std::time::Instant::now();
     while closed < 2 {
+      if config.read_timeout_secs != 0 && last_output.elapsed() >= config.read_timeout() {
+        output_error
+          .get_or_insert_with(|| ExecutionError("recipe output idle timeout exceeded".into()));
+      }
       if cancellation.is_cancelled() && !cancelled {
         if !terminated {
           process_tree.terminate(&mut child)?;
@@ -247,8 +287,9 @@ impl RecipeExecutor {
         }
         cancelled = true;
       }
-      match receiver.recv_timeout(self.config.cancellation_poll_interval()) {
+      match receiver.recv_timeout(config.cancellation_poll_interval()) {
         Ok(StreamMessage::Data(StreamKind::Stdout, bytes)) => {
+          last_output = std::time::Instant::now();
           if output_error.is_none() {
             match crate::bounded_output::extend_with_limit(
               &mut stdout_bytes,
@@ -264,6 +305,7 @@ impl RecipeExecutor {
           }
         }
         Ok(StreamMessage::Data(StreamKind::Stderr, bytes)) => {
+          last_output = std::time::Instant::now();
           if output_error.is_none() {
             match crate::bounded_output::extend_with_limit(
               &mut stderr_bytes,
@@ -493,6 +535,33 @@ fn command_error(action: &str, stderr: &[u8]) -> ExecutionError {
 mod tests {
   use super::*;
   use std::time::Duration;
+
+  #[cfg(unix)]
+  #[test]
+  fn project_execution_limits_and_idle_timeout_are_effective() {
+    use std::{fs, os::unix::fs::PermissionsExt};
+    let dir = tempfile::tempdir().unwrap();
+    let binary = dir.path().join("runner");
+    fs::write(&binary, "#!/bin/sh\nif [ \"$1\" = --dump ]; then echo '{}'; elif [ \"$1\" = --dry-run ]; then echo 'echo safe' >&2; elif [ \"$2\" = quiet ]; then sleep 10; else printf '%100s' x; sleep 10; fi\n").unwrap();
+    fs::set_permissions(&binary, fs::Permissions::from_mode(0o700)).unwrap();
+    fs::write(dir.path().join("just-ai.toml"), "[execution]\nmax_capture_bytes = 64\nstream_queue_capacity = 1\ncancellation_poll_ms = 5\nread_timeout_secs = 1\n").unwrap();
+    let executor = RecipeExecutor::new(&binary);
+    for (recipe, expected) in [("verbose", "byte limit"), ("quiet", "idle timeout")] {
+      let prepared = executor
+        .prepare(RunRequest {
+          project_root: dir.path().into(),
+          recipe: recipe.into(),
+          arguments: vec![],
+        })
+        .unwrap();
+      let started = std::time::Instant::now();
+      let error = executor
+        .execute(&prepared, &RunConfirmation::None)
+        .unwrap_err();
+      assert!(error.to_string().contains(expected), "{error}");
+      assert!(started.elapsed() < Duration::from_secs(5));
+    }
+  }
 
   #[test]
   fn rejects_option_instead_of_recipe() {
