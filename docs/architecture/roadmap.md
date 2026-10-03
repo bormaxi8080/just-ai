@@ -9,7 +9,8 @@
 - direct argv execution without shell construction;
 - `--` option termination before recipe names and arguments in prepare and
   execute commands;
-- atomic, optimistic-concurrency-protected proposal writes;
+- atomic root-file proposal writes with cooperative writer locks and content
+  revalidation;
 - provider subprocess arguments no longer contain credentials or prompt bodies;
 - versioned product prompts and project-agent commands;
 - separate Tauri 2 + React GUI with inspect, risk display, prepare, policy
@@ -35,8 +36,8 @@
   retaining Chat Completions for Ollama and OpenAI-compatible servers;
 - native Ollama `/api/chat` adapter with schema-format output, deterministic
   temperature, and explicit non-streaming transport;
-- independent read-only MCP/stdio adapter for inspection, risk reports, and
-  dry-run preparation, with no execution or write tools;
+- independent MCP/stdio adapter with read-only inspection/preparation and
+  explicitly authorized execution and proposal writes;
 - MCP prompt discovery backed directly by the canonical project-agent files;
 - allowlisted MCP resources for canonical architecture documentation and ADRs;
 - black-box MCP stdio tests for framing, notification silence, and parse-error
@@ -61,13 +62,18 @@
 - bounded JSONL history reads with capped retention, record size, file size,
   and newest-first selection before deserialization;
 - dedicated layered CI workflow;
-- local ADRs and Codebase Memory MCP ADR/index.
+- local ADRs and Codebase Memory MCP ADR/index;
+- SQLite history backend and migration from JSONL;
+- persistent and built-in templates, batch AI operations and composed workflows;
+- shared validated modularization plans and merge logic for all adapters;
+- UTF-16-safe LSP edits, refreshed disk analysis and editor transport tests;
+- upstream master synchronization, locked container builds and corrected archives.
 
 ## Next increments
 
 1. Add adapters for additional local-model runtimes only when their semantics
    differ materially from Ollama and OpenAI-compatible chat completions.
-2. Migrate JSONL history to SQLite if querying requirements justify it.
+2. Extend import-aware transactional migrations and unsaved LSP analysis.
 3. Add platform fixtures only when upstream emits a materially different JSON
    shape on that platform.
 

@@ -12,7 +12,7 @@ Run checks from the repository root and stop at the first failure.
    cargo test --package just-ai-lsp
    ```
 
-2. Check the independent MCP adapter:
+2. Check the workspace MCP adapter:
 
    ```sh
    cargo fmt --manifest-path apps/just-ai-mcp/Cargo.toml -- --check

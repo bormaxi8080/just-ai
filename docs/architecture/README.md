@@ -8,7 +8,7 @@ The project follows a core-first, ports-and-adapters architecture.
 ```text
 justfile -> just CLI -> just-ai-core <- CLI
                                   <- Tauri GUI
-                                  <- read-only stdio MCP adapter
+                                  <- stdio MCP adapter
 ```
 
 `just` owns parsing, dependency resolution, and recipe execution. `just-ai`
@@ -28,7 +28,10 @@ Presentation adapters must never accept or execute arbitrary shell strings.
 5. Recipe execution is always delegated to the configured `just` binary.
    A `--` terminator separates just-ai-controlled options from the recipe name
    and every user-supplied recipe argument.
-6. File writes are workspace-confined, hash-guarded, validated, and atomic.
+6. Reviewed root-file writes are validated and use an atomic rename with a
+   cooperative writer lock and immediate content revalidation. Modularization
+   validates all new files in staging, refuses existing destinations, and rolls
+   back new files on returned errors. See ADR 0006 for crash/concurrency limits.
 7. Secrets and excluded files never enter remote AI context.
 8. Provider transport is native Rust behind `AiProvider`; model responses must
    pass operation-specific JSON Schema validation before deserialization.
@@ -68,12 +71,14 @@ crates/just-ai/src/
   ai_responses.rs    typed model responses and JSON Schemas
   proposal.rs        validation, rendering, diff, guarded application
   provider.rs        native provider adapter
-  application/       execution, history, scanner, patch use cases
+  application/       execution, history, scanner, patches, shared migrations
   domain/            risk and policy rules
 
 apps/just-ai-gui/     separate Tauri/React adapter
-apps/just-ai-mcp/     separate read-only adapter with isolated stdio transport,
+apps/just-ai-mcp/     separate adapter with isolated stdio transport,
                      JSON-RPC protocol, catalog, and core tool modules
+apps/just-ai-vscode/  trusted-workspace CLI adapter and contract tests
+crates/just-ai-lsp/    core context adapter and UTF-16-safe document updates
 agent/                canonical prompts and project-management commands
 ```
 
@@ -107,3 +112,27 @@ Job Object cancellation.
 
 The Codebase Memory MCP index is refreshed after structural changes. Graph
 queries are used to verify that adapters depend on core and not vice versa.
+
+## Maintenance synchronization (2026-10-03)
+
+The fork includes upstream master `602ee328c9b21361121b498674334012175d4d81`
+(the published release remains 1.58.0). Root `src/` matches upstream exactly.
+Companion changes and upstream synchronization have separate commits.
+
+CLI, MCP and desktop use the same modularization plan and recipe-merge helper.
+Modularization currently refuses projects with existing imports/modules, before
+changing any file. Desktop commands do not change process-global cwd. LSP uses
+core project inspection and refreshes disk analysis on each request; unsaved
+semantic analysis remains a future increment. The editor distinguishes `just`
+and `just-ai` binaries and does not launch them in an untrusted workspace.
+
+The MCP surface has grown beyond its initial read-only foundation. Inspection
+and preparation are read-only. Recipe execution uses core confirmations, and
+proposal/migration application requires explicit `write` input. It remains
+scoped to the server cwd and uses a server-controlled runner. Catalog annotations
+and schema validation must reflect each tool's actual side effects.
+
+Resolve Codebase Memory MCP projects by the current checkout root. Verify source
+availability and changed symbols, not only a ready status. Generated index
+artifacts are stored under `.codebase-memory/`; dependency directories and editor
+build output are ignored, while package lockfiles are tracked.
