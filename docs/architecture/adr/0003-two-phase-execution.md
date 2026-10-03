@@ -7,8 +7,10 @@
 
 GUI execution is split into `prepare_run` and `execute_prepared_run`.
 Preparation resolves a recipe, validates arguments, obtains a command preview,
-calculates risk, evaluates policy, and returns an expiring confirmation token.
-Execution accepts that token and streams typed events from a direct `just`
+calculates risk from the real dry-run stderr/stdout, evaluates project policy,
+and returns a prepared snapshot. Execution prepares again and compares that
+snapshot before accepting the required confirmation; it has no expiry token.
+Execution streams typed events from a direct `just`
 child process. The frontend cannot submit a shell command.
 
 ## Consequences

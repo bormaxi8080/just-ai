@@ -13,3 +13,8 @@ before committing. Locks coordinate companion writers, not arbitrary editors.
 A multi-file update is not crash-atomic; interruption before the root commit may
 leave new unreferenced modules and a stale lock. Inspect these before removing
 the lock and retrying. Never delete an existing module automatically.
+
+Deduplication also uses a reviewed application plan. It removes only exact
+source duplicates after normalizing the recipe name, retains referenced recipes,
+and refuses existing imported/module projects. Parameter order, interpolations
+and repeated commands are preserved. Non-equivalent semantic merges are rejected.

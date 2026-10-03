@@ -65,7 +65,7 @@
 - local ADRs and Codebase Memory MCP ADR/index;
 - SQLite history backend and migration from JSONL;
 - persistent and built-in templates, batch AI operations and composed workflows;
-- shared validated modularization plans and merge logic for all adapters;
+- shared validated modularization and exact-source deduplication plans;
 - UTF-16-safe LSP edits, refreshed disk analysis and editor transport tests;
 - upstream master synchronization, locked container builds and corrected archives.
 

@@ -18,3 +18,8 @@ Provider credentials must not be placed in subprocess arguments.
 Prompt injection cannot directly trigger execution. Invalid or blocked output
 fails closed. Provider implementations can be replaced without changing the
 application use cases.
+
+All adapter AI context serialization sanitizes string values, including recipe
+bodies, documentation and defaults. The provider boundary redacts the final
+user prompt as well. These heuristics do not replace source-secret hygiene.
+Generated writes must pass configured risk policy and upstream syntax validation.
