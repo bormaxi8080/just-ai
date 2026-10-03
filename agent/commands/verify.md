@@ -7,7 +7,9 @@ Run checks from the repository root and stop at the first failure.
    ```sh
    cargo fmt --all -- --check
    cargo clippy --package just-ai --all-targets -- -D warnings
+   cargo build --package just --package just-ai --package just-ai-mcp
    cargo test --package just-ai
+   cargo test --package just-ai-lsp
    ```
 
 2. Check the independent MCP adapter:
@@ -25,16 +27,22 @@ Run checks from the repository root and stop at the first failure.
    cargo check --manifest-path apps/just-ai-gui/src-tauri/Cargo.toml --locked
    ```
 
-4. Run upstream `just` library tests and prove its tracked implementation was
+4. Check the editor adapter:
+
+   ```sh
+   npm --prefix apps/just-ai-vscode run test:contracts
+   ```
+
+5. Run upstream `just` library tests and prove its tracked implementation was
    not changed by the increment:
 
    ```sh
    cargo test --lib
-   git diff --exit-code -- src Cargo.toml tests
+   git diff --exit-code upstream/master -- src
    git diff --check
    ```
 
-5. Re-index Codebase Memory MCP. Use `get_architecture`, `search_graph`, and
+6. Re-index Codebase Memory MCP. Use `get_architecture`, `search_graph`, and
    `trace_path` to confirm dependency direction, then update its ADR when the
    increment changed a contract or boundary.
 

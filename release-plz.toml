@@ -1,21 +1,30 @@
+# Companion releases use git tags; never publish the upstream just package.
 [workspace]
-# All packages in this workspace use the same version
-# Release them together
 changelog_config = "release-plz-changelog.toml"
 repo_url = "https://github.com/bormaxi8080/just-ai"
+release = false
+publish = false
+git_only = true
 
-# Package configuration
 [[package]]
 name = "just-ai"
-path = "crates/just-ai"
+release = true
 release_always = false
+version_group = "companion"
+git_tag_name = "v{{ version }}"
 
 [[package]]
 name = "just-ai-mcp"
-path = "apps/just-ai-mcp"
+release = true
 release_always = false
+version_group = "companion"
+git_tag_enable = false
+git_release_enable = false
 
 [[package]]
-name = "just-ai-gui"
-path = "apps/just-ai-gui/src-tauri"
+name = "just-ai-lsp"
+release = true
 release_always = false
+version_group = "companion"
+git_tag_enable = false
+git_release_enable = false

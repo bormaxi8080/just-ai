@@ -3,7 +3,22 @@
   "productName": "just-ai",
   "version": "0.1.0",
   "identifier": "dev.just-ai.desktop",
-  "build": { "beforeDevCommand": "npm run dev", "devUrl": "http://localhost:1420", "frontendDist": "../dist" },
-  "app": { "windows": [{ "title": "just-ai", "width": 1180, "height": 760 }] },
-  "bundle": { "active": false }
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "frontendDist": "../dist",
+    "beforeBuildCommand": "npm run build"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "just-ai",
+        "width": 1180,
+        "height": 760
+      }
+    ]
+  },
+  "bundle": {
+    "active": false
+  }
 }

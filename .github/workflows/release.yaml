@@ -110,21 +110,21 @@ jobs:
         esac
 
     - name: Build CLI
-      run: cargo build --release --package just-ai --target ${{ matrix.target }}
+      run: cargo build --release --locked --package just-ai --target ${{ matrix.target }}
 
     - name: Build MCP
-      run: cargo build --release --manifest-path apps/just-ai-mcp/Cargo.toml --target ${{ matrix.target }}
+      run: cargo build --release --locked --manifest-path apps/just-ai-mcp/Cargo.toml --target ${{ matrix.target }}
 
     - name: Package CLI
       id: package-cli
       run: |
-       mkdir -p dist
+        mkdir -p dist
         TARGET=${{ matrix.target }}
         VERSION=${{ github.ref_name }}
         BINARY=target/${TARGET}/release/just-ai
         [[ "$TARGET" == *windows* ]] && BINARY="${BINARY}.exe"
         ARCHIVE="just-ai-${VERSION}-${TARGET}.tar.gz"
-        tar czf "dist/${ARCHIVE}" -C target/${TARGET}/release just-ai*
+        tar czf "dist/${ARCHIVE}" -C target/${TARGET}/release "$(basename "$BINARY")"
         echo "archive=dist/${ARCHIVE}" >> $GITHUB_OUTPUT
 
     - name: Package MCP
@@ -133,10 +133,10 @@ jobs:
         mkdir -p dist
         TARGET=${{ matrix.target }}
         VERSION=${{ github.ref_name }}
-        BINARY=apps/just-ai-mcp/target/${TARGET}/release/just-ai-mcp
+        BINARY=target/${TARGET}/release/just-ai-mcp
         [[ "$TARGET" == *windows* ]] && BINARY="${BINARY}.exe"
         ARCHIVE="just-ai-mcp-${VERSION}-${TARGET}.tar.gz"
-        tar czf "dist/${ARCHIVE}" -C apps/just-ai-mcp/target/${TARGET}/release just-ai-mcp*
+        tar czf "dist/${ARCHIVE}" -C target/${TARGET}/release "$(basename "$BINARY")"
         echo "archive=dist/${ARCHIVE}" >> $GITHUB_OUTPUT
 
     - name: Upload CLI Artifacts

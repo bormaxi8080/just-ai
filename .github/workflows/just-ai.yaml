@@ -6,6 +6,9 @@ on:
       - "crates/just-ai/**"
       - "apps/just-ai-gui/**"
       - "apps/just-ai-mcp/**"
+      - "apps/just-ai-vscode/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
       - "agent/**"
       - "docs/architecture/**"
       - ".github/workflows/just-ai.yaml"
@@ -15,6 +18,9 @@ on:
       - "crates/just-ai/**"
       - "apps/just-ai-gui/**"
       - "apps/just-ai-mcp/**"
+      - "apps/just-ai-vscode/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
       - "agent/**"
       - "docs/architecture/**"
 
@@ -63,3 +69,18 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: cargo check --manifest-path src-tauri/Cargo.toml --locked
+
+  editor:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/just-ai-vscode
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/just-ai-vscode/package-lock.json
+      - run: npm ci
+      - run: npm run test:contracts

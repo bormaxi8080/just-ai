@@ -1,67 +1,25 @@
-# ===================================================================
-# just-ai MCP Server - Multi-stage Docker Build
-# ===================================================================
-# Build stage
+# Build the companion and matching upstream runner from the locked workspace.
 FROM rust:1.89-slim-bookworm AS builder
-
-# Install build dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    pkg-config \
-    libssl-dev \
-    ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
-
-# Set working directory
+RUN apt-get update && apt-get install -y --no-install-recommends pkg-config libssl-dev ca-certificates && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
-
-# Copy just-ai and just-ai-mcp crate files for dependency caching
-COPY crates/just-ai/Cargo.toml crates/just-ai/Cargo.toml
-COPY apps/just-ai-mcp/Cargo.toml apps/just-ai-mcp/Cargo.toml
-
-# Create dummy src to cache dependencies
-RUN mkdir -p crates/just-ai/src apps/just-ai-mcp/src agent/commands agent/prompts docs/architecture/adr && \
-    echo "fn main() {}" > crates/just-ai/src/main.rs && \
-    echo "fn main() {}" > apps/just-ai-mcp/src/main.rs
-
-# Build dependencies - build from crate root (not workspace)
-RUN cargo build --release --manifest-path apps/just-ai-mcp/Cargo.toml 2>/dev/null || true
-
-# Copy actual source
-COPY crates/just-ai/src crates/just-ai/src
-COPY apps/just-ai-mcp/src apps/just-ai-mcp/src
+COPY Cargo.toml Cargo.lock build.rs ./
+COPY src/ src/
+COPY etc/ etc/
+COPY completions/ completions/
+COPY CHANGELOG.md ./
+COPY crates/ crates/
+COPY apps/just-ai-mcp/ apps/just-ai-mcp/
 COPY agent/ agent/
 COPY docs/ docs/
-COPY just-ai.toml ./
+RUN cargo build --release --locked -p just -p just-ai-mcp
 
-# Build the binary
-RUN cargo build --release --manifest-path apps/just-ai-mcp/Cargo.toml --locked
-
-# ===================================================================
-# Runtime stage
 FROM debian:bookworm-slim AS runtime
-
-# Install runtime dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates \
-    libssl3 \
-    && rm -rf /var/lib/apt/lists/*
-
-# Create non-root user
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates libssl3 && rm -rf /var/lib/apt/lists/*
 RUN useradd -m -u 1000 -s /bin/bash justai
-
-# Copy binary from builder
-COPY --from=builder /app/apps/just-ai-mcp/target/release/just-ai-mcp /usr/local/bin/just-ai-mcp
-
-# Set up data directory
+COPY --from=builder /app/target/release/just /usr/local/bin/just
+COPY --from=builder /app/target/release/just-ai-mcp /usr/local/bin/just-ai-mcp
 RUN mkdir -p /home/justai/.local/share/just-ai && chown -R justai:justai /home/justai/.local
-
-# Switch to non-root user
 USER justai
 WORKDIR /workspace
-
-# Default environment
 ENV JUST_AI_DATA_DIR=/home/justai/.local/share/just-ai
-
-# MCP runs on stdio - no exposed ports
-# Entrypoint
 ENTRYPOINT ["just-ai-mcp"]
