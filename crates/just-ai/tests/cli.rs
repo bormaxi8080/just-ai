@@ -375,3 +375,43 @@ build:
   assert!(stdout.contains("test-b"));
   // build should not be in similar pairs (different body)
 }
+
+#[test]
+fn modularize_refuses_existing_module_without_changing_files() {
+  let directory = tempfile::tempdir().unwrap();
+  let original = "test-a:\n  echo a\n\ntest-b:\n  echo b\n";
+  let root = directory.path().join("justfile");
+  let module = directory.path().join("test.just");
+  std::fs::write(&root, original).unwrap();
+  std::fs::write(&module, "# keep existing content\n").unwrap();
+  let output = just_ai()
+    .current_dir(directory.path())
+    .args(["migrate", "modularize", "--write"])
+    .output()
+    .unwrap();
+  assert!(!output.status.success());
+  assert_eq!(std::fs::read_to_string(root).unwrap(), original);
+  assert_eq!(
+    std::fs::read_to_string(module).unwrap(),
+    "# keep existing content\n"
+  );
+}
+
+#[test]
+fn modularize_preserves_attributes_and_validates_before_writing() {
+  let directory = tempfile::tempdir().unwrap();
+  let original = "# test documentation\n[private]\ntest-a:\n  echo a\n\ntest-b:\n  echo b\n";
+  std::fs::write(directory.path().join("justfile"), original).unwrap();
+  let output = just_ai()
+    .current_dir(directory.path())
+    .args(["migrate", "modularize", "--write"])
+    .output()
+    .unwrap();
+  assert!(
+    output.status.success(),
+    "{}",
+    String::from_utf8_lossy(&output.stderr)
+  );
+  let module = std::fs::read_to_string(directory.path().join("test.just")).unwrap();
+  assert!(module.contains("# test documentation\n[private]\ntest-a:"));
+}
