@@ -872,5 +872,10 @@ mod tests {
     });
     assert!(pair.is_some());
     assert_eq!(pair.unwrap().2, 1.0); // identical bodies = 100% similarity
+    let merged = crate::application::deduplication::smart_merge_recipes(&recipe_a, &recipe_b);
+    assert!(
+      merged.starts_with("# Run unit tests (alternative)\ntest-unit SCOPE='all': (build) (lint)\n")
+    );
+    assert_eq!(merged.matches("cargo test --lib").count(), 1);
   }
 }
