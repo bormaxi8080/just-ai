@@ -190,7 +190,14 @@
         "just-ai.aiProvider": {
           "type": "string",
           "default": "openai",
-          "enum": ["openai", "ollama", "openai-compatible", "anthropic", "azure", "gemini"],
+          "enum": [
+            "openai",
+            "ollama",
+            "openai-compatible",
+            "anthropic",
+            "azure",
+            "gemini"
+          ],
           "description": "AI provider to use for suggestions and explanations"
         },
         "just-ai.aiModel": {
@@ -211,13 +218,21 @@
         "just-ai.historyBackend": {
           "type": "string",
           "default": "sqlite",
-          "enum": ["jsonl", "sqlite"],
+          "enum": [
+            "jsonl",
+            "sqlite"
+          ],
           "description": "History storage backend"
         },
         "just-ai.showHistoryOnFailure": {
           "type": "boolean",
           "default": true,
           "description": "Show history panel when a recipe fails"
+        },
+        "just-ai.companionBinary": {
+          "type": "string",
+          "default": "just-ai",
+          "description": "Path to the just-ai companion executable."
         }
       }
     },
@@ -242,8 +257,15 @@
     "languages": [
       {
         "id": "just",
-        "aliases": ["Just", "justfile"],
-        "extensions": [".just", "justfile", "Justfile"],
+        "aliases": [
+          "Just",
+          "justfile"
+        ],
+        "extensions": [
+          ".just",
+          "justfile",
+          "Justfile"
+        ],
         "configuration": "./language-configuration.json"
       }
     ],
@@ -287,7 +309,8 @@
     "watch": "tsc -watch -p ./",
     "lint": "eslint src --ext ts",
     "test": "node ./out/test/runTest.js",
-    "package": "vsce package --no-dependencies"
+    "package": "vsce package --no-dependencies",
+    "test:contracts": "npm run compile && node --test test/client.test.cjs"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
@@ -301,5 +324,11 @@
   },
   "dependencies": {
     "vscode-languageclient": "^9.0.0"
+  },
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false,
+      "description": "just-ai executes local companion binaries."
+    }
   }
 }

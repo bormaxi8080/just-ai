@@ -10,7 +10,7 @@ pub fn provide_hover(
   analysis: Option<&ProjectAnalysis>,
 ) -> Option<Hover> {
   let line = text.lines().nth(position.line as usize)?;
-  let char_idx = position.character as usize;
+  let char_idx = crate::utf16_character_index(line, position.character);
   let word = extract_word_at(line, char_idx)?;
 
   // 1. Recipe hover
@@ -78,7 +78,7 @@ fn recipe_hover(recipe: &crate::analysis::RecipeInfo) -> Hover {
         }
       } else if let Some(default) = &param.default {
         let default_preview = if default.len() > 30 {
-          &default[..30]
+          &default.chars().take(30).collect::<String>()
         } else {
           default
         };

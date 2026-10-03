@@ -56,6 +56,8 @@ enum Commands {
     recipe: Option<String>,
     #[arg(long, help = "Explain all recipes in the project")]
     all: bool,
+    #[arg(long, requires = "all", help = "Only explain recipes in this module")]
+    module: Option<String>,
   },
   #[command(about = "Ask an AI provider to propose a new recipe")]
   Add {
@@ -178,6 +180,10 @@ enum HistoryCommands {
     #[arg(long, default_value_t = 20)]
     limit: usize,
     #[arg(long)]
+    recipe: Option<String>,
+    #[arg(long, action = clap::ArgAction::Set)]
+    success: Option<bool>,
+    #[arg(long)]
     json: bool,
   },
   #[command(about = "Migrate history from JSONL to SQLite")]
@@ -274,10 +280,22 @@ fn try_main() -> Result<(), Box<dyn Error>> {
       )?;
       print_suggestions(&response);
     }
-    Commands::Explain { recipe, all } => {
+    Commands::Explain {
+      recipe,
+      all,
+      module,
+    } => {
       if all {
         // Batch explain all recipes
-        let recipes = &context.recipes;
+        let recipes = context
+          .recipes
+          .iter()
+          .filter(|recipe| {
+            module
+              .as_ref()
+              .is_none_or(|module| recipe.module_path == *module)
+          })
+          .collect::<Vec<_>>();
         if recipes.is_empty() {
           println!("No recipes to explain.");
         } else {
@@ -620,13 +638,18 @@ fn try_main() -> Result<(), Box<dyn Error>> {
       }
     }
     Commands::History { command } => match command {
-      HistoryCommands::Recent { limit, json } => {
+      HistoryCommands::Recent {
+        limit,
+        json,
+        recipe,
+        success,
+      } => {
         use crate::config::Config;
         use application::history::create_history;
         let project_root = env::current_dir()?;
         let config = Config::load(&project_root)?;
         let history = create_history(config.history)?;
-        let records = history.recent(limit)?;
+        let records = history.query(recipe.as_deref(), success, limit)?;
         if json {
           println!("{}", serde_json::to_string_pretty(&records)?);
         } else if records.is_empty() {

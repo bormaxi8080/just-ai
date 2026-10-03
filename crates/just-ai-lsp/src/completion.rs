@@ -12,7 +12,8 @@ pub fn provide_completions(
   let mut completions = Vec::new();
 
   let line = text.lines().nth(position.line as usize).unwrap_or("");
-  let prefix = extract_completion_prefix(line, position.character as usize);
+  let prefix =
+    extract_completion_prefix(line, crate::utf16_character_index(line, position.character));
 
   // 1. Recipe name completions
   if let Some(analysis) = analysis {
@@ -67,12 +68,8 @@ pub fn provide_completions(
 
 /// Extract the word being completed at the cursor position
 fn extract_completion_prefix(line: &str, char_idx: usize) -> String {
-  if char_idx >= line.len() {
-    return String::new();
-  }
-
   let chars: Vec<char> = line.chars().collect();
-  if char_idx >= chars.len() {
+  if char_idx > chars.len() {
     return String::new();
   }
 

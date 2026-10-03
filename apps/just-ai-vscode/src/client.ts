@@ -15,7 +15,7 @@ export interface JustRecipe {
 
 export interface ProjectContext {
   recipes: JustRecipe[];
-  modules: Array<{ name: string; path: string }>;
+  modules: Array<{ module_path: string; source: string; recipe_count: number }>;
 }
 
 export interface HistoryRecord {
@@ -46,71 +46,18 @@ export class JustAiClient {
   private justBinary: string;
   private projectRoot: string;
 
-  constructor(projectRoot: string, justBinary: string = 'just') {
+  constructor(projectRoot: string, justBinary: string = 'just', private companionBinary: string = 'just-ai') {
     this.projectRoot = projectRoot;
     this.justBinary = justBinary;
   }
 
-  private runJustAi(args: string[]): Promise<string> {
-    return new Promise((resolve, reject) => {
-      const env = { ...process.env };
-      // Ensure we inherit the user's environment for API keys
-      const child = spawn(this.justBinary, ['--dump', '--dump-format', 'json'], {
-        cwd: this.projectRoot,
-        env,
-        stdio: ['ignore', 'pipe', 'pipe']
-      });
-
-      let stdout = '';
-      let stderr = '';
-
-      child.stdout.on('data', (data) => stdout += data.toString());
-      child.stderr.on('data', (data) => stderr += data.toString());
-
-      child.on('close', (code) => {
-        if (code === 0) {
-          resolve(stdout);
-        } else {
-          reject(new Error(`just --dump failed: ${stderr}`));
-        }
-      });
-    });
-  }
-
   async getProjectContext(): Promise<ProjectContext> {
-    const output = await this.runJustAi([]);
-    return JSON.parse(output);
+    return JSON.parse(await this.runJustAiCommand('export-context'));
   }
 
   async runDoctor(json: boolean = false): Promise<DoctorReport | string> {
-    return new Promise((resolve, reject) => {
-      const args = ['doctor'];
-      if (json) { args.push('--json'); }
-
-      const child = spawn(this.justBinary, args, {
-        cwd: this.projectRoot,
-        env: { ...process.env },
-        stdio: ['ignore', 'pipe', 'pipe']
-      });
-
-      let stdout = '';
-      let stderr = '';
-
-      child.stdout.on('data', (data) => stdout += data.toString());
-      child.stderr.on('data', (data) => stderr += data.toString());
-
-      child.on('close', (code) => {
-        if (code === 0 || code === 1) { // doctor returns 1 for blocked
-          if (json) {
-            resolve(JSON.parse(stdout));
-          } else {
-            resolve(stdout);
-          }
-        } else {
-          reject(new Error(`just-ai doctor failed: ${stderr}`));
-        }
-      });
-    });
+    const output = await this.runJustAiCommandWithArgs(json ? ['doctor', '--json'] : ['doctor'], [0, 1]);
+    return json ? JSON.parse(output) : output;
   }
 
   async suggest(): Promise<string> {
@@ -122,19 +69,19 @@ export class JustAiClient {
   }
 
   async add(request: string, write: boolean = false): Promise<string> {
-    return this.runJustAiCommand('add', request, write ? '--write' : '');
+    return this.runJustAiCommand('add', request, ...(write ? ['--write'] : []));
   }
 
   async fix(recipe: string, write: boolean = false): Promise<string> {
-    return this.runJustAiCommand('fix', recipe, write ? '--write' : '');
+    return this.runJustAiCommand('fix', recipe, ...(write ? ['--write'] : []));
   }
 
   async workflow(request: string, write: boolean = false): Promise<string> {
-    return this.runJustAiCommand('workflow', request, write ? '--write' : '');
+    return this.runJustAiCommand('workflow', request, ...(write ? ['--write'] : []));
   }
 
   async fixBatch(write: boolean = false): Promise<string> {
-    return this.runJustAiCommand('fix', '--all-failed', write ? '--write' : '');
+    return this.runJustAiCommand('fix', '--all-failed', ...(write ? ['--write'] : []));
   }
 
   async explainBatch(module?: string): Promise<string> {
@@ -146,7 +93,7 @@ export class JustAiClient {
   }
 
   async exportContext(pretty: boolean = false): Promise<string> {
-    return this.runJustAiCommand('export-context', pretty ? '--pretty' : '');
+    return this.runJustAiCommand('export-context', ...(pretty ? ['--pretty'] : []));
   }
 
   // Migrate commands
@@ -201,7 +148,7 @@ export class JustAiClient {
   }
 
   async composeWorkflow(request: string, write: boolean = false): Promise<string> {
-    return this.runJustAiCommand('compose-workflow', request, write ? '--write' : '');
+    return this.runJustAiCommand('compose-workflow', request, ...(write ? ['--write'] : []));
   }
 
   async getHistory(limit: number = 20, recipe?: string, success?: boolean): Promise<HistoryRecord[]> {
@@ -214,50 +161,39 @@ export class JustAiClient {
     return JSON.parse(result);
   }
 
-  private async runJustAiCommand(...args: string[]): Promise<string> {
-    const child = spawn('just-ai', args, {
-      cwd: this.projectRoot,
-      env: { ...process.env },
-      stdio: ['ignore', 'pipe', 'pipe']
-    });
-
-    let stdout = '';
-    let stderr = '';
-
-    child.stdout.on('data', (data) => stdout += data.toString());
-    child.stderr.on('data', (data) => stderr += data.toString());
-
-    return new Promise((resolve, reject) => {
-      child.on('close', (code) => {
-        if (code === 0) {
-          resolve(stdout);
-        } else {
-          reject(new Error(`just-ai ${args.join(' ')} failed: ${stderr}`));
-        }
-      });
-    });
+  private runJustAiCommand(...args: string[]): Promise<string> {
+    return this.runJustAiCommandWithArgs(args);
   }
 
-  private async runJustAiCommandWithArgs(args: string[]): Promise<string> {
-    const child = spawn('just-ai', args, {
-      cwd: this.projectRoot,
-      env: { ...process.env },
-      stdio: ['ignore', 'pipe', 'pipe']
-    });
-
-    let stdout = '';
-    let stderr = '';
-
-    child.stdout.on('data', (data) => stdout += data.toString());
-    child.stderr.on('data', (data) => stderr += data.toString());
-
+  private runJustAiCommandWithArgs(args: string[], acceptedCodes: number[] = [0]): Promise<string> {
+    if (!vscode.workspace.isTrusted) {
+      return Promise.reject(new Error('Trust this workspace before running just-ai.'));
+    }
     return new Promise((resolve, reject) => {
-      child.on('close', (code) => {
-        if (code === 0) {
-          resolve(stdout);
-        } else {
-          reject(new Error(`just-ai ${args.join(' ')} failed: ${stderr}`));
+      const child = spawn(this.companionBinary, ['--just-binary', this.justBinary, ...args], {
+        cwd: this.projectRoot,
+        env: { ...process.env },
+        stdio: ['ignore', 'pipe', 'pipe']
+      });
+      let stdout = '';
+      let stderr = '';
+      const maxOutputBytes = 8 * 1024 * 1024;
+      let capturedBytes = 0;
+      const capture = (data: Buffer, errorStream: boolean) => {
+        capturedBytes += data.length;
+        if (capturedBytes > maxOutputBytes) {
+          child.kill();
+          reject(new Error('just-ai output exceeded the 8 MiB limit'));
+          return;
         }
+        if (errorStream) { stderr += data.toString(); } else { stdout += data.toString(); }
+      };
+      child.stdout.on('data', data => capture(data, false));
+      child.stderr.on('data', data => capture(data, true));
+      child.on('error', reject);
+      child.on('close', code => {
+        if (code !== null && acceptedCodes.includes(code)) { resolve(stdout); }
+        else { reject(new Error(`just-ai failed (exit ${code}): ${stderr}`)); }
       });
     });
   }
@@ -358,9 +294,10 @@ export class RiskDiagnostics {
 
   private findLineInDocument(document: vscode.TextDocument, searchLine: string): number {
     const normalizedSearch = searchLine.trim().toLowerCase();
+    if (!normalizedSearch) { return -1; }
     for (let i = 0; i < document.lineCount; i++) {
       const line = document.lineAt(i).text.trim().toLowerCase();
-      if (line.includes(normalizedSearch) || normalizedSearch.includes(line)) {
+      if (line && (line.includes(normalizedSearch) || normalizedSearch.includes(line))) {
         return i;
       }
     }

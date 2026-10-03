@@ -18,3 +18,5 @@ tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
 lsp-types = "0.94"
 url = "2"
 regex = "1"
+[dev-dependencies]
+tempfile = "3"

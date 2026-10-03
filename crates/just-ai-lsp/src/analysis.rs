@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
-use just_ai::dump_json;
+use just_ai::inspection::inspect_project_at;
 use just_ai::inspection::{ContextRecipe, ProjectContext};
 use lsp_types::{Location, Position, Range, Url};
 use serde::{Deserialize, Serialize};
@@ -82,9 +82,19 @@ pub struct RiskFinding {
 
 /// Analyze a project by running just --dump
 pub async fn analyze_project(project_root: &Path) -> Result<ProjectAnalysis> {
-  let output = dump_json(project_root).await?;
-  let context: ProjectContext = serde_json::from_str(&output)?;
+  let project_root = project_root.to_owned();
+  let just_binary = std::env::var("JUST_AI_JUST_BINARY")
+    .or_else(|_| std::env::var("JUST_BINARY"))
+    .unwrap_or_else(|_| "just".to_owned());
+  let context = tokio::task::spawn_blocking(move || {
+    inspect_project_at(&just_binary, &project_root)
+      .map_err(|error| anyhow::anyhow!(error.to_string()))
+  })
+  .await??;
+  analyze_context(context)
+}
 
+fn analyze_context(context: ProjectContext) -> Result<ProjectAnalysis> {
   let mut recipes = HashMap::new();
   let variables = HashMap::new();
   let modules = HashMap::new();
@@ -94,14 +104,6 @@ pub async fn analyze_project(project_root: &Path) -> Result<ProjectAnalysis> {
   for module in &context.modules {
     if let Ok(content) = std::fs::read_to_string(&module.source) {
       file_contents.insert(module.source.clone(), content);
-    }
-  }
-
-  // Also load the main justfile if not in modules
-  let main_justfile = project_root.join("justfile");
-  if main_justfile.exists() && !file_contents.contains_key(&main_justfile) {
-    if let Ok(content) = std::fs::read_to_string(&main_justfile) {
-      file_contents.insert(main_justfile.clone(), content);
     }
   }
 
@@ -133,7 +135,8 @@ fn parse_recipe(
   // Find the source file for this recipe
   let source_file = context
     .modules
-    .first()
+    .iter()
+    .find(|module| module.module_path == recipe.module_path)
     .map(|m| m.source.clone())
     .unwrap_or_default();
 
@@ -224,7 +227,7 @@ pub fn find_definition(
   uri: &lsp_types::Url,
 ) -> Option<Vec<lsp_types::Location>> {
   let line_text = text.lines().nth(position.line as usize)?;
-  let char_idx = position.character as usize;
+  let char_idx = crate::utf16_character_index(line_text, position.character);
 
   // Find word at position
   let word = extract_word_at(line_text, char_idx)?;
@@ -368,4 +371,50 @@ fn extract_recipe_name_from_diagnostic(message: &str) -> Option<String> {
     }
   }
   None
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[tokio::test]
+  async fn loads_core_context_and_refreshes_saved_recipes() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path().join("justfile");
+    std::fs::write(&root, "test:\n  echo a\n").unwrap();
+    let first = analyze_project(directory.path()).await.unwrap();
+    assert!(first.recipes.contains_key("test"));
+    std::fs::write(&root, "build:\n  echo b\n").unwrap();
+    let next = analyze_project(directory.path()).await.unwrap();
+    assert!(next.recipes.contains_key("build"));
+    assert!(!next.recipes.contains_key("test"));
+  }
+
+  #[tokio::test]
+  async fn maps_module_recipe_to_its_own_source() {
+    let directory = tempfile::tempdir().unwrap();
+    std::fs::write(
+      directory.path().join("justfile"),
+      "mod child\n\nroot:\n  echo root\n",
+    )
+    .unwrap();
+    std::fs::write(
+      directory.path().join("child.just"),
+      "child-recipe:\n  echo child\n",
+    )
+    .unwrap();
+    let analysis = analyze_project(directory.path()).await.unwrap();
+    let recipe = analysis
+      .recipes
+      .get("child::child-recipe")
+      .or_else(|| {
+        analysis
+          .recipes
+          .values()
+          .find(|recipe| recipe.name == "child-recipe")
+      })
+      .unwrap();
+    assert_eq!(recipe.file.file_name().unwrap(), "child.just");
+    assert_eq!(recipe.line, 0);
+  }
 }

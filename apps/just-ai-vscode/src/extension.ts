@@ -21,7 +21,8 @@ export function activate(context: vscode.ExtensionContext): void {
 
   const config = vscode.workspace.getConfiguration('just-ai');
   const justBinary = config.get<string>('justBinary', 'just');
-  justAiClient = new JustAiClient(projectRoot || '', justBinary);
+  const companionBinary = config.get<string>('companionBinary', 'just-ai');
+  justAiClient = new JustAiClient(projectRoot || '', justBinary, companionBinary);
 
   // Initialize risk diagnostics provider
   riskDiagnostics = new RiskDiagnostics(context, outputChannel);
@@ -77,9 +78,9 @@ export function activate(context: vscode.ExtensionContext): void {
           riskDiagnostics.refresh(vscode.window.activeTextEditor.document);
         }
       }
-      if (event.affectsConfiguration('just-ai.justBinary')) {
+      if (event.affectsConfiguration('just-ai.justBinary') || event.affectsConfiguration('just-ai.companionBinary')) {
         const newBinary = config.get<string>('justBinary', 'just');
-        justAiClient = new JustAiClient(projectRoot || '', newBinary);
+        justAiClient = new JustAiClient(projectRoot || '', newBinary, config.get<string>('companionBinary', 'just-ai'));
         riskDiagnostics.setClient(justAiClient);
         historyProvider.setClient(justAiClient);
       }
@@ -533,7 +534,7 @@ async function runExplainBatch(): Promise<void> {
 
   try {
     const context = await justAiClient.getProjectContext();
-    const modules = context.modules.map(m => m.name);
+    const modules = context.modules.map(m => m.module_path).filter(Boolean);
 
     const moduleChoice = await vscode.window.showQuickPick(
       ['All recipes', ...modules],

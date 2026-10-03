@@ -415,3 +415,25 @@ fn modularize_preserves_attributes_and_validates_before_writing() {
   let module = std::fs::read_to_string(directory.path().join("test.just")).unwrap();
   assert!(module.contains("# test documentation\n[private]\ntest-a:"));
 }
+
+#[test]
+fn history_accepts_recipe_and_success_filters() {
+  let output = run_with_justfile(
+    "test:\n  echo a\n",
+    &[
+      "history",
+      "recent",
+      "--recipe",
+      "test",
+      "--success",
+      "false",
+      "--json",
+    ],
+  );
+  assert!(
+    output.status.success(),
+    "{}",
+    String::from_utf8_lossy(&output.stderr)
+  );
+  assert!(serde_json::from_slice::<Vec<serde_json::Value>>(&output.stdout).is_ok());
+}

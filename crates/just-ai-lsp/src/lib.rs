@@ -37,8 +37,6 @@ pub struct JustLspServer {
   client: Client,
   /// Open documents: uri -> (version, text)
   documents: Arc<Mutex<HashMap<Url, (i32, String)>>>,
-  /// Project analysis cache: project_root -> analysis
-  analyses: Arc<Mutex<HashMap<PathBuf, ProjectAnalysis>>>,
   /// Workspace folders
   workspace_folders: Arc<Mutex<Vec<WorkspaceFolder>>>,
 }
@@ -48,7 +46,6 @@ impl JustLspServer {
     Self {
       client,
       documents: Arc::new(Mutex::new(HashMap::new())),
-      analyses: Arc::new(Mutex::new(HashMap::new())),
       workspace_folders: Arc::new(Mutex::new(Vec::new())),
     }
   }
@@ -57,26 +54,9 @@ impl JustLspServer {
   async fn get_analysis(&self, uri: &Url) -> Result<ProjectAnalysis> {
     let project_root = self.find_project_root(uri).await?;
 
-    // First check cache without holding lock across await
-    let cached = {
-      let analyses = self.analyses.lock().unwrap();
-      analyses.get(&project_root).cloned()
-    };
-
-    if let Some(analysis) = cached {
-      return Ok(analysis);
-    }
-
-    // Compute fresh analysis (lock not held)
-    let analysis = analyze_project(&project_root).await?;
-
-    // Store in cache
-    self
-      .analyses
-      .lock()
-      .unwrap()
-      .insert(project_root.clone(), analysis.clone());
-    Ok(analysis)
+    // Refresh from disk on every request. An indefinitely cached dump silently
+    // loses saved edits and changes to imported files.
+    analyze_project(&project_root).await
   }
 
   /// Find the project root (directory containing justfile) for a URI
@@ -236,10 +216,13 @@ impl LanguageServer for JustLspServer {
       // In lsp-types 0.94, TextDocumentContentChangeEvent is a struct with optional range
       if let Some(range) = change.range {
         // Incremental change
-        if let Some((_, current_text)) = self.documents.lock().unwrap().get_mut(&uri) {
+        if let Some((version, current_text)) = self.documents.lock().unwrap().get_mut(&uri) {
+          *version = params.text_document.version;
           let start = position_to_offset(current_text, range.start);
           let end = position_to_offset(current_text, range.end);
-          current_text.replace_range(start..end, &change.text);
+          if start <= end {
+            current_text.replace_range(start..end, &change.text);
+          }
         }
       } else {
         // Full document change
@@ -348,15 +331,53 @@ impl LanguageServer for JustLspServer {
   }
 }
 
-/// Convert LSP position to byte offset
+/// Convert UTF-16 LSP positions into valid UTF-8 byte boundaries.
 fn position_to_offset(text: &str, position: Position) -> usize {
   let mut offset = 0;
-  for (i, line) in text.lines().enumerate() {
+  for (i, line) in text.split_inclusive('\n').enumerate() {
     if i as u32 == position.line {
-      offset += position.character as usize;
-      break;
+      let content = line.trim_end_matches('\n').trim_end_matches('\r');
+      let characters = utf16_character_index(content, position.character);
+      return offset
+        + content
+          .char_indices()
+          .nth(characters)
+          .map_or(content.len(), |(index, _)| index);
     }
-    offset += line.len() + 1; // +1 for newline
+    offset += line.len();
   }
-  offset.min(text.len())
+  text.len()
+}
+
+fn utf16_character_index(text: &str, position: u32) -> usize {
+  let mut units = 0;
+  for (index, character) in text.chars().enumerate() {
+    if units + character.len_utf16() > position as usize {
+      return index;
+    }
+    units += character.len_utf16();
+  }
+  text.chars().count()
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn utf16_offsets_handle_multibyte_text_emoji_crlf_and_end_of_document() {
+    let text = "é😀x\r\nnext\n";
+    assert_eq!(position_to_offset(text, Position::new(0, 1)), 2);
+    assert_eq!(position_to_offset(text, Position::new(0, 2)), 2);
+    assert_eq!(position_to_offset(text, Position::new(0, 3)), 6);
+    assert_eq!(position_to_offset(text, Position::new(0, 99)), 7);
+    assert_eq!(position_to_offset(text, Position::new(1, 1)), 10);
+    assert_eq!(position_to_offset(text, Position::new(2, 0)), text.len());
+    assert_eq!(position_to_offset(text, Position::new(99, 0)), text.len());
+    let mut edited = text.to_owned();
+    let start = position_to_offset(text, Position::new(0, 1));
+    let end = position_to_offset(text, Position::new(0, 3));
+    edited.replace_range(start..end, "a");
+    assert_eq!(edited, "éax\r\nnext\n");
+  }
 }

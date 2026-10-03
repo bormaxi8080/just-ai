@@ -1485,6 +1485,7 @@ dependencies = [
  "regex",
  "serde",
  "serde_json",
+ "tempfile",
  "tokio",
  "tower-lsp",
  "tracing",
