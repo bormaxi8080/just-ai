@@ -45,7 +45,8 @@ Run checks from the repository root and stop at the first failure.
 
 6. Run `python3 tests/codebase_index_check.py --refresh` with Codebase MCP
    0.11.0 or newer. This verifies checkout identity, current source, generated
-   output exclusion and the three real template-plan adapter calls.
+   output exclusion, the three real template-plan adapter calls and execution
+   preparation boundaries.
    Re-index Codebase Memory MCP. Use `get_architecture`, `search_graph`, and
    `trace_path` to confirm dependency direction, then update its ADR when the
    increment changed a contract or boundary.

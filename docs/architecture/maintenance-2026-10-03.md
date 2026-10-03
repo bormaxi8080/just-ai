@@ -125,3 +125,9 @@ the production JS bundle is byte-identical. Companion parser diagnostics are
 now clean; remaining MCP warnings concern upstream `release-plz-changelog.toml`
 and `examples/rule124.just`. The graph gate rejects companion parse/skipped
 coverage failures and exposes upstream diagnostics for direct source review.
+
+The final graph gate also checks actual execution-preparation callers from CLI,
+MCP, GUI and core revalidation. MCP preparation uses explicit associated dispatch
+to avoid the resolver missing a chained constructor/method call; behavior and
+argv are unchanged. MCP tests and Clippy passed after this source-equivalent
+change. Synthetic file containers are distinguished from function callers.

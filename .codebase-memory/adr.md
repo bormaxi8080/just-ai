@@ -40,3 +40,6 @@ Codebase MCP >= 0.11.0 is required. tests/codebase_index_check.py verifies check
 
 ## Native desktop acceptance (2026-10-04)
 Native Linux ARM64 WebKit/Tauri smoke passed inspect/run/history/deny/live-output/cancellation in a disposable Docker fixture. The main window needs explicit core:event:allow-listen and core:event:allow-unlisten capabilities. Packaged Docker uses tauri/custom-protocol, and opt-in native-smoke uses pinned tauri-driver 2.0.6 with Docker --init. Windows native smoke is configured in CI and remains unexecuted locally. JSX ampersands are entity-encoded without changing the renderer bundle; companion source parser coverage is clean. The index gate rejects companion parser/skipped failures; upstream parser diagnostics require source inspection.
+
+## Execution graph acceptance (2026-10-04)
+The index gate also checks the four function callers of RecipeExecutor.prepare: core streaming execution, CLI, MCP and GUI. Explicit associated dispatch preserves behavior while making adapter calls resolvable. Synthetic file containers are excluded from runtime caller assertions.

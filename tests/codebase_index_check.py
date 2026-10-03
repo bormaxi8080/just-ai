@@ -103,6 +103,27 @@ def main():
     )}
     if observed != expected:
         raise RuntimeError(f"TemplatePlan adapter call coverage mismatch: missing={expected-observed}, unexpected={observed-expected}")
+    execution_symbol = project + ".crates.just-ai.src.application.execution.RecipeExecutor.prepare"
+    execution_discovered = call("search_graph", project=project, format="json",
+                                qn_pattern=re.escape(execution_symbol) + "$", limit=5)
+    if execution_discovered.get("total") != 1:
+        raise RuntimeError("Expected current RecipeExecutor.prepare symbol")
+    execution_trace = call("trace_path", project=project, function_name=execution_symbol,
+                           direction="inbound", depth=1, format="json", limit=100)
+    execution_callers = execution_trace.get("callers", [])
+    if isinstance(execution_callers, dict):
+        execution_callers = list(rows(execution_callers))
+    # File containers may aggregate cfg/test call sites; check actual function boundaries.
+    execution_observed = {row["qualified_name"] for row in execution_callers
+                          if not row["qualified_name"].endswith(".__file__")}
+    execution_expected = {project + "." + path for path in (
+        "crates.just-ai.src.application.execution.RecipeExecutor.execute_streaming_with_limit",
+        "crates.just-ai.src.cli.try_main",
+        "apps.just-ai-mcp.src.tools.call_tool_at",
+        "apps.just-ai-gui.src-tauri.src.lib.prepare_run",
+    )}
+    if execution_observed != execution_expected:
+        raise RuntimeError(f"Execution preparation call coverage mismatch: missing={execution_expected-execution_observed}, unexpected={execution_observed-execution_expected}")
     print(f"Codebase source/exclusion/CLI-MCP-GUI call checks passed: {project}")
     print(f"Index: {status.get('nodes', '?')} nodes, {status.get('edges', '?')} edges")
 

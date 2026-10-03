@@ -357,14 +357,17 @@ fn call_tool_at(params: &Value, just_binary: &Path, project_root: &Path) -> Resu
         .unwrap_or_else(|| json!([]));
       let arguments: Vec<String> =
         serde_json::from_value(arguments).map_err(|error| error.to_string())?;
+      let executor = RecipeExecutor::new(just_binary);
       serde_json::to_value(
-        RecipeExecutor::new(just_binary)
-          .prepare(RunRequest {
+        RecipeExecutor::prepare(
+          &executor,
+          RunRequest {
             project_root: PathBuf::from(project_root),
             recipe,
             arguments,
-          })
-          .map_err(|error| error.to_string())?,
+          },
+        )
+        .map_err(|error| error.to_string())?,
       )
       .map_err(|error| error.to_string())?
     }
