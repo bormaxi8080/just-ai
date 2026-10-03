@@ -413,14 +413,11 @@ fn call_tool_at(params: &Value, just_binary: &Path, project_root: &Path) -> Resu
         .unwrap_or(false);
       let context =
         inspect_project_at(just_binary, project_root).map_err(|error| error.to_string())?;
-      let client = AiClient::from_env().map_err(|error| error.to_string())?;
+      let client = AiClient::from_project(project_root).map_err(|error| error.to_string())?;
       let response = client
         .complete_json::<just_ai::ai_responses::AddRecipeResponse>(
           "Generate a safe just recipe proposal as strict JSON.",
-          &prompts::add(
-            &serde_json::to_string_pretty(&context).map_err(|e| e.to_string())?,
-            &request,
-          ),
+          &prompts::add(&context.ai_json().map_err(|e| e.to_string())?, &request),
         )
         .map_err(|error| error.to_string())?;
       let source = context
@@ -475,12 +472,12 @@ fn call_tool_at(params: &Value, just_binary: &Path, project_root: &Path) -> Resu
         .map_err(|error| error.to_string())?;
       let context =
         inspect_project_at(just_binary, project_root).map_err(|error| error.to_string())?;
-      let client = AiClient::from_env().map_err(|error| error.to_string())?;
+      let client = AiClient::from_project(project_root).map_err(|error| error.to_string())?;
       let response = client
         .complete_json::<just_ai::ai_responses::FixResponse>(
           "Generate a fix proposal for a failing just recipe as strict JSON.",
           &prompts::fix(
-            &serde_json::to_string_pretty(&context).map_err(|e| e.to_string())?,
+            &context.ai_json().map_err(|e| e.to_string())?,
             &recipe_name,
             &serde_json::to_string_pretty(&failed_runs).map_err(|e| e.to_string())?,
           ),
@@ -527,14 +524,11 @@ fn call_tool_at(params: &Value, just_binary: &Path, project_root: &Path) -> Resu
         .unwrap_or(false);
       let context =
         inspect_project_at(just_binary, project_root).map_err(|error| error.to_string())?;
-      let client = AiClient::from_env().map_err(|error| error.to_string())?;
+      let client = AiClient::from_project(project_root).map_err(|error| error.to_string())?;
       let response = client
         .complete_json::<just_ai::ai_responses::WorkflowResponse>(
           "Generate a multi-recipe workflow as strict JSON.",
-          &prompts::workflow(
-            &serde_json::to_string_pretty(&context).map_err(|e| e.to_string())?,
-            &request,
-          ),
+          &prompts::workflow(&context.ai_json().map_err(|e| e.to_string())?, &request),
         )
         .map_err(|error| error.to_string())?;
       let source = context
@@ -625,7 +619,7 @@ fn call_tool_at(params: &Value, just_binary: &Path, project_root: &Path) -> Resu
       } else {
         let context =
           inspect_project_at(just_binary, project_root).map_err(|error| error.to_string())?;
-        let client = AiClient::from_env().map_err(|error| error.to_string())?;
+        let client = AiClient::from_project(project_root).map_err(|error| error.to_string())?;
         let source = context
           .root_source()
           .ok_or("project context does not contain a root justfile source")?;
@@ -643,7 +637,7 @@ fn call_tool_at(params: &Value, just_binary: &Path, project_root: &Path) -> Resu
             .map_err(|error| error.to_string())?;
           let history_json =
             serde_json::to_string_pretty(&recipe_history).map_err(|e| e.to_string())?;
-          let context_json = serde_json::to_string_pretty(&context).map_err(|e| e.to_string())?;
+          let context_json = context.ai_json().map_err(|e| e.to_string())?;
 
           let response = client
             .complete_json::<just_ai::ai_responses::FixResponse>(
@@ -712,7 +706,7 @@ fn call_tool_at(params: &Value, just_binary: &Path, project_root: &Path) -> Resu
 
       let context =
         inspect_project_at(just_binary, project_root).map_err(|error| error.to_string())?;
-      let client = AiClient::from_env().map_err(|error| error.to_string())?;
+      let client = AiClient::from_project(project_root).map_err(|error| error.to_string())?;
 
       let mut explanations = Vec::new();
 
@@ -732,7 +726,7 @@ fn call_tool_at(params: &Value, just_binary: &Path, project_root: &Path) -> Resu
           .complete_json::<just_ai::ai_responses::ExplainResponse>(
             "Explain a just recipe using the supplied project context.",
             &prompts::explain(
-              &serde_json::to_string_pretty(&context).map_err(|e| e.to_string())?,
+              &context.ai_json().map_err(|e| e.to_string())?,
               &serde_json::to_string_pretty(recipe_ctx).map_err(|e| e.to_string())?,
             ),
           )
@@ -760,14 +754,11 @@ fn call_tool_at(params: &Value, just_binary: &Path, project_root: &Path) -> Resu
         .unwrap_or(false);
       let context =
         inspect_project_at(just_binary, project_root).map_err(|error| error.to_string())?;
-      let client = AiClient::from_env().map_err(|error| error.to_string())?;
+      let client = AiClient::from_project(project_root).map_err(|error| error.to_string())?;
       let response = client
         .complete_json::<just_ai::ai_responses::TemplateResponse>(
           "Generate a reusable just recipe template as strict JSON.",
-          &prompts::template(
-            &serde_json::to_string_pretty(&context).map_err(|e| e.to_string())?,
-            &request,
-          ),
+          &prompts::template(&context.ai_json().map_err(|e| e.to_string())?, &request),
         )
         .map_err(|error| error.to_string())?;
 
@@ -815,7 +806,7 @@ fn call_tool_at(params: &Value, just_binary: &Path, project_root: &Path) -> Resu
 
       let context =
         inspect_project_at(just_binary, project_root).map_err(|error| error.to_string())?;
-      let client = AiClient::from_env().map_err(|error| error.to_string())?;
+      let client = AiClient::from_project(project_root).map_err(|error| error.to_string())?;
 
       // Generate template from request
       let template_prompt = format!(
@@ -826,7 +817,7 @@ fn call_tool_at(params: &Value, just_binary: &Path, project_root: &Path) -> Resu
         .complete_json::<just_ai::ai_responses::TemplateResponse>(
           "Generate a reusable just recipe template as strict JSON.",
           &prompts::template(
-            &serde_json::to_string_pretty(&context).map_err(|e| e.to_string())?,
+            &context.ai_json().map_err(|e| e.to_string())?,
             &template_prompt,
           ),
         )
@@ -925,14 +916,11 @@ fn call_tool_at(params: &Value, just_binary: &Path, project_root: &Path) -> Resu
         .unwrap_or(false);
       let context =
         inspect_project_at(just_binary, project_root).map_err(|error| error.to_string())?;
-      let client = AiClient::from_env().map_err(|error| error.to_string())?;
+      let client = AiClient::from_project(project_root).map_err(|error| error.to_string())?;
       let response = client
         .complete_json::<just_ai::ai_responses::ComposeWorkflowResponse>(
           "Compose a multi-recipe workflow by reusing existing recipes as strict JSON.",
-          &prompts::compose_workflow(
-            &serde_json::to_string_pretty(&context).map_err(|e| e.to_string())?,
-            &request,
-          ),
+          &prompts::compose_workflow(&context.ai_json().map_err(|e| e.to_string())?, &request),
         )
         .map_err(|error| error.to_string())?;
 

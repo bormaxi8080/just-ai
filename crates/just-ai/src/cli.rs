@@ -378,7 +378,7 @@ fn try_main() -> Result<(), Box<dyn Error>> {
           // Get history for this specific recipe
           let recipe_history = history.query(Some(recipe_name), Some(false), 10)?;
           let history_json = serde_json::to_string_pretty(&recipe_history)?;
-          let context_json = serde_json::to_string_pretty(&context)?;
+          let context_json = context.ai_json()?;
 
           let response = AiClient::from_env()?.complete_json::<FixResponse>(
             "Generate a fix proposal for a failing just recipe as strict JSON.",
@@ -443,7 +443,7 @@ fn try_main() -> Result<(), Box<dyn Error>> {
         // Query for failed runs of this recipe
         let failed_runs = history.query(Some(&recipe), Some(false), 10)?;
         let history_json = serde_json::to_string_pretty(&failed_runs)?;
-        let context_json = serde_json::to_string_pretty(&context)?;
+        let context_json = context.ai_json()?;
         let response = AiClient::from_env()?.complete_json::<FixResponse>(
           "Generate a fix proposal for a failing just recipe as strict JSON.",
           &prompts::fix(&context_json, &recipe, &history_json),
@@ -454,21 +454,21 @@ fn try_main() -> Result<(), Box<dyn Error>> {
     Commands::Workflow { request, write } => {
       let response = AiClient::from_env()?.complete_json::<WorkflowResponse>(
         "Generate a multi-recipe workflow as strict JSON.",
-        &prompts::workflow(&serde_json::to_string_pretty(&context)?, &request),
+        &prompts::workflow(&context.ai_json()?, &request),
       )?;
       handle_workflow(&cli.just_binary, &context, &request, response, write)?;
     }
     Commands::ComposeWorkflow { request, write } => {
       let response = AiClient::from_env()?.complete_json::<ComposeWorkflowResponse>(
         "Compose a multi-recipe workflow by reusing existing recipes as strict JSON.",
-        &prompts::compose_workflow(&serde_json::to_string_pretty(&context)?, &request),
+        &prompts::compose_workflow(&context.ai_json()?, &request),
       )?;
       handle_compose_workflow(&cli.just_binary, &context, &request, response, write)?;
     }
     Commands::Template { request } => {
       let response = AiClient::from_env()?.complete_json::<TemplateResponse>(
         "Generate a reusable just recipe template as strict JSON.",
-        &prompts::template(&serde_json::to_string_pretty(&context)?, &request),
+        &prompts::template(&context.ai_json()?, &request),
       )?;
       handle_template(&context, &request, response)?;
     }
@@ -1077,17 +1077,19 @@ pub struct AiClient {
 
 impl AiClient {
   pub fn from_env() -> Result<Self, Box<dyn Error>> {
-    let provider = env::var("JUST_AI_PROVIDER").unwrap_or_else(|_| "openai".to_owned());
-    let base_url = env::var("JUST_AI_BASE_URL").unwrap_or_else(|_| match provider.as_str() {
-      "ollama" => "http://localhost:11434".to_owned(),
-      _ => "https://api.openai.com/v1".to_owned(),
-    });
-    let model = env::var("JUST_AI_MODEL").unwrap_or_else(|_| match provider.as_str() {
-      "ollama" => "llama3.1".to_owned(),
-      "openai" => "gpt-5.6-terra".to_owned(),
-      _ => "gpt-5-mini".to_owned(),
-    });
-    let api_key = env::var("JUST_AI_API_KEY").ok();
+    Self::from_project(&env::current_dir()?)
+  }
+
+  pub fn from_project(root: &Path) -> Result<Self, Box<dyn Error>> {
+    let config = crate::config::Config::load(root)?.ai;
+    let provider = env::var("JUST_AI_PROVIDER").unwrap_or_else(|_| config.provider.clone());
+    let mut config = config;
+    config.provider = provider.clone();
+    let base_url = env::var("JUST_AI_BASE_URL").unwrap_or_else(|_| config.effective_base_url());
+    let model = env::var("JUST_AI_MODEL").unwrap_or_else(|_| config.effective_model());
+    let api_key = env::var("JUST_AI_API_KEY")
+      .ok()
+      .or_else(|| config.effective_api_key());
     if provider != "ollama" && api_key.is_none() {
       return Err("JUST_AI_API_KEY is required unless JUST_AI_PROVIDER=ollama is used".into());
     }
@@ -1136,7 +1138,7 @@ impl AiClient {
       self.provider.as_ref(),
       &provider::AiRequest {
         system: system.into(),
-        user: user.into(),
+        user: application::project_context::redact_text(user).0,
         schema_name: std::any::type_name::<T>()
           .rsplit("::")
           .next()
@@ -1163,7 +1165,7 @@ fn strip_json_fence(content: &str) -> &str {
 }
 
 fn suggest_prompt(context: &ProjectContext) -> Result<String, Box<dyn Error>> {
-  Ok(prompts::suggest(&serde_json::to_string_pretty(context)?))
+  Ok(prompts::suggest(&context.ai_json()?))
 }
 
 fn explain_prompt(
@@ -1171,16 +1173,13 @@ fn explain_prompt(
   recipe: &ContextRecipe,
 ) -> Result<String, Box<dyn Error>> {
   Ok(prompts::explain(
-    &serde_json::to_string_pretty(context)?,
+    &context.ai_json()?,
     &serde_json::to_string_pretty(recipe)?,
   ))
 }
 
 fn add_prompt(context: &ProjectContext, request: &str) -> Result<String, Box<dyn Error>> {
-  Ok(prompts::add(
-    &serde_json::to_string_pretty(context)?,
-    request,
-  ))
+  Ok(prompts::add(&context.ai_json()?, request))
 }
 
 fn print_suggestions(response: &SuggestResponse) {

@@ -14,12 +14,8 @@ use {
   },
 };
 
-fn load_dump(just_binary: &Path) -> Result<DumpModule, Box<dyn Error>> {
-  load_dump_at(just_binary, None)
-}
-
 pub(crate) fn load_context(just_binary: &Path) -> Result<ProjectContext, Box<dyn Error>> {
-  Ok(ProjectContext::from_dump(load_dump(just_binary)?))
+  inspect_project_at(just_binary, std::env::current_dir()?)
 }
 
 fn load_dump_at(
@@ -36,7 +32,7 @@ fn load_dump_at(
 /// representation suitable for CLI, desktop, and agent adapters.
 pub fn inspect_project(just_binary: impl Into<PathBuf>) -> Result<ProjectContext, Box<dyn Error>> {
   let just_binary = just_binary.into();
-  Ok(ProjectContext::from_dump(load_dump(&just_binary)?))
+  inspect_project_at(&just_binary, std::env::current_dir()?)
 }
 
 /// Inspect a specific project without changing process-global working state.
@@ -54,10 +50,16 @@ pub fn inspect_project_at(
       .into(),
     );
   }
-  Ok(ProjectContext::from_dump(load_dump_at(
-    just_binary.as_ref(),
-    Some(project_root),
-  )?))
+  let config = crate::config::Config::load(project_root)?;
+  let mut context =
+    ProjectContext::from_dump(load_dump_at(just_binary.as_ref(), Some(project_root))?);
+  context.facts =
+    application::project_context::ProjectScanner::with_config(config.scanner).scan(project_root);
+  for recipe in &mut context.recipes {
+    recipe.risks = config.risk.scan_lines(&recipe.body);
+    recipe.risk = RiskLevel::highest(&recipe.risks);
+  }
+  Ok(context)
 }
 
 #[derive(Debug, Deserialize)]
@@ -113,6 +115,20 @@ pub struct ProjectContext {
 }
 
 impl ProjectContext {
+  pub fn ai_json(&self) -> Result<String, serde_json::Error> {
+    fn sanitize(value: &mut Value) {
+      match value {
+        Value::String(text) => *text = application::project_context::redact_text(text).0,
+        Value::Array(values) => values.iter_mut().for_each(sanitize),
+        Value::Object(values) => values.values_mut().for_each(sanitize),
+        _ => {}
+      }
+    }
+    let mut value = serde_json::to_value(self)?;
+    sanitize(&mut value);
+    serde_json::to_string_pretty(&value)
+  }
+
   fn from_dump(dump: DumpModule) -> Self {
     let facts = dump.source.parent().map_or_else(Default::default, |root| {
       application::project_context::ProjectScanner::default().scan(root)

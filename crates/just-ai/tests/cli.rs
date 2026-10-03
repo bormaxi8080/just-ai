@@ -461,3 +461,52 @@ fn modularize_validation_failure_leaves_project_untouched() {
   assert_eq!(std::fs::read_to_string(root).unwrap(), original);
   assert!(!directory.path().join("test.just").exists());
 }
+
+#[test]
+fn real_runner_preview_enforces_blocked_and_custom_policy() {
+  use just_ai::application::execution::{RecipeExecutor, RunRequest};
+  let directory = tempfile::tempdir().unwrap();
+  std::fs::write(
+    directory.path().join("justfile"),
+    "danger:\n  rm -rf /\n\nsafe:\n  @echo safe\n",
+  )
+  .unwrap();
+  let executor = RecipeExecutor::new("just");
+  let request = |recipe: &str| RunRequest {
+    project_root: directory.path().into(),
+    recipe: recipe.into(),
+    arguments: vec![],
+  };
+  let prepared = executor.prepare(request("danger")).unwrap();
+  assert_eq!(prepared.risk, just_ai::domain::risk::RiskLevel::Blocked);
+  assert!(!prepared.preview.is_empty());
+  assert!(matches!(
+    prepared.policy,
+    just_ai::domain::policy::PolicyDecision::Deny { .. }
+  ));
+  std::fs::write(
+    directory.path().join("just-ai.toml"),
+    "[policy.decisions]\nlow = { type = 'deny', reason = 'project policy' }\n",
+  )
+  .unwrap();
+  assert!(matches!(
+    executor.prepare(request("safe")).unwrap().policy,
+    just_ai::domain::policy::PolicyDecision::Deny { .. }
+  ));
+}
+
+#[test]
+fn ai_context_redacts_recipe_bodies_docs_and_defaults_without_mutating_source() {
+  let directory = tempfile::tempdir().unwrap();
+  std::fs::write(
+    directory.path().join("justfile"),
+    "# API_KEY=synthetic-doc-secret\nhello:\n  @echo API_KEY=synthetic-body-secret\n",
+  )
+  .unwrap();
+  let context = just_ai::inspect_project_at("just", directory.path()).unwrap();
+  let sanitized = context.ai_json().unwrap();
+  assert!(!sanitized.contains("synthetic-doc-secret"));
+  assert!(!sanitized.contains("synthetic-body-secret"));
+  assert!(context.recipes[0].body[0].contains("synthetic-body-secret"));
+  serde_json::from_str::<serde_json::Value>(&sanitized).unwrap();
+}

@@ -1,7 +1,7 @@
 use crate::{
   config::ExecutionConfig,
   domain::{
-    policy::{DefaultPolicy, PolicyDecision},
+    policy::PolicyDecision,
     risk::{RiskFinding, RiskLevel},
   },
 };
@@ -135,11 +135,18 @@ impl RecipeExecutor {
       return Err(command_error("just dry-run", &output.stderr));
     }
 
-    let preview_text = String::from_utf8_lossy(&output.stdout);
+    let config = crate::config::Config::load(&request.project_root)
+      .map_err(|error| ExecutionError(error.to_string()))?;
+    // Upstream writes dry-run commands to stderr; retain stdout for compatible runners.
+    let preview_text = format!(
+      "{}{}",
+      String::from_utf8_lossy(&output.stderr),
+      String::from_utf8_lossy(&output.stdout)
+    );
     let preview = preview_text.lines().map(str::to_owned).collect::<Vec<_>>();
-    let findings = RiskFinding::scan_lines(&preview);
+    let findings = config.risk.scan_lines(&preview);
     let risk = RiskLevel::highest(&findings);
-    let policy = DefaultPolicy.evaluate(&request.recipe, risk);
+    let policy = config.policy.evaluate(&request.recipe, risk);
 
     Ok(PreparedRun {
       request,

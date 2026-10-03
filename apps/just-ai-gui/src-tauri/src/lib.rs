@@ -148,13 +148,11 @@ async fn ai_suggest(project_root: PathBuf) -> Result<SuggestResponse, String> {
   }
   let context =
     inspect_project_at("just", project_root.clone()).map_err(|error| error.to_string())?;
-  let response = AiClient::from_env()
+  let response = AiClient::from_project(&project_root)
     .map_err(|error| error.to_string())?
     .complete_json::<SuggestResponse>(
       "Suggest useful missing just recipes for this project.",
-      &prompts::suggest(
-        &serde_json::to_string_pretty(&context).map_err(|error| error.to_string())?,
-      ),
+      &prompts::suggest(&context.ai_json().map_err(|error| error.to_string())?),
     )
     .map_err(|error| error.to_string())?;
   Ok(response)
@@ -173,12 +171,12 @@ async fn ai_explain(project_root: PathBuf, recipe_name: String) -> Result<Explai
   let recipe = context
     .find_recipe(&recipe_name)
     .ok_or_else(|| format!("recipe `{recipe_name}` not found"))?;
-  let response = AiClient::from_env()
+  let response = AiClient::from_project(&project_root)
     .map_err(|error| error.to_string())?
     .complete_json::<ExplainResponse>(
       "Explain a just recipe using the supplied project context.",
       &prompts::explain(
-        &serde_json::to_string_pretty(&context).map_err(|error| error.to_string())?,
+        &context.ai_json().map_err(|error| error.to_string())?,
         &serde_json::to_string_pretty(recipe).map_err(|error| error.to_string())?,
       ),
     )
@@ -215,12 +213,12 @@ async fn ai_add_recipe(
   }
   let context =
     inspect_project_at("just", project_root.clone()).map_err(|error| error.to_string())?;
-  let response = AiClient::from_env()
+  let response = AiClient::from_project(&project_root)
     .map_err(|error| error.to_string())?
     .complete_json::<AiAddRecipeResponse>(
       "Generate a safe just recipe proposal as strict JSON.",
       &prompts::add(
-        &serde_json::to_string_pretty(&context).map_err(|error| error.to_string())?,
+        &context.ai_json().map_err(|error| error.to_string())?,
         &request.request,
       ),
     )
@@ -294,9 +292,9 @@ async fn ai_fix_recipe(
     .map_err(|error| error.to_string())?;
   let history_json =
     serde_json::to_string_pretty(&failed_runs).map_err(|error| error.to_string())?;
-  let context_json = serde_json::to_string_pretty(&context).map_err(|error| error.to_string())?;
+  let context_json = context.ai_json().map_err(|error| error.to_string())?;
 
-  let response = AiClient::from_env()
+  let response = AiClient::from_project(&project_root)
     .map_err(|error| error.to_string())?
     .complete_json::<FixResponse>(
       "Generate a fix proposal for a failing just recipe as strict JSON.",
@@ -366,12 +364,12 @@ async fn ai_workflow(
   let context =
     inspect_project_at("just", project_root.clone()).map_err(|error| error.to_string())?;
 
-  let response = AiClient::from_env()
+  let response = AiClient::from_project(&project_root)
     .map_err(|error| error.to_string())?
     .complete_json::<AiWorkflowResponse>(
       "Generate a multi-recipe workflow as strict JSON.",
       &prompts::workflow(
-        &serde_json::to_string_pretty(&context).map_err(|error| error.to_string())?,
+        &context.ai_json().map_err(|error| error.to_string())?,
         &request.request,
       ),
     )
@@ -453,12 +451,12 @@ async fn ai_template(
   let context =
     inspect_project_at("just", project_root.clone()).map_err(|error| error.to_string())?;
 
-  let response = AiClient::from_env()
+  let response = AiClient::from_project(&project_root)
     .map_err(|error| error.to_string())?
     .complete_json::<AiTemplateResponse>(
       "Generate a reusable just recipe template as strict JSON.",
       &prompts::template(
-        &serde_json::to_string_pretty(&context).map_err(|error| error.to_string())?,
+        &context.ai_json().map_err(|error| error.to_string())?,
         &request.request,
       ),
     )
@@ -523,12 +521,12 @@ async fn ai_instantiate_template(
     "Find or create a template named '{}' for this project.",
     request.template
   );
-  let template_response = AiClient::from_env()
+  let template_response = AiClient::from_project(&project_root)
     .map_err(|error| error.to_string())?
     .complete_json::<AiTemplateResponse>(
       "Generate a reusable just recipe template as strict JSON.",
       &prompts::template(
-        &serde_json::to_string_pretty(&context).map_err(|error| error.to_string())?,
+        &context.ai_json().map_err(|error| error.to_string())?,
         &template_prompt,
       ),
     )
@@ -671,12 +669,12 @@ async fn ai_compose_workflow(
   let context =
     inspect_project_at("just", project_root.clone()).map_err(|error| error.to_string())?;
 
-  let response = AiClient::from_env()
+  let response = AiClient::from_project(&project_root)
     .map_err(|error| error.to_string())?
     .complete_json::<AiComposeWorkflowResponse>(
       "Compose a workflow by reusing and adapting existing recipes as strict JSON.",
       &prompts::compose_workflow(
-        &serde_json::to_string_pretty(&context).map_err(|error| error.to_string())?,
+        &context.ai_json().map_err(|error| error.to_string())?,
         &request.request,
       ),
     )
@@ -767,7 +765,7 @@ async fn ai_fix_batch(
     });
   }
 
-  let client = AiClient::from_env().map_err(|error| error.to_string())?;
+  let client = AiClient::from_project(&project_root).map_err(|error| error.to_string())?;
   let source = context
     .root_source()
     .ok_or("project context does not contain a root justfile source")?;
@@ -783,7 +781,7 @@ async fn ai_fix_batch(
       .map_err(|error| error.to_string())?;
     let history_json =
       serde_json::to_string_pretty(&recipe_history).map_err(|error| error.to_string())?;
-    let context_json = serde_json::to_string_pretty(&context).map_err(|error| error.to_string())?;
+    let context_json = context.ai_json().map_err(|error| error.to_string())?;
 
     let response = client
       .complete_json::<FixResponse>(
@@ -869,7 +867,7 @@ async fn ai_explain_batch(
   let context =
     inspect_project_at("just", project_root.clone()).map_err(|error| error.to_string())?;
 
-  let client = AiClient::from_env().map_err(|error| error.to_string())?;
+  let client = AiClient::from_project(&project_root).map_err(|error| error.to_string())?;
   let mut explanations = Vec::new();
 
   for recipe_ctx in &context.recipes {
@@ -888,7 +886,7 @@ async fn ai_explain_batch(
       .complete_json::<ExplainResponse>(
         "Explain a just recipe using the supplied project context.",
         &prompts::explain(
-          &serde_json::to_string_pretty(&context).map_err(|error| error.to_string())?,
+          &context.ai_json().map_err(|error| error.to_string())?,
           &serde_json::to_string_pretty(recipe_ctx).map_err(|error| error.to_string())?,
         ),
       )
