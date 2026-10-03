@@ -29,7 +29,7 @@ pub(crate) struct Justfile<'src> {
   pub(crate) functions: Table<'src, FunctionDefinition<'src>>,
   pub(crate) groups: Vec<StringLiteral<'src>>,
   #[serde(skip)]
-  pub(crate) loaded: Vec<PathBuf>,
+  pub(crate) loaded: Vec<Utf8PathBuf>,
   #[serde(skip)]
   pub(crate) module_aliases: Table<'src, ModuleAlias<'src>>,
   pub(crate) module_path: Modulepath,
@@ -42,13 +42,13 @@ pub(crate) struct Justfile<'src> {
   pub(crate) recipe_aliases: Table<'src, RecipeAlias<'src>>,
   pub(crate) recipes: Table<'src, Arc<Recipe<'src>>>,
   pub(crate) settings: Settings,
-  pub(crate) source: PathBuf,
+  pub(crate) source: Utf8PathBuf,
   pub(crate) unexports: BTreeSet<String>,
   #[serde(skip)]
   pub(crate) unstable_features: BTreeSet<UnstableFeature>,
   pub(crate) warnings: Vec<Warning>,
   #[serde(skip)]
-  pub(crate) working_directory: PathBuf,
+  pub(crate) working_directory: Utf8PathBuf,
 }
 
 impl<'src> Justfile<'src> {
@@ -739,6 +739,44 @@ impl<'src> Justfile<'src> {
     let mut stack = vec![self];
     while let Some(current) = stack.pop() {
       for alias in current.recipe_aliases.values() {
+        if alias.is_public() {
+          aliases.push((alias, &current.module_path));
+        }
+      }
+
+      for module in current.public_modules(config).into_iter().rev() {
+        stack.push(module);
+      }
+    }
+
+    aliases
+  }
+
+  pub(crate) fn public_modules_recursive(&self, config: &Config) -> Vec<&Justfile> {
+    let mut modules = Vec::new();
+
+    let mut stack = self.public_modules(config);
+    stack.reverse();
+    while let Some(current) = stack.pop() {
+      modules.push(current);
+
+      for module in current.public_modules(config).into_iter().rev() {
+        stack.push(module);
+      }
+    }
+
+    modules
+  }
+
+  pub(crate) fn public_module_aliases_recursive(
+    &self,
+    config: &Config,
+  ) -> Vec<(&ModuleAlias<'_>, &Modulepath)> {
+    let mut aliases = Vec::new();
+
+    let mut stack = vec![self];
+    while let Some(current) = stack.pop() {
+      for alias in current.module_aliases.values() {
         if alias.is_public() {
           aliases.push((alias, &current.module_path));
         }
