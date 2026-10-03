@@ -3,7 +3,7 @@ use {
     ContextRecipe, ProjectContext,
     ai_responses::*,
     application,
-    application::deduplication::smart_merge_recipes,
+    application::deduplication::DeduplicationPlan,
     config::{HistoryBackend, HistoryConfig},
     domain::risk::{RiskFinding, RiskLevel},
     inspection::load_context,
@@ -869,108 +869,35 @@ fn deduplicate_project(
   interactive: bool,
   merge: bool,
 ) -> Result<(), Box<dyn Error>> {
-  use crate::bounded_file::{max_editable_file_bytes, read_utf8};
-  use crate::proposal::{replace_recipe, unified_diff, validate_justfile};
-
-  let similar = context.find_similar_recipes(similarity_threshold);
-
-  if similar.is_empty() {
-    println!(
-      "No similar recipes found at threshold {:.0}%.",
-      similarity_threshold * 100.0
-    );
-    return Ok(());
-  }
-
   println!("=== Duplicate Analysis ===");
-  println!("Found {} similar recipe pairs:", similar.len());
-  println!();
-
-  let source = context
-    .root_source()
-    .ok_or("project context does not contain a root justfile source")?;
-  let original = read_utf8(source, max_editable_file_bytes())?;
-  let mut proposed = original.clone();
-
-  for (a, b, sim) in &similar {
-    println!("{:.1}% similar:", sim * 100.0);
-    println!("  1. {}", a);
-    println!("  2. {}", b);
-
-    let recipe_a = context.find_recipe(a);
-    let recipe_b = context.find_recipe(b);
-
-    if interactive {
-      print!("Merge? [1=keep first, 2=keep second, m=smart merge, s=skip] ");
-      std::io::stdout().flush()?;
-      let mut input = String::new();
-      std::io::stdin().read_line(&mut input)?;
-
-      match input.trim() {
-        "1" => {
-          // Keep a, remove b
-          if let Some(recipe_b) = recipe_b {
-            proposed = replace_recipe(&proposed, &recipe_b.name, "");
-            println!("  Marked '{}' for removal", b);
-          }
-        }
-        "2" => {
-          // Keep b, remove a
-          if let Some(recipe_a) = recipe_a {
-            proposed = replace_recipe(&proposed, &recipe_a.name, "");
-            println!("  Marked '{}' for removal", a);
-          }
-        }
-        "m" => {
-          // Smart merge - try to combine the best of both recipes
-          if let (Some(ra), Some(rb)) = (recipe_a, recipe_b) {
-            let merged = smart_merge_recipes(ra, rb);
-            proposed = replace_recipe(&proposed, &ra.name, "");
-            proposed = replace_recipe(&proposed, &rb.name, &merged);
-            println!("  Smart merged into '{}'", ra.name);
-          }
-        }
-        _ => {
-          println!("  Skipped");
-        }
-      }
-    } else if write {
-      if merge {
-        // Smart auto-merge: combine similar recipes
-        if let (Some(ra), Some(rb)) = (recipe_a, recipe_b) {
-          let merged = smart_merge_recipes(ra, rb);
-          proposed = replace_recipe(&proposed, &ra.name, "");
-          proposed = replace_recipe(&proposed, &rb.name, &merged);
-          println!("  Smart auto-merged into '{}'", ra.name);
-        }
-      } else {
-        // Non-interactive: keep the one with shorter namepath (more generic)
-        let keep = if a.len() <= b.len() { a } else { b };
-        let remove = if keep == a { b } else { a };
-
-        if let Some(recipe) = context.find_recipe(remove) {
-          proposed = replace_recipe(&proposed, &recipe.name, "");
-          println!("  Auto-merged: kept '{}', removed '{}'", keep, remove);
-        }
-      }
-    }
-    println!();
+  let plan = DeduplicationPlan::prepare(context, similarity_threshold, merge)?;
+  plan.validate(just_binary)?;
+  println!("Found {} similar recipe pairs", plan.similar_pairs.len());
+  for (a, b, similarity) in &plan.similar_pairs {
+    println!("{a} <-> {b}: {:.1}% similar", similarity * 100.0);
   }
-
-  if write || interactive {
-    validate_justfile(just_binary, source, &proposed)?;
-
-    println!("{}", unified_diff(source, &original, &proposed));
-
-    if write {
-      use crate::application::patches::apply_reviewed_change;
-      apply_reviewed_change(source, &original, &proposed)?;
-      println!("Wrote {}", source.display());
-    } else {
-      println!("Dry run only. Re-run with --write to apply changes.");
+  for skipped in &plan.skipped {
+    println!("Skipped: {skipped}");
+  }
+  println!(
+    "{}",
+    crate::proposal::unified_diff(&plan.source, &plan.original, &plan.proposed)
+  );
+  if interactive && write {
+    print!("Apply exact-duplicate removal plan? [y/N] ");
+    std::io::stdout().flush()?;
+    let mut answer = String::new();
+    std::io::stdin().read_line(&mut answer)?;
+    if answer.trim() != "y" {
+      return Ok(());
     }
   }
-
+  if write {
+    plan.apply(just_binary)?;
+    println!("Removed {} exact duplicates", plan.removed.len());
+  } else {
+    println!("Dry run only. Re-run with --write to apply changes.");
+  }
   Ok(())
 }
 

@@ -11,11 +11,10 @@ use just_ai::{
     TemplateResponse as AiTemplateResponse, WorkflowResponse as AiWorkflowResponse,
   },
   application::{
-    deduplication::smart_merge_recipes,
+    deduplication::DeduplicationPlan,
     execution::{CancellationToken, PreparedRun, RecipeExecutor, RunConfirmation, RunRequest},
     history::{RunRecord, create_history_at},
     modularization::ModularizationPlan,
-    patches::apply_reviewed_change,
   },
   bounded_file::{max_editable_file_bytes, read_utf8},
   cli::AiClient,
@@ -25,8 +24,7 @@ use just_ai::{
   prompts,
   proposal::{
     builtin_templates, handle_add, handle_compose_workflow, handle_fix, handle_workflow,
-    install_builtin_templates, replace_recipe, unified_diff, validate_fix_proposal,
-    validate_justfile,
+    install_builtin_templates, unified_diff, validate_fix_proposal,
   },
 };
 use serde::{Deserialize, Serialize};
@@ -1057,73 +1055,28 @@ async fn ai_migrate_deduplicate(
     inspect_project_at("just", project_root.clone()).map_err(|error| error.to_string())?;
 
   let threshold = request.similarity_threshold.unwrap_or(0.8);
-  let similar = context.find_similar_recipes(threshold);
-
-  let source = context
-    .root_source()
-    .ok_or("project context does not contain a root justfile source")?;
-  let original = read_utf8(source, max_editable_file_bytes()).map_err(|e| e.to_string())?;
-  let mut proposed = original.clone();
-
-  let mut similar_pairs = Vec::new();
-  let mut removed = Vec::new();
-  let mut merged = Vec::new();
-
-  for (a, b, sim) in &similar {
-    similar_pairs.push((a.clone(), b.clone(), *sim));
-
-    let recipe_a = context.find_recipe(a);
-    let recipe_b = context.find_recipe(b);
-
-    if request.write {
-      if request.merge {
-        if let (Some(ra), Some(rb)) = (recipe_a, recipe_b) {
-          let merged_recipe = smart_merge_recipes(ra, rb);
-          proposed = replace_recipe(&proposed, &ra.name, "");
-          proposed = replace_recipe(&proposed, &rb.name, &merged_recipe);
-          merged.push(ra.name.clone());
-        }
-      } else {
-        let keep = if a.len() <= b.len() { a } else { b };
-        let remove = if keep == a { b } else { a };
-
-        if let Some(recipe) = context.find_recipe(remove) {
-          proposed = replace_recipe(&proposed, &recipe.name, "");
-          removed.push(remove.clone());
-        }
-      }
-    }
-  }
-
-  let diff = unified_diff(source, &original, &proposed);
-
+  let plan =
+    DeduplicationPlan::prepare(&context, threshold, request.merge).map_err(|e| e.to_string())?;
+  plan
+    .validate(PathBuf::from("just").as_path())
+    .map_err(|e| e.to_string())?;
   if request.write {
-    validate_justfile(&PathBuf::from("just"), source, &proposed).map_err(|e| e.to_string())?;
-    apply_reviewed_change(source, &original, &proposed).map_err(|e| e.to_string())?;
-
-    Ok(GuiMigrateDeduplicateResult {
-      success: true,
-      message: format!(
-        "Processed {} similar pairs (removed: {}, merged: {})",
-        similar_pairs.len(),
-        removed.len(),
-        merged.len()
-      ),
-      similar_pairs,
-      removed,
-      merged,
-      diff: Some(diff),
-    })
-  } else {
-    Ok(GuiMigrateDeduplicateResult {
-      success: true,
-      message: "Dry run - no changes written".to_string(),
-      similar_pairs,
-      removed,
-      merged,
-      diff: Some(diff),
-    })
+    plan
+      .apply(PathBuf::from("just").as_path())
+      .map_err(|e| e.to_string())?;
   }
+  Ok(GuiMigrateDeduplicateResult {
+    success: true,
+    message: format!(
+      "{} exact duplicates planned; {} pairs skipped",
+      plan.removed.len(),
+      plan.skipped.len()
+    ),
+    diff: Some(unified_diff(&plan.source, &plan.original, &plan.proposed)),
+    similar_pairs: plan.similar_pairs,
+    removed: plan.removed,
+    merged: vec![],
+  })
 }
 
 // ========================================================================

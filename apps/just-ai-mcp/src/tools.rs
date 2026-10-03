@@ -1,18 +1,16 @@
 use {
   just_ai::{
     application::{
-      deduplication::smart_merge_recipes,
+      deduplication::DeduplicationPlan,
       execution::{RecipeExecutor, RunConfirmation, RunRequest},
       history::{RunRecord, create_history_at},
       modularization::ModularizationPlan,
-      patches::apply_reviewed_change,
     },
-    bounded_file::{max_editable_file_bytes, read_utf8},
     cli::AiClient,
     config::Config,
     inspection::inspect_project_at,
     prompts,
-    proposal::{replace_recipe, unified_diff, validate_justfile},
+    proposal::unified_diff,
   },
   serde_json::{Map, Value, json},
   std::{
@@ -1188,58 +1186,13 @@ fn call_tool_at(params: &Value, just_binary: &Path, project_root: &Path) -> Resu
       let context =
         inspect_project_at(just_binary, project_root).map_err(|error| error.to_string())?;
 
-      let similar = context.find_similar_recipes(threshold);
-
-      let source = context
-        .root_source()
-        .ok_or("project context does not contain a root justfile source")?;
-      let original = read_utf8(source, max_editable_file_bytes()).map_err(|e| e.to_string())?;
-      let mut proposed = original.clone();
-
-      let mut similar_pairs = Vec::new();
-      let mut removed = Vec::new();
-      let mut merged = Vec::new();
-
-      for (a, b, sim) in &similar {
-        similar_pairs.push(json!({"recipe1": a, "recipe2": b, "similarity": sim}));
-
-        let recipe_a = context.find_recipe(a);
-        let recipe_b = context.find_recipe(b);
-
-        if write {
-          if merge {
-            if let (Some(ra), Some(rb)) = (recipe_a, recipe_b) {
-              let merged_recipe = smart_merge_recipes(ra, rb);
-              proposed = replace_recipe(&proposed, &ra.name, "");
-              proposed = replace_recipe(&proposed, &rb.name, &merged_recipe);
-              merged.push(ra.name.clone());
-            }
-          } else {
-            let keep = if a.len() <= b.len() { a } else { b };
-            let remove = if keep == a { b } else { a };
-
-            if let Some(recipe) = context.find_recipe(remove) {
-              proposed = replace_recipe(&proposed, &recipe.name, "");
-              removed.push(remove.clone());
-            }
-          }
-        }
-      }
-
-      let diff = unified_diff(source, &original, &proposed);
-
+      let plan =
+        DeduplicationPlan::prepare(&context, threshold, merge).map_err(|e| e.to_string())?;
+      plan.validate(just_binary).map_err(|e| e.to_string())?;
       if write {
-        validate_justfile(just_binary, source, &proposed).map_err(|e| e.to_string())?;
-        apply_reviewed_change(source, &original, &proposed).map_err(|e| e.to_string())?;
+        plan.apply(just_binary).map_err(|e| e.to_string())?;
       }
-
-      json!({
-        "similar_pairs": similar_pairs,
-        "removed": removed,
-        "merged": merged,
-        "diff": diff,
-        "dry_run": !write,
-      })
+      json!({ "similar_pairs": plan.similar_pairs, "removed": plan.removed, "skipped": plan.skipped, "merged": [], "diff": unified_diff(&plan.source, &plan.original, &plan.proposed), "dry_run": !write })
     }
     _ => unreachable!("tool name validated before argument parsing"),
   };

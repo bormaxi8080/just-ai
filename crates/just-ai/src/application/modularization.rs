@@ -130,7 +130,7 @@ impl ModularizationPlan {
   }
 }
 
-fn recipe_range(content: &str, name: &str) -> Option<std::ops::Range<usize>> {
+pub(crate) fn recipe_range(content: &str, name: &str) -> Option<std::ops::Range<usize>> {
   let lines = content.split_inclusive('\n').collect::<Vec<_>>();
   let header = lines.iter().position(|line| {
     line

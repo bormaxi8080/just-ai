@@ -324,7 +324,7 @@ test-unit-alt:
 
   let stdout = String::from_utf8(output.stdout).unwrap();
   assert!(output.status.success(), "stdout: {}", stdout);
-  assert!(stdout.contains("Auto-merged"));
+  assert!(stdout.contains("exact duplicates"));
 
   // Verify one recipe was removed
   let root_content = std::fs::read_to_string(&justfile_path).unwrap();
@@ -555,4 +555,46 @@ fn sqlite_history_is_scoped_to_project_root() {
       .len(),
     1
   );
+}
+
+#[test]
+fn deduplication_preserves_source_and_refuses_module_projects() {
+  let directory = tempfile::tempdir().unwrap();
+  let root = directory.path();
+  let source = "alpha z a:\n  @echo {{z}} {{a}}\n  @echo repeat\n  @echo repeat\n\nbeta z a:\n  @echo {{z}} {{a}}\n  @echo repeat\n  @echo repeat\n";
+  std::fs::write(root.join("justfile"), source).unwrap();
+  let context = just_ai::inspect_project_at("just", root).unwrap();
+  let plan =
+    just_ai::application::deduplication::DeduplicationPlan::prepare(&context, 0.8, true).unwrap();
+  plan.apply(std::path::Path::new("just")).unwrap();
+  let written = std::fs::read_to_string(root.join("justfile")).unwrap();
+  assert!(written.contains("beta z a:"));
+  assert_eq!(written.matches("@echo repeat").count(), 2);
+  assert!(written.contains("{{z}} {{a}}"));
+  std::fs::write(root.join("justfile"), "mod tools\n\nalpha:\n  @echo safe\n").unwrap();
+  std::fs::write(root.join("tools.just"), "alpha:\n  @echo safe\n").unwrap();
+  let context = just_ai::inspect_project_at("just", root).unwrap();
+  assert!(
+    just_ai::application::deduplication::DeduplicationPlan::prepare(&context, 0.8, false).is_err()
+  );
+  assert!(
+    std::fs::read_to_string(root.join("justfile"))
+      .unwrap()
+      .contains("alpha:")
+  );
+}
+
+#[test]
+fn deduplication_keeps_referenced_duplicates() {
+  let directory = tempfile::tempdir().unwrap();
+  std::fs::write(
+    directory.path().join("justfile"),
+    "a:\n  @echo safe\n\nb:\n  @echo safe\n\ncaller: b\n",
+  )
+  .unwrap();
+  let context = just_ai::inspect_project_at("just", directory.path()).unwrap();
+  let plan =
+    just_ai::application::deduplication::DeduplicationPlan::prepare(&context, 0.8, false).unwrap();
+  assert!(plan.removed.is_empty());
+  assert_eq!(plan.original, plan.proposed);
 }
