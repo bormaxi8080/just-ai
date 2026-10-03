@@ -9,7 +9,9 @@
 .codegraph/
 .DS_Store
 
-# Node.js
-*/node_modules/
-*/package-lock.json
-*/out/
+# Generated dependency and build directories (lockfiles remain tracked).
+**/node_modules/
+**/out/
+**/target/
+**/dist/
+*.vsix
