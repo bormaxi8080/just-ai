@@ -136,3 +136,18 @@ Resolve Codebase Memory MCP projects by the current checkout root. Verify source
 availability and changed symbols, not only a ready status. Generated index
 artifacts are stored under `.codebase-memory/`; dependency directories and editor
 build output are ignored, while package lockfiles are tracked.
+
+## Index quality gates
+
+Codebase Memory MCP 0.11.0 or newer is required. The previous 0.7.0 index
+included generated editor output and missed associated Rust calls. Run
+`python3 tests/codebase_index_check.py --refresh` to rebuild only this checkout
+and check the source and exact CLI/MCP/GUI template-plan callers. CI uses the
+pinned official 0.11.0 binary with a verified archive checksum and isolated cache.
+Explicit type imports and an associated RecipeExecutor preparation call avoid
+ambiguous same-named method resolution in these verified adapter boundaries.
+
+The gate verifies these contracts; it cannot certify every graph edge. Parser
+diagnostics and other unresolved calls still require direct source inspection.
+After upgrading a long-lived MCP process, reconnect it before subsequent edits
+so its old watcher cannot overwrite the refreshed index.

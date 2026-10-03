@@ -1,3 +1,4 @@
+use just_ai::application::templates::TemplatePlan;
 use std::{
   path::PathBuf,
   sync::Mutex,
@@ -51,7 +52,8 @@ fn inspect_project(project_root: PathBuf) -> Result<ProjectContext, String> {
 #[tauri::command]
 async fn prepare_run(request: RunRequest) -> Result<PreparedRun, String> {
   tauri::async_runtime::spawn_blocking(move || {
-    RecipeExecutor::from_project(&request.project_root)?.prepare(request)
+    let executor = RecipeExecutor::from_project(&request.project_root)?;
+    RecipeExecutor::prepare(&executor, request)
   })
   .await
   .map_err(|error| error.to_string())?
@@ -603,13 +605,8 @@ fn ai_instantiate_template_blocking(
   let template = just_ai::proposal::load_template(&project_root, &request.template)
     .map_err(|e| e.to_string())?
     .ok_or("stored template not found")?;
-  let plan = just_ai::application::templates::TemplatePlan::prepare(
-    &context,
-    &template,
-    &request.values,
-    false,
-  )
-  .map_err(|e| e.to_string())?;
+  let plan = TemplatePlan::prepare(&context, &template, &request.values, false)
+    .map_err(|e| e.to_string())?;
   plan
     .validate(configured_runner(&project_root)?.as_path())
     .map_err(|e| e.to_string())?;

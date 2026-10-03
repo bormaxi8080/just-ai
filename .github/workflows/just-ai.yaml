@@ -9,6 +9,8 @@ on:
       - "apps/just-ai-vscode/**"
       - "tests/companion_smoke.py"
       - "tests/desktop_smoke.py"
+      - "tests/codebase_index_check.py"
+      - ".cbmignore"
       - "crates/just-ai-lsp/**"
       - "Cargo.toml"
       - "Cargo.lock"
@@ -24,6 +26,8 @@ on:
       - "apps/just-ai-vscode/**"
       - "tests/companion_smoke.py"
       - "tests/desktop_smoke.py"
+      - "tests/codebase_index_check.py"
+      - ".cbmignore"
       - "crates/just-ai-lsp/**"
       - "Cargo.toml"
       - "Cargo.lock"
@@ -124,3 +128,19 @@ jobs:
           cache-dependency-path: apps/just-ai-vscode/package-lock.json
       - run: npm ci
       - run: npm run test:contracts
+
+  codebase-index:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned Codebase MCP for graph verification
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/codebase-mcp"
+          curl --fail --location --retry 3 https://github.com/DeusData/codebase-memory-mcp/releases/download/v0.11.0/codebase-memory-mcp-linux-amd64.tar.gz -o "$RUNNER_TEMP/codebase-mcp/release.tar.gz"
+          echo "032b33c1833919a2d1de67ff6367fa6ea46aee8689c86ef223c88fae3b6e4536  $RUNNER_TEMP/codebase-mcp/release.tar.gz" | sha256sum --check
+          tar -xzf "$RUNNER_TEMP/codebase-mcp/release.tar.gz" -C "$RUNNER_TEMP/codebase-mcp"
+      - name: Verify graph source, exclusions and adapter call coverage
+        env:
+          CBM_CACHE_DIR: ${{ runner.temp }}/just-ai-codebase-cache
+        run: python tests/codebase_index_check.py --binary "$RUNNER_TEMP/codebase-mcp/codebase-memory-mcp" --refresh

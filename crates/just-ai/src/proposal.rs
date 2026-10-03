@@ -1,3 +1,4 @@
+use crate::application::templates::TemplatePlan;
 use {
   crate::{
     ProjectContext,
@@ -1358,8 +1359,7 @@ pub fn handle_instantiate_template(
   write: bool,
   force: bool,
 ) -> Result<(), Box<dyn Error>> {
-  let plan =
-    crate::application::templates::TemplatePlan::prepare(context, template, values, force)?;
+  let plan = TemplatePlan::prepare(context, template, values, force)?;
   plan.validate(just_binary)?;
   println!("Template instantiated: {}", template.name);
   println!(

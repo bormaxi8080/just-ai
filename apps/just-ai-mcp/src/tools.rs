@@ -1,3 +1,4 @@
+use just_ai::application::templates::TemplatePlan;
 use {
   just_ai::{
     application::{
@@ -836,13 +837,8 @@ fn call_tool_at(params: &Value, just_binary: &Path, project_root: &Path) -> Resu
       let template = just_ai::proposal::load_template(project_root, &template_name)
         .map_err(|e| e.to_string())?
         .ok_or("stored template not found")?;
-      let plan = just_ai::application::templates::TemplatePlan::prepare(
-        &context,
-        &template,
-        &values_map,
-        false,
-      )
-      .map_err(|e| e.to_string())?;
+      let plan = TemplatePlan::prepare(&context, &template, &values_map, false)
+        .map_err(|e| e.to_string())?;
       plan.validate(just_binary).map_err(|e| e.to_string())?;
       if write {
         plan.apply(just_binary).map_err(|e| e.to_string())?;

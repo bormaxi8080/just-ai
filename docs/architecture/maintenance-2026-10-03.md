@@ -99,3 +99,14 @@ cancelled confirmation, root changes/failed/stale inspection, live output and
 cancellation. They exposed and fixed stale project state and output hidden until
 process exit. Native Linux/Windows WebDriver smoke is configured in CI; those
 platform jobs have not been executed locally. No remote workflow was triggered.
+
+Codebase MCP was updated from 0.7.0 to the official 0.11.0 after checking the
+release SHA-256. The old binary and this project's SQLite index were backed up
+under `/private/tmp/just-ai-cbm-0.11/`; other project indexes were not removed
+or rebuilt. Full indexing now excludes editor `out` and restores the three
+TemplatePlan callers (CLI, MCP, GUI). A source-equivalent explicit type import
+and associated execution call avoid unresolved/ambiguous Rust calls at these
+boundaries. `tests/codebase_index_check.py` checks current source and exact
+call coverage, and the Linux CI graph job uses a pinned, checksum-verified
+0.11.0 in an isolated cache. Other parser diagnostics still require source
+inspection; this is not a claim of complete resolution for every language.
