@@ -28,7 +28,8 @@ kept outside the upstream implementation.
 - Desktop Rust targets compile on macOS; frontend production build passes.
 - VS Code TypeScript compile and all three process/contract tests pass,
   including literal argv transport and rejection in untrusted workspaces.
-- Linux ARM64 CLI and MCP release Docker images build. CLI help and bundled
+- Linux ARM64 CLI, MCP and desktop release Docker images build. Desktop runtime
+  dynamic libraries resolve without missing dependencies. CLI help and bundled
   `just --version` work; MCP initialize/tools-list exchange returns 16 tools.
 - Linux and Windows release archive commands were checked with dummy binaries;
   this verifies filenames and layout, not native executable behavior.
