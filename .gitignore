@@ -15,3 +15,6 @@
 **/target/
 **/dist/
 *.vsix
+
+**/desktop-test-artifacts/
+**/__pycache__/

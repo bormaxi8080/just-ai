@@ -85,3 +85,17 @@ and resolves the current TemplatePlan source. The installed server still indexes
 generated editor `out` files despite `.cbmignore`; restrict symbol discovery to
 source paths until server ignore support is reconciled. A ready index alone
 therefore remains insufficient evidence of source freshness.
+
+## Remaining-limit remediation, 2026-10-04
+
+Runtime configuration is connected in `2eed4eed`: project execution capture,
+queue/poll and idle limits; CLI/GUI runner selection; native provider timeout and
+temperature/token options; custom regex redaction at both history persistence
+boundaries. MCP keeps its server-controlled runner. Workspace tests passed
+(2,554 tests), Clippy passed and desktop compiled. Idle timeout zero disables it.
+
+Renderer workflows now cover literal argv/history, policy denial, typed and
+cancelled confirmation, root changes/failed/stale inspection, live output and
+cancellation. They exposed and fixed stale project state and output hidden until
+process exit. Native Linux/Windows WebDriver smoke is configured in CI; those
+platform jobs have not been executed locally. No remote workflow was triggered.

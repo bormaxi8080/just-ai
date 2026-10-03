@@ -8,6 +8,7 @@ on:
       - "apps/just-ai-mcp/**"
       - "apps/just-ai-vscode/**"
       - "tests/companion_smoke.py"
+      - "tests/desktop_smoke.py"
       - "crates/just-ai-lsp/**"
       - "Cargo.toml"
       - "Cargo.lock"
@@ -22,6 +23,7 @@ on:
       - "apps/just-ai-mcp/**"
       - "apps/just-ai-vscode/**"
       - "tests/companion_smoke.py"
+      - "tests/desktop_smoke.py"
       - "crates/just-ai-lsp/**"
       - "Cargo.toml"
       - "Cargo.lock"
@@ -84,10 +86,29 @@ jobs:
           cache-dependency-path: apps/just-ai-gui/package-lock.json
       - name: Linux desktop dependencies
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev
+        run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev webkit2gtk-driver xvfb
       - run: npm ci
+      - run: npm run test:workflows
       - run: npm run build
       - run: cargo check --manifest-path src-tauri/Cargo.toml --locked
+      - name: Build native smoke binaries
+        if: runner.os != 'macOS'
+        run: |
+          cargo build --manifest-path ../../Cargo.toml --locked --package just --bin just
+          npm run tauri -- build --debug --no-bundle
+          cargo install tauri-driver --locked
+          python -m pip install "selenium>=4.26,<5"
+      - name: Native Linux desktop workflows
+        if: runner.os == 'Linux'
+        run: xvfb-run -a python ../../tests/desktop_smoke.py --application src-tauri/target/debug/just-ai-gui --just ../../target/debug/just
+      - name: Native Windows desktop workflows
+        if: runner.os == 'Windows'
+        run: python ../../tests/desktop_smoke.py --application src-tauri/target/debug/just-ai-gui.exe --just ../../target/debug/just.exe
+      - uses: actions/upload-artifact@v4
+        if: failure() && runner.os != 'macOS'
+        with:
+          name: desktop-failure-${{ matrix.os }}
+          path: apps/just-ai-gui/desktop-test-artifacts/
 
   editor:
     runs-on: ubuntu-latest

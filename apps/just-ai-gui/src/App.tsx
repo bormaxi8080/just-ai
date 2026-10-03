@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import {
   aiAddRecipe,
@@ -45,6 +45,7 @@ import {
 
 export function App() {
   const [root, setRoot] = useState(".");
+  const loadGeneration = useRef(0);
   const [project, setProject] = useState<ProjectContext | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -100,16 +101,31 @@ export function App() {
   );
 
   async function load() {
+    const generation = ++loadGeneration.current;
     setError(null);
+    setProject(null);
+    setSelected(null);
+    setHistory([]);
     try {
       const next = await inspectProject(root);
+      const records = await recentRuns(root).catch(() => []);
+      if (generation !== loadGeneration.current) return;
       setProject(next);
-      setSelected((current) => next.recipes.some((item) => item.namepath === current)
-        ? current : next.recipes[0]?.namepath ?? null);
-      setHistory(await recentRuns(root).catch(() => []));
+      setSelected(next.recipes[0]?.namepath ?? null);
+      setHistory(records);
     } catch (reason) {
-      setError(String(reason));
+      if (generation === loadGeneration.current) setError(String(reason));
     }
+  }
+
+  function changeRoot(value: string) {
+    ++loadGeneration.current;
+    setRoot(value);
+    setProject(null);
+    setSelected(null);
+    setHistory([]);
+    setRun(null);
+    setLiveOutput("");
   }
 
   async function handleSuggest() {
@@ -429,6 +445,8 @@ export function App() {
   }
 
   async function runRecipe(selectedRecipe: Recipe, arguments_: string[]) {
+    if (running) return;
+    setRunning(true);
     setError(null); setRun(null); setLiveOutput("");
     try {
       const prepared = await prepareRun({ project_root: root, recipe: selectedRecipe.namepath, arguments: arguments_ });
@@ -439,6 +457,7 @@ export function App() {
       if (prepared.policy.decision === "confirm_typed") {
         const phrase = window.prompt(`Type “${prepared.policy.phrase}” to continue:`);
         if (phrase === null) return;
+        if (phrase !== prepared.policy.phrase) throw new Error("Confirmation phrase does not match.");
         confirmation = { confirmation: "typed", phrase };
       }
       setRunning(true);
@@ -464,8 +483,8 @@ export function App() {
     <header>
       <div><span className="eyebrow">LOCAL WORKFLOW CONTROL</span><h1>just-ai</h1></div>
       <form onSubmit={(event) => { event.preventDefault(); void load(); }}>
-        <input aria-label="Project root" value={root} onChange={(e) => setRoot(e.target.value)} />
-        <button>Inspect project</button>
+        <input aria-label="Project root" value={root} disabled={running} onChange={(e) => changeRoot(e.target.value)} />
+        <button disabled={running}>Inspect project</button>
       </form>
     </header>
     {error && <p className="error">{error}</p>}
@@ -645,8 +664,8 @@ export function App() {
         {recipe ? <RecipeDetail key={recipe.namepath} recipe={recipe}
           onRun={(arguments_) => void runRecipe(recipe, arguments_)} /> : <p>Select a recipe.</p>}
         {running && <button className="cancel-button" onClick={() => void cancelRun()}>Cancel run</button>}
-        {run && <section className="run-output"><h3>Run output · {run.success ? "success" : `exit ${run.exit_code}`}</h3>
-          <pre>{liveOutput || `${run.stdout}${run.stderr && `\n${run.stderr}`}`}</pre></section>}
+        {(run || running) && <section className="run-output"><h3>Run output · {running ? "running" : run?.success ? "success" : `exit ${run?.exit_code}`}</h3>
+          <pre>{liveOutput || (run ? `${run.stdout}${run.stderr && `\n${run.stderr}`}` : "")}</pre></section>}
 
         {/* AI Results Panel */}
         {showAiPanel && (
