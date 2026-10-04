@@ -43,3 +43,6 @@ Native Linux ARM64 WebKit/Tauri smoke passed inspect/run/history/deny/live-outpu
 
 ## Execution graph acceptance (2026-10-04)
 The index gate also checks the four function callers of RecipeExecutor.prepare: core streaming execution, CLI, MCP and GUI. Explicit associated dispatch preserves behavior while making adapter calls resolvable. Synthetic file containers are excluded from runtime caller assertions.
+
+## Parser inputs and native readiness (2026-10-04)
+The fork changelog configuration uses valid git-cliff TOML and Tera and remains indexed. Only upstream examples/rule124.just is excluded, with a pinned SHA-256 fingerprint and independent successful just dump. All other parser/skipped failures stop the graph gate. Native desktop smoke waits for the inner WebDriver status before creating a session; the Windows resource icon is converted from the existing PNG. Platform matrix fail-fast is disabled.

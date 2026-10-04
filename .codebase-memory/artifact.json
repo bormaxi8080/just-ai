@@ -1,11 +1,12 @@
 {
     "schema_version": 2,
-    "commit": "6921358adc87ccbcff3e9179a32c49c9f9b58225",
-    "indexed_at": "2026-10-04T05:02:14Z",
+    "commit": "62453fabf8e6a0cbdfbc638df1aeae93efc881f3",
+    "indexed_at": "2026-10-04T05:14:45Z",
     "project": "Volumes-Transcend-workspace-projects-just-ai",
-    "nodes": 7187,
-    "edges": 29111,
-    "original_size": 20381696,
-    "compressed_size": 3451285,
-    "compression_level": 9
+    "nodes": 7200,
+    "edges": 29118,
+    "original_size": 20447232,
+    "compressed_size": 3451979,
+    "compression_level": 9,
+    "reconcile_basis": "git-clean-head"
 }
