@@ -5,7 +5,5 @@
 **/target/
 .codebase-memory/graph.db.zst
 # Reviewed upstream parser exceptions; fingerprints are checked by the graph gate.
-# This file contains a changelog template, not valid TOML.
-/release-plz-changelog.toml
 # Recursive unstable just functions are valid in just, unsupported by the graph parser.
 /examples/rule124.just

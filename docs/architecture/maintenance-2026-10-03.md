@@ -122,7 +122,7 @@ remains a CI gate and was not run locally; nothing was pushed to trigger it.
 
 JSX ampersands are encoded as entities: renderer tests still pass (seven), and
 the production JS bundle is byte-identical. Companion parser diagnostics are
-now clean; remaining MCP warnings concern upstream `release-plz-changelog.toml`
+now clean; remaining MCP warnings concern the fork's `release-plz-changelog.toml`
 and `examples/rule124.just`. The graph gate rejects companion parse/skipped
 coverage failures and exposes upstream diagnostics for direct source review.
 
@@ -134,13 +134,14 @@ change. Synthetic file containers are distinguished from function callers.
 
 ## Remaining-platform follow-up (2026-10-04)
 
-Reviewed the two upstream parser exceptions directly. Python's TOML parser
-rejects template prose in `release-plz-changelog.toml`; upstream `just --dump`
-accepts `examples/rule124.just` without warnings. Exact root-anchored exclusions
-keep these unsupported inputs out of the graph without changing upstream files.
-The gate pins both SHA-256 fingerprints and rejects any other parse/skipped
-diagnostic. Full refresh passed with no parser diagnostics (7,212 nodes / 29,271
-edges at this stage).
+Direct review found that `release-plz-changelog.toml` was introduced by the fork
+(commit a2421aa0), contrary to the earlier upstream attribution. It contained
+invalid TOML and Handlebars-style syntax despite release-plz expecting git-cliff
+configuration with Tera templates. Converted it to that supported format and
+kept it indexed. Only `examples/rule124.just` remains a reviewed root-anchored
+exclusion: upstream `just --dump` accepts it without warnings, but the graph
+parser cannot parse its recursive unstable functions. The gate pins that source
+fingerprint and rejects every other parser/skipped diagnostic.
 
 The already published commit `6921358a` ran in GitHub Actions (run 37177039881).
 Windows core passed, while desktop stopped before native smoke because the

@@ -13,7 +13,6 @@ import subprocess
 
 
 REVIEWED_EXCLUSIONS = {
-    "release-plz-changelog.toml": "facad574ada9025f351249d01b28fbc322af3f0c45621f0626dc6292a1aa6045",
     "examples/rule124.just": "3e63117acec5a0b1cb4f7033662b3bd5d01d4ed1ce44465d171c2bbbeede44cb",
 }
 
