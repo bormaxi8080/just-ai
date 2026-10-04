@@ -18,3 +18,4 @@
 
 **/desktop-test-artifacts/
 **/__pycache__/
+!apps/just-ai-gui/src-tauri/icons/icon.ico

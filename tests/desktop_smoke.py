@@ -13,6 +13,8 @@ import subprocess
 import sys
 import tempfile
 import time
+from urllib.error import URLError
+from urllib.request import ProxyHandler, build_opener
 
 
 def main():
@@ -39,7 +41,7 @@ def main():
     python = Path(sys.executable).as_posix()
     args.artifacts.mkdir(parents=True, exist_ok=True)
     artifacts = args.artifacts.resolve()
-    command = ["tauri-driver", "--port", "4444"]
+    command = ["tauri-driver", "--port", "4444", "--native-port", "4445"]
     if os.name == "nt":
         native = SeleniumManager().binary_paths(["--browser", "edge"])["driver_path"]
         command += ["--native-driver", native]
@@ -62,11 +64,18 @@ def main():
                         raise RuntimeError("tauri-driver exited; see driver.log")
                     try:
                         with socket.create_connection(("127.0.0.1", 4444), timeout=1):
+                            pass
+                        # The proxy starts before its native driver accepts sessions.
+                        # Probe native readiness, bypassing ambient HTTP proxies.
+                        with build_opener(ProxyHandler({})).open("http://127.0.0.1:4445/status", timeout=1) as response:
+                            status = json.load(response)
+                        if status.get("value", {}).get("ready"):
                             break
-                    except OSError:
-                        if time.monotonic() >= deadline:
-                            raise TimeoutError("tauri-driver did not start")
-                        time.sleep(0.1)
+                    except (OSError, URLError, ValueError):
+                        pass
+                    if time.monotonic() >= deadline:
+                        raise TimeoutError("tauri-driver/native WebDriver did not become ready; see driver.log")
+                    time.sleep(0.1)
                 options = Options()
                 options.set_capability("tauri:options", {"application": str(app)})
                 driver = webdriver.Remote("http://127.0.0.1:4444", options=options)

@@ -141,3 +141,12 @@ keep these unsupported inputs out of the graph without changing upstream files.
 The gate pins both SHA-256 fingerprints and rejects any other parse/skipped
 diagnostic. Full refresh passed with no parser diagnostics (7,212 nodes / 29,271
 edges at this stage).
+
+The already published commit `6921358a` ran in GitHub Actions (run 37177039881).
+Windows core passed, while desktop stopped before native smoke because the
+Windows resource compiler requires `icons/icon.ico`. Added that format using
+Tauri's icon conversion from the existing PNG, with an explicit gitignore
+exception. Linux container smoke failed because the proxy listened before the
+native WebDriver was ready. The smoke now waits for native `/status` readiness;
+the real Linux ARM64 container flow passed again. CI desktop matrix no longer
+cancels sibling platforms on failure, and supports manual workflow dispatch.
