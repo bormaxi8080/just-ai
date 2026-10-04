@@ -5,10 +5,17 @@ Use --refresh to build a full persistent index. Never treats ready as sufficient
 Only the current checkout is indexed; other project caches are not modified.
 """
 import argparse
+import hashlib
 import json
 from pathlib import Path
 import re
 import subprocess
+
+
+REVIEWED_EXCLUSIONS = {
+    "release-plz-changelog.toml": "facad574ada9025f351249d01b28fbc322af3f0c45621f0626dc6292a1aa6045",
+    "examples/rule124.just": "3e63117acec5a0b1cb4f7033662b3bd5d01d4ed1ce44465d171c2bbbeede44cb",
+}
 
 
 def unpack(envelope):
@@ -37,6 +44,9 @@ def main():
     parser.add_argument("--refresh", action="store_true")
     args = parser.parse_args()
     root = args.root.resolve(strict=True)
+    for path, fingerprint in REVIEWED_EXCLUSIONS.items():
+        if hashlib.sha256((root / path).read_bytes()).hexdigest() != fingerprint:
+            raise RuntimeError(f"Excluded upstream source changed; review before updating fingerprint: {path}")
     version = subprocess.check_output([args.binary, "--version"], text=True)
     match = re.search(r"(\d+)\.(\d+)\.(\d+)", version)
     if not match or tuple(map(int, match.groups())) < (0, 11, 0):
@@ -69,13 +79,15 @@ def main():
             raise RuntimeError(f"Truncated {category} coverage; inspect full index diagnostics")
         for entry in coverage.get("files", []):
             path = entry.get("path", entry.get("file", ""))
-            if path.startswith(("apps/just-ai-", "crates/just-ai/", "crates/just-ai-lsp/")):
-                raise RuntimeError(f"Companion source coverage failure: {category}: {path}")
-            print(f"Upstream parser diagnostic: {category}: {path}; inspect this source directly")
+            raise RuntimeError(f"Unreviewed source coverage failure: {category}: {path}")
     generated = call("search_graph", project=project, format="json",
                      file_pattern="apps/just-ai-vscode/out/*", limit=1)
     if generated.get("total", 0) != 0:
         raise RuntimeError("Generated editor output contaminates the graph")
+    for path in REVIEWED_EXCLUSIONS:
+        excluded = call("search_graph", project=project, format="json", file_pattern=path, limit=1)
+        if excluded.get("total", 0) != 0:
+            raise RuntimeError(f"Reviewed parser exception still indexed: {path}")
 
     symbol = project + ".crates.just-ai.src.application.templates.TemplatePlan.prepare"
     discovered = call("search_graph", project=project, format="json", qn_pattern=re.escape(symbol) + "$", limit=5)

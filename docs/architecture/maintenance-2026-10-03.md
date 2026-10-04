@@ -131,3 +131,13 @@ MCP, GUI and core revalidation. MCP preparation uses explicit associated dispatc
 to avoid the resolver missing a chained constructor/method call; behavior and
 argv are unchanged. MCP tests and Clippy passed after this source-equivalent
 change. Synthetic file containers are distinguished from function callers.
+
+## Remaining-platform follow-up (2026-10-04)
+
+Reviewed the two upstream parser exceptions directly. Python's TOML parser
+rejects template prose in `release-plz-changelog.toml`; upstream `just --dump`
+accepts `examples/rule124.just` without warnings. Exact root-anchored exclusions
+keep these unsupported inputs out of the graph without changing upstream files.
+The gate pins both SHA-256 fingerprints and rejects any other parse/skipped
+diagnostic. Full refresh passed with no parser diagnostics (7,212 nodes / 29,271
+edges at this stage).

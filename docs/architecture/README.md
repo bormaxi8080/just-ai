@@ -152,6 +152,14 @@ diagnostics and other unresolved calls still require direct source inspection.
 After upgrading a long-lived MCP process, reconnect it before subsequent edits
 so its old watcher cannot overwrite the refreshed index.
 
+Two reviewed upstream files are excluded explicitly in `.cbmignore`:
+`release-plz-changelog.toml` contains template prose rather than valid TOML;
+`examples/rule124.just` uses recursive unstable functions unsupported by the
+graph parser but accepted by upstream `just --dump`. The graph gate pins their
+SHA-256 fingerprints, checks exclusion, and rejects all other parser/skipped
+diagnostics. A changed excluded file must be reviewed before its fingerprint
+is updated. Source files remain unchanged and available for direct inspection.
+
 The desktop main-window capability grants event listen/unlisten for live recipe
 output. The opt-in Docker `native-smoke` target exercises the embedded frontend
 and real IPC under Xvfb; run it with `docker run --init` so Xvfb's readiness
