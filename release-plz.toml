@@ -5,18 +5,18 @@ repo_url = "https://github.com/bormaxi8080/just-ai"
 release = false
 publish = false
 git_only = true
+# This setting is workspace-only; release only after merging a release PR.
+release_always = false
 
 [[package]]
 name = "just-ai"
 release = true
-release_always = false
 version_group = "companion"
 git_tag_name = "v{{ version }}"
 
 [[package]]
 name = "just-ai-mcp"
 release = true
-release_always = false
 version_group = "companion"
 git_tag_enable = false
 git_release_enable = false
@@ -24,7 +24,6 @@ git_release_enable = false
 [[package]]
 name = "just-ai-lsp"
 release = true
-release_always = false
 version_group = "companion"
 git_tag_enable = false
 git_release_enable = false
