@@ -1,6 +1,7 @@
 name: Release PR
 
 on:
+  workflow_dispatch:
   push:
     branches: [master]
 
@@ -25,6 +26,7 @@ jobs:
       - name: Cache Cargo
         uses: Swatinem/rust-cache@v2
 
+      # Repository Settings > Actions > General must allow Actions to create PRs.
       - name: Run release-plz
         uses: release-plz/action@v0.5
         with:
@@ -32,3 +34,9 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CARGO_TERM_COLOR: always
+
+      - name: Release PR troubleshooting
+        if: failure()
+        run: |
+          echo 'If GitHub returned "Actions is not permitted to create or approve pull requests", enable Settings > Actions > General > Workflow permissions > Allow GitHub Actions to create and approve pull requests.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'The workflow already requests contents:write and pull-requests:write; YAML permissions cannot override this repository setting.' >> "$GITHUB_STEP_SUMMARY"

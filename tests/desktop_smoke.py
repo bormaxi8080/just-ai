@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Native Tauri IPC/UI smoke for Linux/Windows, in a disposable project.
 
-Prerequisites: Selenium, tauri-driver, platform WebDriver, built GUI and just.
+Prerequisites: Selenium, platform WebDriver, built GUI and just.
+Linux additionally requires tauri-driver.
 Linux: run under xvfb-run. Windows: Selenium Manager resolves WebDriver for
 the installed WebView2 runtime.
 """
@@ -33,12 +34,29 @@ def stop_driver(process, windows, log):
         process.wait()
 
 
-def tauri_options(application, root, windows):
-    options = {"application": str(application)}
-    if windows:
-        # Keep EdgeDriver's DevToolsActivePort lookup and WebView2 on one profile.
-        options["webviewOptions"] = {"userDataFolder": str(root / "webview2")}
-    return options
+def windows_environment(environment, root, port):
+    return dict(environment,
+                WEBVIEW2_USER_DATA_FOLDER=str(root / "webview2"),
+                WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=
+                f"--remote-debugging-port={port} --remote-debugging-address=127.0.0.1")
+
+
+def wait_for_webview(process, port, timeout=30):
+    """Wait for the actual WebView2 DevTools endpoint, not only EdgeDriver."""
+    deadline = time.monotonic() + timeout
+    opener = build_opener(ProxyHandler({}))
+    while True:
+        if process.poll() is not None:
+            raise RuntimeError(f"Desktop app exited ({process.returncode}); see application.log")
+        try:
+            with opener.open(f"http://127.0.0.1:{port}/json/version", timeout=1) as response:
+                if json.load(response).get("webSocketDebuggerUrl"):
+                    return
+        except (OSError, URLError, ValueError):
+            pass
+        if time.monotonic() >= deadline:
+            raise TimeoutError("WebView2 DevTools endpoint did not become ready; see application.log")
+        time.sleep(0.1)
 
 
 def main():
@@ -68,7 +86,7 @@ def main():
     command = ["tauri-driver", "--port", "4444", "--native-port", "4445"]
     if os.name == "nt":
         native = SeleniumManager().binary_paths(["--browser", "webview2"])["driver_path"]
-        command += ["--native-driver", native]
+        command = [native, "--port=4444", "--verbose", f"--log-path={artifacts / 'native-driver.log'}"]
     with tempfile.TemporaryDirectory(prefix="just-ai-desktop-") as temporary:
         root = Path(temporary)
         (root / "justfile").write_text(
@@ -79,29 +97,43 @@ def main():
         config.write_text("[execution]\njust_binary = " + json.dumps(str(runner)) + "\nread_timeout_secs = 0\n", encoding="utf-8")
         environment = dict(os.environ, JUST_AI_DATA_DIR=str(root / "data"))
         driver = None
-        with (artifacts / "driver.log").open("w", encoding="utf-8") as log:
+        application_process = None
+        with (artifacts / "driver.log").open("w", encoding="utf-8") as log, (artifacts / "application.log").open("w", encoding="utf-8") as app_log:
             process = subprocess.Popen(command, cwd=root, env=environment, stdout=log, stderr=subprocess.STDOUT)
             try:
                 deadline = time.monotonic() + 30
                 while True:
                     if process.poll() is not None:
-                        raise RuntimeError("tauri-driver exited; see driver.log")
+                        raise RuntimeError("WebDriver exited; see driver.log")
                     try:
                         with socket.create_connection(("127.0.0.1", 4444), timeout=1):
                             pass
                         # The proxy starts before its native driver accepts sessions.
                         # Probe native readiness, bypassing ambient HTTP proxies.
-                        with build_opener(ProxyHandler({})).open("http://127.0.0.1:4445/status", timeout=1) as response:
+                        with build_opener(ProxyHandler({})).open(f"http://127.0.0.1:{4444 if os.name == 'nt' else 4445}/status", timeout=1) as response:
                             status = json.load(response)
                         if status.get("value", {}).get("ready"):
                             break
                     except (OSError, URLError, ValueError):
                         pass
                     if time.monotonic() >= deadline:
-                        raise TimeoutError("tauri-driver/native WebDriver did not become ready; see driver.log")
+                        raise TimeoutError("Native WebDriver did not become ready; see driver.log")
                     time.sleep(0.1)
-                options = Options()
-                options.set_capability("tauri:options", tauri_options(app, root, os.name == "nt"))
+                if os.name == "nt":
+                    with socket.socket() as listener:
+                        listener.bind(("127.0.0.1", 0))
+                        debug_port = listener.getsockname()[1]
+                    application_process = subprocess.Popen(
+                        [str(app)], cwd=root,
+                        env=windows_environment(environment, root, debug_port),
+                        stdout=app_log, stderr=subprocess.STDOUT)
+                    wait_for_webview(application_process, debug_port)
+                    options = webdriver.EdgeOptions()
+                    options.use_webview = True
+                    options.debugger_address = f"127.0.0.1:{debug_port}"
+                else:
+                    options = Options()
+                    options.set_capability("tauri:options", {"application": str(app)})
                 driver = webdriver.Remote("http://127.0.0.1:4444", options=options)
                 wait = WebDriverWait(driver, 30)
                 def button(text):
@@ -139,7 +171,11 @@ def main():
                     if driver:
                         driver.quit()
                 finally:
-                    stop_driver(process, os.name == "nt", log)
+                    try:
+                        if application_process:
+                            stop_driver(application_process, True, log)
+                    finally:
+                        stop_driver(process, os.name == "nt", log)
 
 
 if __name__ == "__main__":

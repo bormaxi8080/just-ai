@@ -60,10 +60,13 @@ Windows additionally build the Tauri executable and run `tests/desktop_smoke.py`
 through native WebDriver, exercising real IPC, upstream execution, history,
 policy denial, live events and cancellation. Run Linux under `xvfb-run -a`;
 Windows resolves Edge WebDriver against the installed WebView2 runtime,
-uses an explicit disposable WebView2 profile, and kills the driver process tree
-even when session creation fails. See the script's `--help`. Native
+launches the application with a disposable WebView2 profile and a localhost
+DevTools port, waits for that endpoint, then attaches EdgeDriver directly.
+Both application and driver process trees are stopped on failure. Linux uses
+tauri-driver. See the script's `--help`. Native
 `tauri-driver` does not support macOS WKWebView; renderer tests and Rust checks
-run there. Driver logs and failed screenshots are uploaded by CI.
+run there. Driver logs, Windows application startup logs and failed screenshots are
+uploaded by CI.
 
 For packaged Linux desktop verification, run:
 
@@ -75,3 +78,10 @@ docker run --init --name just-ai-desktop-smoke-test just-ai-desktop-smoke
 The default final Docker stage remains the production runtime. `native-smoke`
 is opt-in and adds WebDriver/Xvfb/test dependencies. Docker desktop builds
 explicitly enable `tauri/custom-protocol` so the frontend is embedded.
+
+The Release PR workflow requires the repository setting **Settings > Actions >
+General > Workflow permissions > Allow GitHub Actions to create and approve pull
+requests**. Its YAML already grants `contents: write` and `pull-requests: write`,
+but those grants cannot override the repository policy. After enabling the
+setting, run **Release PR** manually with `workflow_dispatch`. Do not publish a
+release to verify PR permissions.
