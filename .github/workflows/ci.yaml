@@ -27,6 +27,11 @@ jobs:
     steps:
     - uses: actions/checkout@v6.1.0
 
+    # Keep lint policy reproducible without rewriting preserved upstream tests.
+    - uses: dtolnay/rust-toolchain@1.89.0
+      with:
+        components: rustfmt, clippy
+
     - uses: Swatinem/rust-cache@v2.9.2
 
     - name: Clippy
