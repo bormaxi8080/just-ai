@@ -1,3 +1,6 @@
+#[cfg(all(feature = "native-smoke", any(target_os = "windows", test)))]
+mod native_smoke;
+
 use just_ai::application::templates::TemplatePlan;
 use std::{
   path::PathBuf,
@@ -1250,7 +1253,7 @@ struct TemplateListBuiltinResult {
 
 #[tauri::command]
 async fn ai_template_list_builtin() -> Result<TemplateListBuiltinResult, String> {
-  tauri::async_runtime::spawn_blocking(move || ai_template_list_builtin_blocking())
+  tauri::async_runtime::spawn_blocking(ai_template_list_builtin_blocking)
     .await
     .map_err(|error| error.to_string())?
 }
@@ -1369,7 +1372,7 @@ struct ConfigSchemaResult {
 
 #[tauri::command]
 async fn ai_config_schema() -> Result<ConfigSchemaResult, String> {
-  tauri::async_runtime::spawn_blocking(move || ai_config_schema_blocking())
+  tauri::async_runtime::spawn_blocking(ai_config_schema_blocking)
     .await
     .map_err(|error| error.to_string())?
 }
@@ -1384,6 +1387,14 @@ fn ai_config_schema_blocking() -> Result<ConfigSchemaResult, String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+  let context = tauri::generate_context!();
+  #[cfg(all(feature = "native-smoke", target_os = "windows"))]
+  let context = {
+    let mut context = context;
+    native_smoke::configure_from_environment(context.config_mut())
+      .expect("invalid native WebDriver configuration");
+    context
+  };
   tauri::Builder::default()
     .manage(ActiveRun::default())
     .invoke_handler(tauri::generate_handler![
@@ -1412,6 +1423,6 @@ pub fn run() {
       ai_template_list_builtin,
       ai_template_install,
     ])
-    .run(tauri::generate_context!())
+    .run(context)
     .expect("failed to run just-ai desktop application");
 }

@@ -4,7 +4,7 @@
 Prerequisites: Selenium, platform WebDriver, built GUI and just.
 Linux additionally requires tauri-driver.
 Linux: run under xvfb-run. Windows: Selenium Manager resolves WebDriver for
-the installed WebView2 runtime.
+the installed WebView2 runtime; build the GUI with --features native-smoke.
 """
 import argparse
 import json
@@ -36,9 +36,8 @@ def stop_driver(process, windows, log):
 
 def windows_environment(environment, root, port):
     return dict(environment,
-                WEBVIEW2_USER_DATA_FOLDER=str(root / "webview2"),
-                WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=
-                f"--remote-debugging-port={port} --remote-debugging-address=127.0.0.1")
+                JUST_AI_WEBDRIVER_PROFILE=str(root / "webview2"),
+                JUST_AI_WEBDRIVER_PORT=str(port))
 
 
 def wait_for_webview(process, port, timeout=30):
@@ -55,7 +54,7 @@ def wait_for_webview(process, port, timeout=30):
         except (OSError, URLError, ValueError):
             pass
         if time.monotonic() >= deadline:
-            raise TimeoutError("WebView2 DevTools endpoint did not become ready; see application.log")
+            raise TimeoutError("WebView2 DevTools endpoint did not become ready; see application.log (Windows binary must be built with --features native-smoke)")
         time.sleep(0.1)
 
 

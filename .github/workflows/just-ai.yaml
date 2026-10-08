@@ -104,11 +104,12 @@ jobs:
       - run: npm run test:workflows
       - run: npm run build
       - run: cargo check --manifest-path src-tauri/Cargo.toml --locked
+      - run: cargo test --manifest-path src-tauri/Cargo.toml --locked --features native-smoke --lib native_smoke::tests
       - name: Build native smoke binaries
         if: runner.os != 'macOS'
         run: |
           cargo build --manifest-path ../../Cargo.toml --locked --package just --bin just
-          npm run tauri -- build --debug --no-bundle
+          npm run tauri -- build --debug --no-bundle --features native-smoke
           cargo install tauri-driver --version 2.0.6 --locked
           python -m pip install "selenium>=4.26,<5"
       - name: Native Linux desktop workflows

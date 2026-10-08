@@ -27,6 +27,7 @@ Run checks from the repository root and stop at the first failure.
    npm --prefix apps/just-ai-gui run test:workflows
    npm --prefix apps/just-ai-gui run build
    cargo check --manifest-path apps/just-ai-gui/src-tauri/Cargo.toml --locked
+   cargo test --manifest-path apps/just-ai-gui/src-tauri/Cargo.toml --locked --features native-smoke --lib native_smoke::tests
    ```
 
 4. Check the editor adapter:
@@ -62,6 +63,10 @@ policy denial, live events and cancellation. Run Linux under `xvfb-run -a`;
 Windows resolves Edge WebDriver against the installed WebView2 runtime,
 launches the application with a disposable WebView2 profile and a localhost
 DevTools port, waits for that endpoint, then attaches EdgeDriver directly.
+Build the Windows test binary with `--features native-smoke`. This opt-in
+feature passes the port and profile through Tauri's WebView2 API configuration:
+WebView2 150+ ignores browser argument environment overrides on elevated
+Windows hosts. Ordinary builds do not enable this test configuration.
 Both application and driver process trees are stopped on failure. Linux uses
 tauri-driver. See the script's `--help`. Native
 `tauri-driver` does not support macOS WKWebView; renderer tests and Rust checks

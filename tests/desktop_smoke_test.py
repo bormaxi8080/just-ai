@@ -12,9 +12,9 @@ class DesktopSmokeTests(unittest.TestCase):
     def test_windows_app_receives_debug_port_and_disposable_profile(self):
         original = {'JUST_AI_DATA_DIR': 'data', 'WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS': 'old'}
         environment = windows_environment(original, Path('project'), 12345)
-        self.assertEqual(environment['WEBVIEW2_USER_DATA_FOLDER'], str(Path('project/webview2')))
-        self.assertEqual(environment['WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS'],
-                         '--remote-debugging-port=12345 --remote-debugging-address=127.0.0.1')
+        self.assertEqual(environment['JUST_AI_WEBDRIVER_PROFILE'], str(Path('project/webview2')))
+        self.assertEqual(environment['JUST_AI_WEBDRIVER_PORT'], '12345')
+        self.assertEqual(environment['WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS'], 'old')
         self.assertEqual(environment['JUST_AI_DATA_DIR'], 'data')
         self.assertEqual(original['WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS'], 'old')
 
