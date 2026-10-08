@@ -23,6 +23,7 @@ Run checks from the repository root and stop at the first failure.
 3. Check the independent desktop adapter:
 
    ```sh
+   python3 tests/desktop_smoke_test.py
    npm --prefix apps/just-ai-gui run test:workflows
    npm --prefix apps/just-ai-gui run build
    cargo check --manifest-path apps/just-ai-gui/src-tauri/Cargo.toml --locked
@@ -58,7 +59,9 @@ The desktop CI matrix runs renderer workflows on all three systems. Linux and
 Windows additionally build the Tauri executable and run `tests/desktop_smoke.py`
 through native WebDriver, exercising real IPC, upstream execution, history,
 policy denial, live events and cancellation. Run Linux under `xvfb-run -a`;
-Windows requires matching Edge WebDriver. See the script's `--help`. Native
+Windows resolves Edge WebDriver against the installed WebView2 runtime,
+uses an explicit disposable WebView2 profile, and kills the driver process tree
+even when session creation fails. See the script's `--help`. Native
 `tauri-driver` does not support macOS WKWebView; renderer tests and Rust checks
 run there. Driver logs and failed screenshots are uploaded by CI.
 

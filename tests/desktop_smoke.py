@@ -2,7 +2,8 @@
 """Native Tauri IPC/UI smoke for Linux/Windows, in a disposable project.
 
 Prerequisites: Selenium, tauri-driver, platform WebDriver, built GUI and just.
-Linux: run under xvfb-run. Windows: Selenium Manager resolves Edge WebDriver.
+Linux: run under xvfb-run. Windows: Selenium Manager resolves WebDriver for
+the installed WebView2 runtime.
 """
 import argparse
 import json
@@ -15,6 +16,29 @@ import tempfile
 import time
 from urllib.error import URLError
 from urllib.request import ProxyHandler, build_opener
+
+
+def stop_driver(process, windows, log):
+    """Stop native driver and app descendants, including failed-session launches."""
+    if windows:
+        # Killing only the proxy leaves EdgeDriver and its app holding cwd open.
+        subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                       stdout=log, stderr=subprocess.STDOUT, check=False)
+    else:
+        process.terminate()
+    try:
+        process.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait()
+
+
+def tauri_options(application, root, windows):
+    options = {"application": str(application)}
+    if windows:
+        # Keep EdgeDriver's DevToolsActivePort lookup and WebView2 on one profile.
+        options["webviewOptions"] = {"userDataFolder": str(root / "webview2")}
+    return options
 
 
 def main():
@@ -43,7 +67,7 @@ def main():
     artifacts = args.artifacts.resolve()
     command = ["tauri-driver", "--port", "4444", "--native-port", "4445"]
     if os.name == "nt":
-        native = SeleniumManager().binary_paths(["--browser", "edge"])["driver_path"]
+        native = SeleniumManager().binary_paths(["--browser", "webview2"])["driver_path"]
         command += ["--native-driver", native]
     with tempfile.TemporaryDirectory(prefix="just-ai-desktop-") as temporary:
         root = Path(temporary)
@@ -77,7 +101,7 @@ def main():
                         raise TimeoutError("tauri-driver/native WebDriver did not become ready; see driver.log")
                     time.sleep(0.1)
                 options = Options()
-                options.set_capability("tauri:options", {"application": str(app)})
+                options.set_capability("tauri:options", tauri_options(app, root, os.name == "nt"))
                 driver = webdriver.Remote("http://127.0.0.1:4444", options=options)
                 wait = WebDriverWait(driver, 30)
                 def button(text):
@@ -111,14 +135,11 @@ def main():
                     (artifacts / "failure.html").write_text(driver.page_source, encoding="utf-8")
                 raise
             finally:
-                if driver:
-                    driver.quit()
-                process.terminate()
                 try:
-                    process.wait(timeout=10)
-                except subprocess.TimeoutExpired:
-                    process.kill()
-                    process.wait()
+                    if driver:
+                        driver.quit()
+                finally:
+                    stop_driver(process, os.name == "nt", log)
 
 
 if __name__ == "__main__":
