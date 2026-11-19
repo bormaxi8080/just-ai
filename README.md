@@ -1,25 +1,14 @@
-<div align=right>Table of Contents↗️</div>
+# just-ai
 
-<h1 align=center><code>just-ai</code></h1>
+**AI-assisted extension of the [upstream just command runner](https://github.com/casey/just).**
 
-<div align=center>
-  <a href=https://crates.io/crates/just>
-    <img src=https://img.shields.io/crates/v/just.svg alt="crates.io version">
-  </a>
-  <a href=https://github.com/casey/just/actions/workflows/ci.yaml>
-    <img src=https://github.com/casey/just/actions/workflows/ci.yaml/badge.svg alt="build status">
-  </a>
-  <a href=https://github.com/casey/just/releases>
-    <img src=https://img.shields.io/github/downloads/casey/just/total.svg alt=downloads>
-  </a>
-  <a href=https://discord.gg/ezYScXR>
-    <img src=https://img.shields.io/discord/695580069837406228?logo=discord alt="chat on discord">
-  </a>
-  <a href=mailto:casey@rodarmor.com?subject=Thanks%20for%20Just!>
-    <img src=https://img.shields.io/badge/Say%20Thanks-!-1EAEDB.svg alt="say thanks">
-  </a>
-</div>
-<br>
+This fork adds structured project-context export, local command-risk checks, and optional integration with an OpenAI-compatible model provider. Original just functionality and upstream attribution are retained.
+
+## Installation: extension versus upstream
+
+The upstream just package and release downloads install the original command runner. They do not by themselves install this fork’s just-ai extension. Use this repository’s extension-specific build and configuration instructions below when trying the AI features. The longer upstream manual is retained as a reference for regular just behavior.
+
+[Upstream project and releases](https://github.com/casey/just) · [Fork source and AI extension](https://github.com/bormaxi8080/just-ai)
 
 ## About the `just-ai` Fork
 
